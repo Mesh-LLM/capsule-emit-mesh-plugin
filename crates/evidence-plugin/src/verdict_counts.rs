@@ -231,7 +231,11 @@ pub fn counts_by_model(verdicts: &[PeerVerdict]) -> Value {
     Value::Object(out)
 }
 
-/// The five counts of the verdicts a node's references hold about it.
+/// The five counts of the verdicts a node's references hold about it
+/// (`references_tally` on the page). This plugin does not gather the
+/// references' records yet; the rule is here, and judged by the parity
+/// corpus, for when it does.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReferenceTally {
     pub corroborated: usize,
@@ -241,6 +245,7 @@ pub struct ReferenceTally {
     pub ack_refusals: usize,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl ReferenceTally {
     pub fn to_json(&self) -> Value {
         json!({
@@ -253,6 +258,7 @@ impl ReferenceTally {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn dicts_under<'a>(value: &'a Value, key: &str, out: &mut Vec<&'a serde_json::Map<String, Value>>) {
     match value {
         Value::Object(map) => {
@@ -277,6 +283,7 @@ fn dicts_under<'a>(value: &'a Value, key: &str, out: &mut Vec<&'a serde_json::Ma
 /// referee once per pair. A refusal counts only when it cites a verdict
 /// verified here that contradicts `x`; its own copy of the ruling is never
 /// read.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn classify_reference_receipts(
     receipts: &[Value],
     x: &str,
@@ -378,6 +385,7 @@ pub fn attach(pane_b: &mut Value, our_records: &[Value], ledger_dir: &Path) {
             }
         }
         row["referee_verdicts"] = counts_json(&verdicts);
+        row["referee_verdicts_by_model"] = counts_by_model(&verdicts);
     }
 }
 

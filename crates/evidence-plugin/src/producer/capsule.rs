@@ -1455,6 +1455,89 @@ pub fn seal_adjudication_received_record(
     )
 }
 
+/// `chain.relation` of a referee's verdict record: it adjudicates the pair
+/// whose first half it chains to.
+pub const CHAIN_RELATION_ADJUDICATES: &str = "adjudicates";
+/// `compute_attestation.epistemic_type` of a verdict record: the referee's own
+/// judgment over the two halves.
+pub const EPISTEMIC_TYPE_ADJUDICATION: &str = "adjudication";
+/// The ruling block a referee's verdict record carries.
+pub const ADJUDICATION_BLOCK: &str = "adjudication";
+
+/// Seal a REFEREE's signed verdict: the ruling `block`, chained to the pair's
+/// first half (`adjudicates`), signed with the referee's own key. It is held
+/// beside the ledger and delivered as it is, never written into a chain;
+/// each chain cites it by its capsule id.
+pub fn seal_verdict_record(
+    block: Map<String, Value>,
+    half_a_capsule_id: &str,
+    signing_key: &ed25519_dalek::SigningKey,
+) -> Result<Value, SealError> {
+    let timestamp = crate::producer::timestamp::utc_now_minute();
+    let mut body = Map::new();
+    body.insert("spec_version".into(), json!(SPEC_VERSION));
+    body.insert("format_version".into(), json!(FORMAT_VERSION));
+    body.insert("canonicalization_id".into(), json!(CANONICALIZATION_ID));
+    body.insert(
+        "action_id".into(),
+        json!(format!("mesh-poc/adjudicate/{half_a_capsule_id}")),
+    );
+    body.insert("action_type".into(), json!("decide"));
+    body.insert("operator".into(), json!(LOCAL_RECORD_OPERATOR));
+    body.insert("developer".into(), json!(LOCAL_RECORD_DEVELOPER));
+    body.insert("timestamp".into(), json!(timestamp));
+    body.insert("domain".into(), json!("action"));
+    body.insert("provenance".into(), json!("referee"));
+
+    let mut compute_attestation = Map::new();
+    compute_attestation.insert("epistemic_type".into(), json!(EPISTEMIC_TYPE_ADJUDICATION));
+    compute_attestation.insert(ADJUDICATION_BLOCK.into(), Value::Object(block));
+    compute_attestation.insert(STORE_NONCE_FIELD.into(), json!(fresh_store_nonce()));
+    body.insert(
+        "model_attestation".into(),
+        json!({
+            "model_id": "n/a-adjudication",
+            "provider": LOCAL_RECORD_PROVIDER,
+            "compute_attestation": Value::Object(compute_attestation),
+        }),
+    );
+    body.insert(
+        "assurance".into(),
+        json!({
+            "attestation_mode": "self_attested",
+            "effect_mode": "not_applicable",
+            "ledger_mode": "chained",
+        }),
+    );
+    body.insert(
+        "disposition".into(),
+        json!({
+            "decision": "accept",
+            "approver": "policy",
+            "human_disposed": false,
+            "verdict_class": "assessed",
+        }),
+    );
+    body.insert(
+        "chain".into(),
+        ChainLink {
+            parent_capsule_id: half_a_capsule_id.to_string(),
+            relation: CHAIN_RELATION_ADJUDICATES.to_string(),
+        }
+        .to_value(),
+    );
+    let capsule_id = compute_capsule_id(&Value::Object(body.clone()))?;
+    let mut sealed = Map::new();
+    sealed.insert("capsule_id".into(), json!(capsule_id));
+    for (k, v) in body {
+        sealed.entry(k).or_insert(v);
+    }
+    let mut capsule = Value::Object(sealed);
+    attach_producer_envelope(&mut capsule, signing_key)
+        .expect("a verdict record always carries a hex capsule_id");
+    Ok(capsule)
+}
+
 /// A delivery of a verdict that its receiver refused, with a signed refusal.
 pub struct RefusedDelivery<'a> {
     pub verdict_capsule_id: &'a str,

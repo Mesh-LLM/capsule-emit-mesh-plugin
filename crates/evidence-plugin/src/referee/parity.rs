@@ -149,6 +149,99 @@ fn run_adjudicate(case: &Value) -> Vec<Value> {
     vec![answer]
 }
 
+// --- service (the referee's door) --------------------------------------------
+
+/// Verdict record ids differ between implementations (each seals at its own
+/// time), so an answer names them `verdict-1`, `verdict-2`, ... in the order
+/// a case first shows them.
+#[derive(Default)]
+struct VerdictNames(Vec<String>);
+
+impl VerdictNames {
+    fn name(&mut self, capsule_id: &str) -> String {
+        let at = match self.0.iter().position(|id| id == capsule_id) {
+            Some(at) => at,
+            None => {
+                self.0.push(capsule_id.to_string());
+                self.0.len() - 1
+            }
+        };
+        format!("verdict-{}", at + 1)
+    }
+}
+
+fn held_summary(held: &Value, node_key_id: &str, names: &mut VerdictNames) -> Value {
+    let mut out = held.as_object().cloned().unwrap_or_default();
+    for key in ["verdict_capsule", "verdict_capsule_id", "issued_at"] {
+        out.remove(key);
+    }
+    let capsule = &held["verdict_capsule"];
+    let id = held["verdict_capsule_id"].as_str().unwrap_or_default();
+    let attestation = &capsule["model_attestation"]["compute_attestation"];
+    let signed = crate::referee::half::record_checks(capsule)
+        && crate::referee::half::signer(capsule).as_deref() == Some(node_key_id)
+        && capsule.get("key_id").and_then(Value::as_str) == Some(node_key_id);
+    out.insert("verdict_capsule_id".into(), json!(names.name(id)));
+    out.insert(
+        "verdict_capsule_id_is_the_records".into(),
+        json!(capsule["capsule_id"].as_str() == Some(id)),
+    );
+    out.insert(
+        "verdict_capsule".into(),
+        json!({
+            "block": attestation["adjudication"],
+            "epistemic_type": attestation.get("epistemic_type"),
+            "chain": capsule.get("chain"),
+            "provenance": capsule.get("provenance"),
+            "signed_by_node": signed,
+        }),
+    );
+    out.insert(
+        "issued_at_is_now".into(),
+        json!(held.get("issued_at").and_then(Value::as_str) == Some(NOW)),
+    );
+    Value::Object(out)
+}
+
+fn run_service(case: &Value) -> Vec<Value> {
+    let node = CaseNode::new(&case["node"]);
+    let key_id = node.key_id();
+    let referee = crate::referee::service::Referee {
+        ledger_dir: node.ledger_dir(),
+        signing_key: &node.key,
+        peer_keys: node.peer_keys.as_deref(),
+    };
+    let mut names = VerdictNames::default();
+    let issued = crate::referee::service::ISSUED_ADJUDICATIONS_FILENAME;
+    case["requests"]
+        .as_array()
+        .expect("requests")
+        .iter()
+        .map(|request| {
+            let body = body_bytes(request);
+            let before = line_counts(node.ledger_dir());
+            let reply = crate::referee::service::handle_adjudicate_request(&referee, &body, NOW)
+                .expect("local writes succeed");
+            let reply = if let Some(reason) = reply.get("reason") {
+                let mut normal = node.normalize(&reply, &body);
+                if reason == crate::referee::service::REASON_NO_VERDICT {
+                    normal["detail"] = reply.get("detail").cloned().unwrap_or(Value::Null);
+                }
+                normal
+            } else {
+                held_summary(&reply, &key_id, &mut names)
+            };
+            let mut added = appended(node.ledger_dir(), &before);
+            if let Some(lines) = added.get_mut(issued).and_then(Value::as_array_mut) {
+                for line in lines.iter_mut() {
+                    *line = held_summary(line, &key_id, &mut names);
+                }
+            }
+            json!({"reply": reply, "appended": added})
+        })
+        .collect()
+}
+
 // --- hold (verdicts over record-push) -----------------------------------------
 
 fn run_hold(case: &Value) -> Vec<Value> {
@@ -330,6 +423,7 @@ type Runner = fn(&Value) -> Vec<Value>;
 pub(crate) fn paths() -> Vec<(&'static str, &'static str, Runner)> {
     vec![
         ("adjudicate", "golden", run_adjudicate as Runner),
+        ("service", "golden", run_service),
         ("hold", "golden", run_hold),
         ("deliver", "golden", run_deliver),
         ("classify", "golden", run_classify),

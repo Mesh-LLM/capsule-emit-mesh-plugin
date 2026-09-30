@@ -8,7 +8,7 @@
 //! referee's re-answer can name a twin, and only the twin the referee did
 //! not agree with.
 
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::half::{Half, HalfError};
 
@@ -189,7 +189,8 @@ impl Outcome {
     }
 
     /// The answer the parity corpus compares (`adjudicate` path).
-    pub fn to_answer(&self) -> Value {
+    #[cfg(test)]
+    pub fn to_answer(&self) -> serde_json::Value {
         json!({
             "verdict": self.verdict,
             "status": self.verdict.as_deref().and_then(status_for_verdict),

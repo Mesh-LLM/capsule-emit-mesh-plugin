@@ -22,9 +22,12 @@
 //! `policy_declined` before the ledger is read. Every answer is logged to
 //! the "asked of you" log (`received_log`).
 //!
-//! This node has no referee yet. A referee's `adjudicate` request is not a
-//! -00 subject, so it is answered like any other request that does not
-//! parse: a signed `request_malformed` refusal, never a verdict.
+//! An `adjudicate` request (a requester asking this node to referee two
+//! twins) is not a -00 subject: it is plugin-internal, carried on the same
+//! stream, and answered by the referee's door (`crate::referee::service`)
+//! with a signed verdict or a signed refusal. A verdict's
+//! `adjudication_issued` record is sealed on this node's chain before the
+//! reply leaves; if that seal fails, nothing is sent.
 //!
 //! **Requester role**: the streamed-HTTP-binding path mesh-llm ships
 //! (`handle_streamed_http_binding`) forwards a binding's *static* manifest
@@ -210,8 +213,21 @@ async fn answer_in_process(
     let permit = IN_FLIGHT
         .get_or_init(|| tokio::sync::Semaphore::new(MAX_IN_FLIGHT_ANSWERS))
         .try_acquire();
+    // A verdict this node issues lands on its own counts: the opt-in
+    // stop-routing rule looks again (it does nothing while off).
+    let adjudicate = serde_json::from_slice::<serde_json::Value>(&request_bytes)
+        .is_ok_and(|request| crate::referee::service::is_adjudicate_request(&request));
+    let for_rule = capsules.clone();
     let answered = tokio::task::spawn_blocking(move || {
         let now = crate::evidence_answer::now_utc();
+        // Past the in-flight cap, an adjudicate request is declined like any
+        // other (below), before any work on it.
+        if permit.is_ok() {
+            if let Some(verdict_or_refusal) = referee_answer(&capsules, &request_bytes, &now) {
+                drop(permit);
+                return verdict_or_refusal;
+            }
+        }
         let responder = crate::evidence_answer::Responder {
             ledger_dir: capsules.ledger_dir(),
             signing_key: capsules.signing_key(),
@@ -235,7 +251,94 @@ async fn answer_in_process(
         outcome.wire_bytes()
     })
     .await;
+    if adjudicate {
+        crate::routing_rule::spawn_evaluate(for_rule);
+    }
     answered.ok().flatten()
+}
+
+/// The referee's answer to an `adjudicate` request, as wire bytes; `None`
+/// for any other request. `Some(None)` sends nothing: a verdict whose
+/// `adjudication_issued` record did not seal is never sent.
+fn referee_answer(
+    capsules: &crate::capsule_emit::CapsuleState,
+    request_bytes: &[u8],
+    now: &str,
+) -> Option<Option<Vec<u8>>> {
+    let parsed: serde_json::Value = serde_json::from_slice(request_bytes).ok()?;
+    if !crate::referee::service::is_adjudicate_request(&parsed) {
+        return None;
+    }
+    let peer_keys = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let referee = crate::referee::service::Referee {
+        ledger_dir: capsules.ledger_dir(),
+        signing_key: capsules.signing_key(),
+        peer_keys: peer_keys.as_deref(),
+    };
+    let reply = match crate::referee::service::handle_adjudicate_request(
+        &referee,
+        request_bytes,
+        now,
+    ) {
+        Ok(reply) => reply,
+        Err(error) => {
+            tracing::warn!(%error, "an adjudicate request was not answered: the verdict could not be held");
+            return Some(None);
+        }
+    };
+    if reply
+        .get(crate::referee::service::ADJUDICATION_VERDICT_MARKER)
+        .is_some()
+    {
+        if let Err(error) = seal_issued_verdict(capsules, &reply) {
+            tracing::warn!(%error, "a verdict was issued but its record did not seal; nothing sent");
+            return Some(None);
+        }
+    }
+    Some(serde_json::to_vec(&reply).ok())
+}
+
+/// Seal this node's `adjudication_issued` record of the verdict in `reply`.
+/// Keyed on the verdict id: a repeated request seals nothing more.
+fn seal_issued_verdict(
+    capsules: &crate::capsule_emit::CapsuleState,
+    reply: &serde_json::Value,
+) -> anyhow::Result<()> {
+    use serde_json::Value;
+    let text = |key: &str| reply.get(key).and_then(Value::as_str);
+    let pair = |key: &str| -> Option<[&str; 2]> {
+        match reply.get(key)?.as_array()?.as_slice() {
+            [a, b] => Some([a.as_str()?, b.as_str()?]),
+            _ => None,
+        }
+    };
+    let (Some(verdict), Some(id), Some(referee), Some(halves), Some(nodes)) = (
+        text("verdict"),
+        text("verdict_capsule_id"),
+        text("referee_node_id"),
+        pair("halves"),
+        pair("half_node_ids"),
+    ) else {
+        anyhow::bail!("the issued verdict's facts are incomplete");
+    };
+    let model_hash = reply
+        .pointer("/verdict_capsule/model_attestation/compute_attestation/adjudication/model_hash")
+        .and_then(Value::as_str);
+    let facts = crate::capsule_emit::VerdictFacts {
+        verdict,
+        verdict_capsule_id: id,
+        referee_node_id: referee,
+        halves,
+        half_node_ids: nodes,
+        twin_bracket_id: text("twin_bracket_id"),
+        model_hash,
+    };
+    capsules.emit_adjudication_issued(
+        &facts,
+        text("referee_capsule_id"),
+        text("issued_at").unwrap_or_default(),
+    )?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------
