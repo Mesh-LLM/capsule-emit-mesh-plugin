@@ -1,0 +1,149 @@
+# SPDX-License-Identifier: Apache-2.0
+# Tier 2: two real mesh-llm nodes on one runner, each running this plugin,
+# nightly and on pull requests labelled `run-e2e`. See CONTRIBUTING.md.
+#
+# The mesh-llm release and the model are pinned by SHA-256 below and checked
+# after every download and every cache restore, so a cache entry can never
+# stand in for a different file. Only this workflow's runner downloads them.
+#
+# Every action is pinned to a full commit SHA (the tag it was taken from is in
+# the trailing comment). The workflow token is read-only and no job here gets a
+# secret. The `pull_request` trigger (never `pull_request_target`) runs a fork's
+# code with no secrets and a read-only token, like tier 1.
+name: e2e
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  pull_request:
+    types: [labeled, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: "1.97.1"
+  CARGO_TERM_COLOR: always
+  # mesh-llm v0.77.0, Linux x86_64, CPU build: the unmodified release.
+  MESH_LLM_VERSION: "0.77.0"
+  MESH_LLM_ASSET: mesh-llm-v0.77.0-x86_64-unknown-linux-gnu.tar.gz
+  MESH_LLM_SHA256: 775ee7611a99da18b14cb2eebe81a8e278b83809273ea70a27c898304fc12940
+  # Qwen2.5-0.5B-Instruct, Q4_K_M GGUF (491 MB), at a fixed repository revision.
+  MODEL_FILE: qwen2.5-0.5b-instruct-q4_k_m.gguf
+  MODEL_URL: https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q4_k_m.gguf
+  MODEL_SHA256: 74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db
+
+jobs:
+  two-node:
+    name: two nodes, stock mesh-llm
+    # Nightly, by hand, or on a pull request that carries the label (added
+    # now, or already there when new commits arrive).
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master @ 2026-09-12 (the action publishes no release tags)
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/evidence-plugin/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-e2e-${{ hashFiles('crates/evidence-plugin/Cargo.lock') }}
+
+      # Keyed on the pinned digests: a new pin is a new entry.
+      - name: Restore the pinned mesh-llm release and model
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/e2e-inputs
+          key: e2e-inputs-${{ env.MESH_LLM_SHA256 }}-${{ env.MODEL_SHA256 }}
+
+      - name: Download what is missing, then check both digests
+        run: |
+          mkdir -p ~/e2e-inputs
+          cd ~/e2e-inputs
+          if [ ! -f "$MESH_LLM_ASSET" ]; then
+            curl -fsSL --retry 3 -o "$MESH_LLM_ASSET" \
+              "https://github.com/Mesh-LLM/mesh-llm/releases/download/v$MESH_LLM_VERSION/$MESH_LLM_ASSET"
+          fi
+          if [ ! -f "$MODEL_FILE" ]; then
+            curl -fsSL --retry 3 -o "$MODEL_FILE" "$MODEL_URL"
+          fi
+          printf '%s  %s\n%s  %s\n' \
+            "$MESH_LLM_SHA256" "$MESH_LLM_ASSET" \
+            "$MODEL_SHA256" "$MODEL_FILE" | sha256sum -c -
+          ls -l ~/e2e-inputs
+
+      - name: Unpack mesh-llm
+        run: |
+          mkdir -p ~/mesh-llm
+          tar -xzf ~/e2e-inputs/"$MESH_LLM_ASSET" -C ~/mesh-llm
+          # The archive holds one directory, mesh-bundle/: the binary and the
+          # native runtime it finds beside itself. Keep them together.
+          test -x ~/mesh-llm/mesh-bundle/mesh-llm
+          echo "MESH_LLM_BIN=$HOME/mesh-llm/mesh-bundle/mesh-llm" >> "$GITHUB_ENV"
+
+      - name: Build the plugin and the scenario checks
+        working-directory: crates/evidence-plugin
+        run: |
+          cargo build --locked --bin capsule-emit-mesh
+          cargo test --locked --bin capsule-emit-mesh --no-run
+
+      - name: Two nodes, three exchanges, then the scenario checks
+        env:
+          E2E_OUT: ${{ runner.temp }}/e2e
+        run: |
+          scripts/e2e-two-node.sh "$MESH_LLM_BIN" \
+            crates/evidence-plugin/target/debug/capsule-emit-mesh \
+            "$HOME/e2e-inputs/$MODEL_FILE" "$E2E_OUT"
+
+      # The same checks over the same run, against a receiver built without
+      # its claim checks: attacks B and D must then FAIL, which shows they test
+      # the receiver and not only the data. The mutant must build first, so a
+      # compile error can never pass as "the mutant was caught".
+      - name: Attacks B and D catch a receiver that skips its claim checks
+        working-directory: crates/evidence-plugin
+        env:
+          E2E_REQUESTER_DIR: ${{ runner.temp }}/e2e/data/requester
+          E2E_PROVIDER_DIR: ${{ runner.temp }}/e2e/data/provider
+          E2E_EXCHANGES: "3"
+        run: |
+          cargo test --locked --bin capsule-emit-mesh --features mutant-record-push-skips-claims --no-run
+          if out=$(cargo test --locked --bin capsule-emit-mesh --features mutant-record-push-skips-claims \
+              -- --ignored --test-threads=1 two_node_e2e::attack_ 2>&1); then
+            echo "::error::the attack checks passed a receiver that skips the claim checks"
+            exit 1
+          fi
+          for attack in attack_b_ attack_d_; do
+            grep -q "two_node_e2e::${attack}[a-z_]* \.\.\. FAILED" <<<"$out" \
+              || { echo "$out"; echo "::error::the mutant was not caught by ${attack%_}"; exit 1; }
+          done
+
+      # The node logs only: never the data directories, which hold each
+      # node's signing key.
+      - name: Keep the node logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-node-logs
+          path: ${{ runner.temp }}/e2e/logs/
+          if-no-files-found: ignore
+          retention-days: 7

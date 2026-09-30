@@ -76,12 +76,29 @@ version bumps.
 
 ### Tier 2: nightly, and on the `run-e2e` label
 
-A two-node integration test on a pinned, unmodified mesh-llm release with a
-small model: an exchange sealed on both sides, a forged record refused, and the
-self-contained attack cases. Checks that need host support not yet in a
-mesh-llm release are reported as blocked on that host change, not as passes.
-Add the `run-e2e` label to a pull request to run it before merge. The workflow
-is added in its own pull request.
+`.github/workflows/e2e.yml` runs two nodes of a pinned, unmodified mesh-llm
+release on one Linux runner, each with this plugin: one serves a small model,
+the other joins its mesh and sends it three chat completions.
+`scripts/e2e-two-node.sh` runs the nodes; once they have stopped, the checks
+in `crates/evidence-plugin/src/two_node_e2e.rs` run over what each node wrote:
+
+- each side sealed its own record of every exchange, and both logs verify;
+- a forged record is refused (changed after signing, signed by another key,
+  or from a sender with no announced key);
+- attack A, a tampered record, and attack C, a dropped one, break the
+  provider's log;
+- attack B, a record naming another server, and attack D, a record naming
+  other model weights, are refused, and the run repeats both against a
+  receiver built without its claim checks, which must fail them.
+
+Confirming an exchange (each side holding the other's record, the row
+CLOSED) needs the exchange event to name the other side, which no mesh-llm
+release does yet. That check runs as "expected-blocked: needs host b8": it
+asserts the honest one-sided state, and fails once the pinned release names
+the other side, so it can become the confirmed / CLOSED check.
+
+The mesh-llm release and the model are pinned by SHA-256 in the workflow and
+cached. Add the `run-e2e` label to a pull request to run it before merge.
 
 ## Test vectors
 

@@ -11,8 +11,9 @@ a real `mesh-llm` process.
 `mesh-llm-host-runtime` is not a crates.io crate, and building mesh-llm needs
 its full native runtime toolchain. The real-host tests are therefore
 `#[ignore]`d and need `MESH_LLM_HOST_BIN` to point at a `mesh-llm` binary.
-The nightly end-to-end workflow runs the two-node scenarios against a pinned
-mesh-llm release instead.
+The nightly end-to-end workflow (`.github/workflows/e2e.yml`) runs the
+two-node scenarios against a pinned mesh-llm release instead; see
+CONTRIBUTING.md, "Tier 2".
 
 ## Running them
 
