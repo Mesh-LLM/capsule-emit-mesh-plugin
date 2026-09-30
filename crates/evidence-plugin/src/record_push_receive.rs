@@ -132,7 +132,7 @@ pub struct Receiver<'a> {
     pub ledger_dir: &'a Path,
     /// This node's key: it signs every refusal.
     pub signing_key: &'a SigningKey,
-    /// The raw `ADMISSION_POLICY_PEER_KEYS` value (`None` when unset).
+    /// The raw `CAPSULE_EMIT_MESH_PEER_KEYS` value (`None` when unset).
     pub peer_keys: Option<&'a str>,
     /// `record_at_completion: off`: receive nothing.
     pub record_at_completion_off: bool,

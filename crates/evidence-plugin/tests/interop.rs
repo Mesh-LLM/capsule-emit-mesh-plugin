@@ -1,4 +1,4 @@
-//! Real interop test: drives the compiled `admission-policy-plugin` binary
+//! Real interop test: drives the compiled `capsule-emit-mesh` binary
 //! over mesh-llm's actual wire protocol (length-prefixed `proto::Envelope`
 //! frames over a Unix domain socket — see `mesh-llm-plugin/src/io.rs`), the
 //! same way `mesh-llm-host-runtime::plugin::runtime::ExternalPlugin` does,
@@ -36,7 +36,7 @@ struct Harness {
 impl Harness {
     async fn spawn(extra_env: &[(&str, &str)]) -> Self {
         let socket_path =
-            std::env::temp_dir().join(format!("admission-policy-interop-{}.sock", nonce()));
+            std::env::temp_dir().join(format!("capsule-emit-mesh-interop-{}.sock", nonce()));
         let _ = std::fs::remove_file(&socket_path);
         let listener = UnixListener::bind(&socket_path).expect("bind fake-host socket");
 
@@ -45,14 +45,14 @@ impl Harness {
             .env("MESH_LLM_PLUGIN_TRANSPORT", "unix")
             // An isolated data dir per run: never the operator's own.
             .env(
-                "ADMISSION_POLICY_DATA_DIR",
-                std::env::temp_dir().join(format!("admission-policy-interop-data-{}", nonce())),
+                "CAPSULE_EMIT_MESH_DATA_DIR",
+                std::env::temp_dir().join(format!("capsule-emit-mesh-interop-data-{}", nonce())),
             )
-            .env("ADMISSION_POLICY_BLOCKED_MODELS", "blocked-test-model");
+            .env("CAPSULE_EMIT_MESH_BLOCKED_MODELS", "blocked-test-model");
         for (key, value) in extra_env {
             cmd.env(key, value);
         }
-        let child = cmd.spawn().expect("spawn admission-policy-plugin");
+        let child = cmd.spawn().expect("spawn the capsule-emit-mesh plugin");
 
         let stream = timeout(
             TEST_TIMEOUT,

@@ -35,7 +35,7 @@ glibc 2.35 or newer (x86_64 or arm64).
 and set `VERSION` to the release (without the leading `v`):
 
 ```bash
-VERSION=0.2.0
+VERSION=0.1.0
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64)  TARGET=aarch64-apple-darwin ;;
   Linux-x86_64)  TARGET=x86_64-unknown-linux-gnu ;;
@@ -107,19 +107,27 @@ confirmed.
 
 **Each node must know the other node's public key.** Nodes do not exchange
 keys yet. The plugin accepts a record only from a peer whose key you have
-configured, and refuses the rest. Set `ADMISSION_POLICY_PEER_KEYS` in the
+configured, and refuses the rest. Set `CAPSULE_EMIT_MESH_PEER_KEYS` in the
 node's environment to a JSON object mapping each peer's id to its raw Ed25519
 public key in hex. A node writes its own id to `<data dir>/self-peer-id` and
 its public key to `<data dir>/keys/node-key.pub.pem`.
 
 ## Where the records are kept
 
-Under the plugin's data directory: `ADMISSION_POLICY_DATA_DIR` if set in the
+Under the plugin's data directory: `CAPSULE_EMIT_MESH_DATA_DIR` if set in the
 node's environment (an absolute path), else `$XDG_DATA_HOME/capsule-emit-mesh`,
 else `~/.local/share/capsule-emit-mesh`. The sealed log is
 `<data dir>/ledger/capsules.jsonl` and its checkpoints are
 `<data dir>/ledger/checkpoints.jsonl`. The node's signing key is under
 `<data dir>/keys/`; it never leaves the node.
+
+## Settings were renamed
+
+Every setting in the node's environment is named `CAPSULE_EMIT_MESH_*`. Until
+the next release the plugin still reads the old `ADMISSION_POLICY_*` name of a
+setting whose new name is unset, and logs which one it used; when both are
+set, the new name wins. Rename yours now: the old names stop working after
+this release.
 
 ## Turn it off or remove it
 

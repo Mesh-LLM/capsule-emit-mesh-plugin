@@ -6,7 +6,7 @@
 //! to the `key_id` that peer is known to sign with, so a push that declares
 //! one peer but is signed with some other key is refused.
 //!
-//! **Config, not discovery.** The operator sets `ADMISSION_POLICY_PEER_KEYS`
+//! **Config, not discovery.** The operator sets `CAPSULE_EMIT_MESH_PEER_KEYS`
 //! on the node to a JSON object mapping peer id to that peer's `key_id` (the
 //! raw Ed25519 public key, lowercase hex), e.g. `{"node-a": "3a1f…", "node-b":
 //! "9c02…"}`. A peer absent from the map is unknown. Every way the value can
@@ -14,7 +14,7 @@
 //! string) means "cannot verify", never a guessed or default key.
 
 /// The environment variable the registry is read from.
-pub const ENV_PEER_KEYS: &str = "ADMISSION_POLICY_PEER_KEYS";
+pub const ENV_PEER_KEYS: &str = "CAPSULE_EMIT_MESH_PEER_KEYS";
 
 /// The `key_id` configured for `peer_id` in `registry`, the raw value of
 /// [`ENV_PEER_KEYS`] (`None` when it is unset). `None` whenever the answer is

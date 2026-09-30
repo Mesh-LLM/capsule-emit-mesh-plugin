@@ -226,7 +226,7 @@ function counterpartyHalfState(
 }
 
 /** A real sealed capsule id is 64 lower-hex (`capsule-emit-mesh`
- *  capsule-producer `DIGEST_LEN`); the self-minted per-response marker
+ *  capsule-emit `DIGEST_LEN`); the self-minted per-response marker
  *  `capsule-<response.id>` (e.g. `capsule-chatcmpl-…`) is not. Only a
  *  digest-shaped id can be fetched and closed against real bytes, so a
  *  non-digest peer assertion must render "not given" with nothing to fetch,

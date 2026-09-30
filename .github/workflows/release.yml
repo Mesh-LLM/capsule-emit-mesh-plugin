@@ -44,7 +44,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build and attach assets to (e.g. v0.2.0-rc.1)"
+        description: "Existing tag to build and attach assets to (e.g. v0.1.0-rc.1)"
         required: true
 
 permissions: {}
@@ -86,7 +86,22 @@ jobs:
             echo "::error::checked out $head, but $RELEASE_TAG points to $tagged"
             exit 1
           fi
-          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          # The crate version is sealed into every record's developer header
+          # (capsule-emit-mesh/<version>), so the tag must name it exactly;
+          # plugin.toml must say the same.
+          release="${RELEASE_TAG#v}"
+          core="${release%%-rc.*}"
+          crate="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' crates/evidence-plugin/Cargo.toml | head -n 1)"
+          declared="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' plugin.toml | head -n 1)"
+          if [ "$crate" != "$core" ]; then
+            echo "::error::crates/evidence-plugin/Cargo.toml says version $crate, the tag is $RELEASE_TAG"
+            exit 1
+          fi
+          if [ "$declared" != "$core" ]; then
+            echo "::error::plugin.toml says version $declared, the tag is $RELEASE_TAG"
+            exit 1
+          fi
+          echo "version=${release}" >> "$GITHUB_OUTPUT"
 
   build:
     name: build (${{ matrix.target }})

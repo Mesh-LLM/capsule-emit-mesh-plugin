@@ -34,7 +34,7 @@ use crate::peer_keys::{announced_key_in, ENV_PEER_KEYS};
 /// The directory this node's log of requests made of it
 /// (`received_log.jsonl`, written by `received_log`) lives in: the drill's
 /// "Asked of you".
-pub const ENV_RECEIVED_LOG_DIR: &str = "ADMISSION_POLICY_RECEIVED_LOG_DIR";
+pub const ENV_RECEIVED_LOG_DIR: &str = "CAPSULE_EMIT_MESH_RECEIVED_LOG_DIR";
 /// Where that log is read from when [`ENV_RECEIVED_LOG_DIR`] is unset:
 /// `<data dir>/received-log`.
 pub const DEFAULT_RECEIVED_LOG_SUBDIR: &str = "received-log";
@@ -95,7 +95,7 @@ impl EvidenceSource {
     /// directory that exists counts, so a node that keeps no log shows
     /// "not shown", never an empty "0 requests".
     pub fn received_log_dir(data_dir: &Path) -> Option<PathBuf> {
-        received_log_dir_for(std::env::var_os(ENV_RECEIVED_LOG_DIR), data_dir)
+        received_log_dir_for(crate::settings::var_os(ENV_RECEIVED_LOG_DIR), data_dir)
     }
 }
 
@@ -289,12 +289,12 @@ pub fn with_routes(
         http::get("/peer-key")
             .binding_id("evidence_peer_key")
             .description(
-                "The key the operator announced for one peer (ADMISSION_POLICY_PEER_KEYS), or null.",
+                "The key the operator announced for one peer (CAPSULE_EMIT_MESH_PEER_KEYS), or null.",
             )
             .input::<PeerKeyArgs>()
             .handle(move |args, _context| {
                 Box::pin(async move {
-                    let registry = std::env::var(ENV_PEER_KEYS).ok();
+                    let registry = crate::settings::var(ENV_PEER_KEYS).ok();
                     peer_key_json(registry.as_deref(), &args.peer)
                 })
             }),

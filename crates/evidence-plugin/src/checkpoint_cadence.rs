@@ -42,28 +42,28 @@ use std::time::{Duration, Instant};
 pub const PUSH_COALESCE_WINDOW: Duration = Duration::from_millis(100);
 
 /// On by default: the plugin runs its OWN checkpoint cadence unless the
-/// operator sets `ADMISSION_POLICY_CHECKPOINT_CADENCE=off` to opt out (e.g.
+/// operator sets `CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE=off` to opt out (e.g.
 /// because a standalone process is already checkpointing this `ledger_dir`
 /// -- see the module doc's race note). Any other value, including
 /// unset, leaves it on.
-const ENV_ENABLE: &str = "ADMISSION_POLICY_CHECKPOINT_CADENCE";
+const ENV_ENABLE: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE";
 /// Age-clock override, seconds. Defaults to `CheckpointCadenceConfig`'s own
 /// 300s mesh default.
-const ENV_INTERVAL_SECONDS: &str = "ADMISSION_POLICY_CHECKPOINT_CADENCE_SECONDS";
+const ENV_INTERVAL_SECONDS: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE_SECONDS";
 /// Entry-count cadence override. Defaults to 100 (upstream `capsule_emit`'s
 /// own default).
-const ENV_CADENCE_ENTRIES: &str = "ADMISSION_POLICY_CHECKPOINT_CADENCE_ENTRIES";
+const ENV_CADENCE_ENTRIES: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE_ENTRIES";
 /// Comma-separated witness URLs to register checkpoints with. Anchoring is
 /// OPT-IN, always (this repo's posture) -- empty/unset means
 /// self-checkpointed only, no network.
-const ENV_WITNESS_URLS: &str = "ADMISSION_POLICY_CHECKPOINT_WITNESS_URLS";
+const ENV_WITNESS_URLS: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS";
 /// `checkpoint_pad_bucket`: pad every checkpoint's leaf count up to a
 /// multiple of this (Evidence Layer -00 §12.1). Defaults to
 /// `DEFAULT_PAD_BUCKET` (32); `0` turns padding off.
-const ENV_PAD_BUCKET: &str = "ADMISSION_POLICY_CHECKPOINT_PAD_BUCKET";
+const ENV_PAD_BUCKET: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_PAD_BUCKET";
 
 pub fn is_enabled() -> bool {
-    is_enabled_for(std::env::var(ENV_ENABLE).ok().as_deref())
+    is_enabled_for(crate::settings::var(ENV_ENABLE).ok().as_deref())
 }
 
 /// Pure decision logic behind [`is_enabled`], taking the raw env value (or
@@ -76,22 +76,22 @@ fn is_enabled_for(raw: Option<&str>) -> bool {
 
 fn config_from_env() -> CheckpointCadenceConfig {
     let mut cfg = CheckpointCadenceConfig::default();
-    if let Ok(v) = std::env::var(ENV_INTERVAL_SECONDS) {
+    if let Ok(v) = crate::settings::var(ENV_INTERVAL_SECONDS) {
         if let Ok(n) = v.parse::<u64>() {
             cfg.cadence_seconds = n;
         }
     }
-    if let Ok(v) = std::env::var(ENV_CADENCE_ENTRIES) {
+    if let Ok(v) = crate::settings::var(ENV_CADENCE_ENTRIES) {
         if let Ok(n) = v.parse::<u64>() {
             cfg.cadence_entries = n;
         }
     }
-    if let Ok(v) = std::env::var(ENV_PAD_BUCKET) {
+    if let Ok(v) = crate::settings::var(ENV_PAD_BUCKET) {
         if let Ok(n) = v.parse::<u64>() {
             cfg.pad_bucket = n;
         }
     }
-    if let Ok(v) = std::env::var(ENV_WITNESS_URLS) {
+    if let Ok(v) = crate::settings::var(ENV_WITNESS_URLS) {
         cfg.witness_urls = v
             .split(',')
             .map(str::trim)

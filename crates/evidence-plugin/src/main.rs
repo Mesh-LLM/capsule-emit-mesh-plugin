@@ -35,6 +35,7 @@ mod record_push_receive;
 mod routing_choice_bridge;
 mod self_peer;
 mod served_summary;
+mod settings;
 mod settlement_channel;
 mod share_policy;
 mod split_stage;
@@ -68,7 +69,7 @@ use std::time::Instant;
 use tokio::net::TcpListener;
 
 const PLUGIN_ID: &str = "capsule-emit-mesh";
-const PLUGIN_VERSION: &str = "0.1.0";
+const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
 const ENDPOINT_ID: &str = "admission-policy-openai";
 
 /// The set of model names this plugin advertises via `/v1/models` — i.e. the
@@ -76,13 +77,13 @@ const ENDPOINT_ID: &str = "admission-policy-openai";
 /// (`mesh-llm-host-runtime::network::openai::ingress`) only falls through to a
 /// plugin-hosted inference endpoint when no local/remote backend already
 /// serves the named model, matched by exact string — there is no wildcard.
-/// An admission-policy plugin therefore enforces its policy by being the
+/// The plugin therefore enforces its blocklist by being the
 /// registered provider for every blocked name it knows about in advance, not
 /// by observing every exchange regardless of model (see docs/PROTOCOL-NOTE.md
 /// for why that's a real architectural difference from the private spike).
 fn blocked_models() -> Vec<String> {
     blocked_models_for(
-        std::env::var("ADMISSION_POLICY_BLOCKED_MODELS")
+        crate::settings::var("CAPSULE_EMIT_MESH_BLOCKED_MODELS")
             .ok()
             .as_deref(),
     )
@@ -146,7 +147,7 @@ struct AppState {
     /// cadence task is enabled (`checkpoint_cadence::is_enabled`) --
     /// the checkpoint-head source's sending half reads this to feed
     /// `PeerAnnouncement.checkpoint`. On by default; `None` when the
-    /// operator has opted out (`ADMISSION_POLICY_CHECKPOINT_CADENCE=off`)
+    /// operator has opted out (`CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE=off`)
     /// or hasn't produced a checkpoint since startup.
     #[allow(dead_code)]
     checkpoint_head: Option<checkpoint_cadence::LatestHead>,
@@ -175,7 +176,7 @@ fn host_provenance_from(observed: HostServingProvenance) -> HostProvenance {
     }
 }
 
-/// Map the mirror's real token usage into the capsule-producer `TokenUsage`.
+/// Map the mirror's real token usage into the producer's `TokenUsage`.
 /// A straight copy of real counts — never fabricated.
 fn token_usage_from(usage: MirrorUsage) -> TokenUsage {
     TokenUsage {
@@ -418,7 +419,7 @@ async fn push_at_completion_if_configured(
     {
         tracing::warn!(
             %peer_id,
-            "record-push at completion skipped: this node's own peer id is unknown (the host has not reported it on a mesh event yet and ADMISSION_POLICY_SELF_PEER_ID is unset)"
+            "record-push at completion skipped: this node's own peer id is unknown (the host has not reported it on a mesh event yet and CAPSULE_EMIT_MESH_SELF_PEER_ID is unset)"
         );
         return;
     }
@@ -788,7 +789,7 @@ async fn serve_admission_http(listener: TcpListener, state: AppState) {
         .with_state(state);
     axum::serve(listener, app)
         .await
-        .expect("admission-policy HTTP server crashed");
+        .expect("the plugin HTTP server crashed");
 }
 
 /// Every operation this plugin serves outside its HTTP routes. Each one goes
@@ -806,7 +807,7 @@ fn with_evidence_operations(
     builder = builder.mcp_item(
         mcp::tool(EVIDENCE_REQUEST_OPERATION)
             .description(
-                "Ask a mesh peer's admission-policy plugin for evidence (a \
+                "Ask a mesh peer's capsule-emit-mesh plugin for evidence (a \
                  draft-mih-agent-evidence-request-00 request map) over the plugin mesh stream. \
                  Returns the peer's own artifact or signed refusal unchanged, beside its \
                  verification against the peer's announced key (verify: false returns it alone).",
@@ -861,7 +862,7 @@ fn with_evidence_operations(
     builder = builder.mcp_item(
         mcp::tool(LEDGER_FETCH_OPERATION)
             .description(
-                "Ask a mesh peer's admission-policy plugin for one of ITS sealed ledger entries by \
+                "Ask a mesh peer's capsule-emit-mesh plugin for one of ITS sealed ledger entries by \
                  capsule_id -- the witness-level fetch half of the two-sided ledger. Returns the raw \
                  unsigned {capsule, signed_statement_b64, node_pub_key_pem} for independent recompute; \
                  never a second attestation.",
@@ -988,7 +989,7 @@ async fn main() -> anyhow::Result<()> {
     owner_maintenance::finish_pending_after_open(&data_dir, &capsules, &log_id)?;
     tracing::info!(
         chain_head = ?capsules.chain_head(),
-        "capsule-producer ready"
+        "record sealing ready"
     );
     let lifecycle_events = Arc::new(ObservedLifecycleEvents::open(&data_dir)?);
     let self_peer = self_peer::SelfPeer::new(&data_dir);
@@ -1054,8 +1055,8 @@ async fn main() -> anyhow::Result<()> {
         plugin_server_info(
             PLUGIN_ID,
             PLUGIN_VERSION,
-            "Admission policy",
-            "Denies OpenAI-compatible exchanges whose model matches a blocked prefix, and emits a signed chained ledgered AAC for every one it admits.",
+            "Capsule evidence",
+            "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page; denies OpenAI-compatible exchanges whose model matches a blocked prefix.",
             None::<String>,
         ),
     ))

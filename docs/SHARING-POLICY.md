@@ -17,9 +17,9 @@ The plugin declares the four switches in its `config_schema`
 (`crates/evidence-plugin/src/share_policy.rs`), so the console shows them under
 Configuration › Plugins › Sharing policy. mesh-llm does not yet pass a
 plugin's configured values back to the running plugin, so today each value is
-read from the plugin's environment: `ADMISSION_POLICY_SHARE_RECORD_AT_COMPLETION`,
-`ADMISSION_POLICY_SHARE_HISTORY_SEGMENTS`, `ADMISSION_POLICY_SHARE_ADJUDICATIONS`
-and `ADMISSION_POLICY_WITNESS`. An unset or unknown value means the default.
+read from the plugin's environment: `CAPSULE_EMIT_MESH_SHARE_RECORD_AT_COMPLETION`,
+`CAPSULE_EMIT_MESH_SHARE_HISTORY_SEGMENTS`, `CAPSULE_EMIT_MESH_SHARE_ADJUDICATIONS`
+and `CAPSULE_EMIT_MESH_WITNESS`. An unset or unknown value means the default.
 
 ## The record at completion (`share_record_at_completion`)
 
@@ -45,7 +45,7 @@ mesh-llm has told it who the other side is. A pushed record is received and
 checked in-process (the sender's announced key, the signature, the claims, and
 a bundle's proof and checkpoint) and held only if every check passes; anything
 else gets a signed refusal. The sender's key must be configured
-(`ADMISSION_POLICY_PEER_KEYS`, see INSTALL.md): nodes do not exchange keys yet.
+(`CAPSULE_EMIT_MESH_PEER_KEYS`, see INSTALL.md): nodes do not exchange keys yet.
 
 ## Reading records back (`share_history_segments`)
 

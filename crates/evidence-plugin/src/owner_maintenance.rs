@@ -535,7 +535,10 @@ impl Maintenance {
 // ---------------------------------------------------------------------------
 
 fn switch(env: &str, default: Option<&str>) -> Value {
-    match std::env::var(env).ok().filter(|v| !v.trim().is_empty()) {
+    match crate::settings::var(env)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+    {
         Some(value) => json!({ "value": value, "source": "set" }),
         None => json!({ "value": default, "source": "default" }),
     }
@@ -563,7 +566,7 @@ fn without_credentials(url: &str) -> String {
 }
 
 fn witness_switch() -> Value {
-    let mut witness = switch("ADMISSION_POLICY_CHECKPOINT_WITNESS_URLS", None);
+    let mut witness = switch("CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS", None);
     if let Some(value) = witness["value"].as_str() {
         let shown: Vec<String> = value
             .split(',')
@@ -578,8 +581,8 @@ fn witness_switch() -> Value {
 fn sharing_status() -> Value {
     json!({
         "record_at_completion": switch(crate::share_policy::ENV_RECORD_AT_COMPLETION, Some("counterparty")),
-        "history_segments": switch("ADMISSION_POLICY_SHARE_HISTORY_SEGMENTS", Some("prospective")),
-        "adjudications": switch("ADMISSION_POLICY_SHARE_ADJUDICATIONS", Some("deliver_to_subjects")),
+        "history_segments": switch("CAPSULE_EMIT_MESH_SHARE_HISTORY_SEGMENTS", Some("prospective")),
+        "adjudications": switch("CAPSULE_EMIT_MESH_SHARE_ADJUDICATIONS", Some("deliver_to_subjects")),
         "witness": witness_switch(),
     })
 }

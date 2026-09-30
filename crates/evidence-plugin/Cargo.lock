@@ -157,9 +157,9 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "capsule-emit"
-version = "0.0.1"
+version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cd9d9232a445098b290a87d9eb6d5d6f0fc60efe5a799fbb91219248579430f"
+checksum = "addec1c0e1e10616796516a888005f6d538cfb234c4df44010d4d255ec33833c"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -529,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "evidence-plugin"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",

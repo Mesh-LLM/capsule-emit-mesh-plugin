@@ -915,7 +915,10 @@ fn seal_local_citation(
 
 /// The producer identity every mesh local record carries in its header.
 const LOCAL_RECORD_OPERATOR: &str = "capsule-emit-mesh-poc-rust";
-const LOCAL_RECORD_DEVELOPER: &str = "capsule-producer/0.2.0";
+/// The producer this plugin names in every record it seals: its own name and
+/// version.
+pub(crate) const LOCAL_RECORD_DEVELOPER: &str =
+    concat!("capsule-emit-mesh/", env!("CARGO_PKG_VERSION"));
 const LOCAL_RECORD_PROVIDER: &str = "mesh-llm";
 
 /// The shared body of every LOCAL record with no served exchange (the citing
@@ -1102,7 +1105,7 @@ pub fn seal_local_routing_choice(
     );
     body.insert("action_type".into(), json!("decide"));
     body.insert("operator".into(), json!("capsule-emit-mesh-poc-rust"));
-    body.insert("developer".into(), json!("capsule-producer/0.2.0"));
+    body.insert("developer".into(), json!(LOCAL_RECORD_DEVELOPER));
     // The same seal path as every other record (Evidence Layer -00 §12.1):
     // committed times truncated to the minute, and a fresh store nonce.
     body.insert(
@@ -1229,7 +1232,7 @@ pub fn seal_owner_maintenance_record(
     );
     body.insert("action_type".into(), json!("fyi"));
     body.insert("operator".into(), json!("capsule-emit-mesh-poc-rust"));
-    body.insert("developer".into(), json!("capsule-producer/0.2.0"));
+    body.insert("developer".into(), json!(LOCAL_RECORD_DEVELOPER));
     body.insert("timestamp".into(), json!(timestamp));
     body.insert("domain".into(), json!("action"));
     body.insert("provenance".into(), json!("collector"));
@@ -1606,7 +1609,7 @@ mod tests {
 
     /// The inline `key_id` is the RAW 32-byte Ed25519 public key, hex (64
     /// chars) -- exactly `capsule_emit.seal()`'s `capsule["key_id"]` and what
-    /// the announced-key registry (`ADMISSION_POLICY_PEER_KEYS`) keys off. NOT this crate's own short
+    /// the announced-key registry (`CAPSULE_EMIT_MESH_PEER_KEYS`) keys off. NOT this crate's own short
     /// SHA-256-based `keys::key_id` (16 chars).
     #[test]
     fn attached_key_id_is_the_raw_public_key_hex_not_the_short_key_id() {

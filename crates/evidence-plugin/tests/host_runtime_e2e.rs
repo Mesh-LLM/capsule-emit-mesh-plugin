@@ -24,7 +24,7 @@
 //! policy exists to catch — same shape as `tests/interop.rs`'s mutant proof,
 //! but exercised through the real host this time):
 //!   MESH_LLM_HOST_BIN=/path/to/mesh-llm/target/debug/mesh-llm \
-//!     cargo test --test host_runtime_e2e --features mutant-allow-blocked \
+//!     cargo test --test host_runtime_e2e --features mutant-blocked-model-served \
 //!     -- --ignored --test-threads=1
 //! (expected: `denies_blocked_model_end_to_end_through_real_host` FAILS)
 
@@ -90,10 +90,10 @@ args = []
         let log_path = home_dir.join("run.log");
         let log_file = std::fs::File::create(&log_path).expect("create run.log");
 
-        // Isolated per-run capsule-producer state (signing key + durable
+        // Isolated per-run plugin state (signing key + durable
         // ledger + observed-lifecycle-events log) -- inherited by the
         // plugin subprocess the host spawns, same as
-        // `ADMISSION_POLICY_BLOCKED_MODELS` already is below.
+        // `CAPSULE_EMIT_MESH_BLOCKED_MODELS` already is below.
         let capsule_data_dir = home_dir.join("capsule-data");
 
         let child = Command::new(&host_bin)
@@ -112,10 +112,10 @@ args = []
             ])
             .env("HOME", &home_dir)
             .env(
-                "ADMISSION_POLICY_BLOCKED_MODELS",
+                "CAPSULE_EMIT_MESH_BLOCKED_MODELS",
                 "blocked-test-model,allowed-test-model",
             )
-            .env("ADMISSION_POLICY_DATA_DIR", &capsule_data_dir)
+            .env("CAPSULE_EMIT_MESH_DATA_DIR", &capsule_data_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::from(log_file.try_clone().expect("clone log fd")))
             .stderr(Stdio::from(log_file))
@@ -242,7 +242,7 @@ fn pick_port() -> u16 {
 /// through the real process instead of the fake-host stand-in.
 ///
 /// This is also the mutant-discriminating check: built with
-/// `--features mutant-allow-blocked`, the real host still dispatches the
+/// `--features mutant-blocked-model-served`, the real host still dispatches the
 /// request to the (broken) plugin, which now answers 200 instead of 403 —
 /// this assertion fails, proving the check actually exercises the plugin's
 /// decision logic end-to-end rather than passing regardless of it.
@@ -289,7 +289,7 @@ async fn allows_unblocked_advertised_model_end_to_end_through_real_host() {
 /// itself returns a non-200 error (observed: 503, "single target None
 /// unavailable") without ever opening a connection to the plugin's HTTP
 /// endpoint. So the plugin's own `body_parse_failure` fail-safe branch
-/// (`decision::malformed`, and the `mutant-allow-malformed` feature that
+/// (`decision::malformed`, and the `mutant-malformed-body-served` feature that
 /// breaks it) is real and correctly wired — proven directly in
 /// `tests/interop.rs` and `src/decision.rs`'s unit tests, which talk to the
 /// plugin's HTTP endpoint directly — but is NOT reachable through this real
@@ -324,13 +324,13 @@ async fn malformed_body_fails_safe_at_the_real_host_before_reaching_the_plugin()
 /// admit/deny decision. Two independent things are checked, corresponding to
 /// the task's two required wiring points:
 ///
-/// 1. **capsule-producer wired to the admission plugin**: the plugin's own
+/// 1. **Sealing wired to the plugin's own handler**: the plugin's own
 ///    `/v1/chat/completions` handler calls `capsule_emit::CapsuleState`
 ///    directly with the real request/response bytes it exchanged; the
 ///    resulting capsule must be durably ledgered and verify offline against
-///    capsule-producer's own independent `verify::verify_offline` (COSE
+///    capsule-emit's independent `verify::verify_offline` (COSE
 ///    signature, capsule_id recomputation, COSE-payload-matches-capsule).
-/// 2. **capsule-producer wired to the #1331 lifecycle hook**: the real host
+/// 2. **Sealing wired to the lifecycle hook**: the real host
 ///    (a mesh-llm build with the #1331 lifecycle hooks)
 ///    independently publishes a `RawProxy`/`Terminal` envelope on the
 ///    `openai.exchange.v1` mesh channel for this SAME exchange
@@ -369,7 +369,7 @@ async fn allowed_exchange_emits_a_signed_chained_ledgered_capsule_and_publishes_
     // host side, same as production).
     tokio::time::sleep(Duration::from_millis(750)).await;
 
-    // --- (1) capsule-producer <-> admission plugin: real ledger, real COSE ---
+    // --- (1) sealing <-> the plugin's handler: real ledger, real COSE ---
     let keys_dir = host.capsule_data_dir().join("keys");
     let pubkey_pem = std::fs::read_to_string(keys_dir.join("node-key.pub.pem"))
         .expect("plugin persisted its public key");
@@ -406,7 +406,7 @@ async fn allowed_exchange_emits_a_signed_chained_ledgered_capsule_and_publishes_
     );
     assert_eq!(entry.capsule["assurance"]["effect_mode"], "confirmed");
 
-    // --- (2) capsule-producer <-> #1331 lifecycle hook: the host's own ---
+    // --- (2) sealing <-> the lifecycle hook: the host's own ---
     //         terminal broadcast for this same exchange was received.
     let lifecycle_log_path = host.capsule_data_dir().join("lifecycle-events.jsonl");
     let lifecycle_log = std::fs::read_to_string(&lifecycle_log_path).unwrap_or_default();

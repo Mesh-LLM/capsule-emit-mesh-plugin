@@ -4,9 +4,9 @@
 //! on `PeerAnnouncement` (and the plugin-facing `MeshPeer` mirror); this
 //! module is what a plugin does with it once received.
 //!
-//! **Wiring status.** `admission-policy` pins `mesh-llm-plugin = "0.75"` from
-//! crates.io (see `Cargo.toml`) — the published release, not the fork branch
-//! that adds the `checkpoint` field. Until that field ships in a published
+//! **Wiring status.** The published `mesh-llm-plugin` this plugin depends on
+//! (see `Cargo.toml`) does not carry the `checkpoint` field yet. Until that
+//! field ships in a published
 //! `mesh-llm-plugin` this plugin depends on, `event.peer.checkpoint` does not
 //! exist to read, so `on_mesh_event` cannot be wired yet. This module is
 //! therefore self-contained (its own `CheckpointHead`, not

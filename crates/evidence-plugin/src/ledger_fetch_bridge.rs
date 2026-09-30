@@ -73,7 +73,7 @@ pub fn is_ledger_fetch_request(request: &OpenStreamRequest) -> bool {
 /// Overridable so a test proving the bound is enforced does not have to wait
 /// out the production default.
 fn responder_timeout() -> Duration {
-    env_millis("ADMISSION_POLICY_LEDGER_FETCH_HTTP_TIMEOUT_MS", 10_000)
+    env_millis("CAPSULE_EMIT_MESH_LEDGER_FETCH_HTTP_TIMEOUT_MS", 10_000)
 }
 
 /// How long the REQUESTER waits for a response once the mesh stream is open
@@ -81,7 +81,7 @@ fn responder_timeout() -> Duration {
 /// a peer that never declared the channel has its stream dropped by the host
 /// with no reply, and this bound turns that into a clean failure, not a hang.
 fn requester_idle_timeout_ms() -> u64 {
-    env_millis("ADMISSION_POLICY_LEDGER_FETCH_TIMEOUT_MS", 8_000).as_millis() as u64
+    env_millis("CAPSULE_EMIT_MESH_LEDGER_FETCH_TIMEOUT_MS", 8_000).as_millis() as u64
 }
 
 // ---------------------------------------------------------------------

@@ -1,4 +1,5 @@
-//! Pure admission-policy decision logic, independent of the wire protocol.
+//! The plugin's admission decision (allow or deny an exchange by its model),
+//! independent of the wire protocol.
 //!
 //! Deny a chat-completions request whose `model` field starts with the blocked
 //! prefix; allow everything else; fail safe (deny) on any body that cannot be
@@ -39,30 +40,30 @@ pub fn decide(body: &[u8]) -> Decision {
     }
 }
 
-#[cfg(not(feature = "mutant-allow-blocked"))]
+#[cfg(not(feature = "mutant-blocked-model-served"))]
 fn is_blocked(model: &str) -> bool {
     model.starts_with(BLOCKED_MODEL_PREFIX)
 }
 
-// mutant-allow-blocked: the deny condition never fires. A deliberately-broken
+// mutant-blocked-model-served: the deny condition never fires. A deliberately-broken
 // build used only to prove the interop test catches a fail-open regression on
-// the exact behavior the admission policy exists to enforce.
-#[cfg(feature = "mutant-allow-blocked")]
+// the exact behavior the model blocklist exists to enforce.
+#[cfg(feature = "mutant-blocked-model-served")]
 fn is_blocked(_model: &str) -> bool {
     false
 }
 
-#[cfg(not(feature = "mutant-allow-malformed"))]
+#[cfg(not(feature = "mutant-malformed-body-served"))]
 fn malformed(detail: String) -> Decision {
     Decision::Deny {
         reason: format!("body_parse_failure: {detail}"),
     }
 }
 
-// mutant-allow-malformed: a body the plugin cannot parse is treated as Allow
+// mutant-malformed-body-served: a body the plugin cannot parse is treated as Allow
 // instead of Deny. A deliberately-broken build used only to prove the interop
 // test catches a fail-open regression on malformed-input handling.
-#[cfg(feature = "mutant-allow-malformed")]
+#[cfg(feature = "mutant-malformed-body-served")]
 fn malformed(_detail: String) -> Decision {
     Decision::Allow
 }

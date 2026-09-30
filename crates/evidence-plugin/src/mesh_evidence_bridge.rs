@@ -67,7 +67,7 @@ pub const EVIDENCE_REQUEST_OPERATION: &str = "mesh_evidence_request";
 /// Overridable so a test proving the bound is actually enforced does not
 /// have to wait out the production default.
 fn responder_http_timeout() -> Duration {
-    env_millis("ADMISSION_POLICY_EVIDENCE_HTTP_TIMEOUT_MS", 10_000)
+    env_millis("CAPSULE_EMIT_MESH_EVIDENCE_HTTP_TIMEOUT_MS", 10_000)
 }
 
 /// How long the REQUESTER waits for a response once the mesh stream is open
@@ -75,14 +75,14 @@ fn responder_http_timeout() -> Duration {
 /// stream with no reply" case the acceptance check requires read as a clean
 /// failure, never a hang.
 fn requester_idle_timeout_ms() -> u64 {
-    env_millis("ADMISSION_POLICY_MESH_REQUEST_TIMEOUT_MS", 8_000).as_millis() as u64
+    env_millis("CAPSULE_EMIT_MESH_MESH_REQUEST_TIMEOUT_MS", 8_000).as_millis() as u64
 }
 
 /// Shared with `ledger_fetch_bridge`, the other plugin-mesh-stream carrier --
 /// same env-var-with-default shape, no reason for two copies.
 pub(crate) fn env_millis(var: &str, default_ms: u64) -> Duration {
     Duration::from_millis(
-        std::env::var(var)
+        crate::settings::var(var)
             .ok()
             .and_then(|raw| raw.parse().ok())
             .unwrap_or(default_ms),
@@ -251,7 +251,7 @@ pub struct MeshEvidenceRequestArgs {
     /// (the responder's sharing policy reads it; it is this node's word).
     pub request: serde_json::Value,
     /// Check what comes back against the peer's announced key
-    /// (`ADMISSION_POLICY_PEER_KEYS`). **On unless the caller turns it off**
+    /// (`CAPSULE_EMIT_MESH_PEER_KEYS`). **On unless the caller turns it off**
     /// with an explicit `"verify": false`. The result is
     /// `{"answer": <the peer's JSON>, "request_digest", "verification"}`
     /// (`evidence_answer::verify_response`, or `no_announced_key` when the
@@ -339,7 +339,7 @@ pub async fn handle_mesh_evidence_request(
     if !args.verify {
         return Ok(answer);
     }
-    let registry = std::env::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let registry = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
     let verification = match crate::peer_keys::announced_key_in(registry.as_deref(), &args.peer_id)
         .and_then(|key_id| verifying_key(&key_id))
     {
