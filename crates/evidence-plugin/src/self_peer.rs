@@ -7,15 +7,15 @@
 //! on every start, so the id is learned from the host each run rather than
 //! configured once.
 //!
-//! `ADMISSION_POLICY_SELF_PEER_ID` still overrides the learned id when set.
+//! `CAPSULE_EMIT_MESH_SELF_PEER_ID` still overrides the learned id when set.
 //! The learned id is written to `<data dir>/self-peer-id` so an operator (or
-//! a harness wiring a peer's `ADMISSION_POLICY_PEER_KEYS`) can read exactly
+//! a harness wiring a peer's `CAPSULE_EMIT_MESH_PEER_KEYS`) can read exactly
 //! what this node will declare.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 
-pub const ENV_OVERRIDE: &str = "ADMISSION_POLICY_SELF_PEER_ID";
+pub const ENV_OVERRIDE: &str = "CAPSULE_EMIT_MESH_SELF_PEER_ID";
 pub const FILE_NAME: &str = "self-peer-id";
 
 #[derive(Clone)]
@@ -62,7 +62,10 @@ impl SelfPeer {
     /// The id to declare: the operator override if set, else what the host
     /// reported, else `None` (no push can name its sender).
     pub fn current(&self) -> Option<String> {
-        resolve(std::env::var(ENV_OVERRIDE).ok().as_deref(), self.learned())
+        resolve(
+            crate::settings::var(ENV_OVERRIDE).ok().as_deref(),
+            self.learned(),
+        )
     }
 }
 

@@ -260,10 +260,10 @@ fn output_sub_digests(response_bytes: &[u8]) -> (Option<String>, Option<String>)
 /// Operator opt-in for sealing the serving host's name. The sealed body is
 /// pushed at completion to every counterparty, so the machine name is
 /// withheld unless the operator sets this to `1`, `true` or `on`.
-pub const ENV_SEAL_HOSTNAME: &str = "ADMISSION_POLICY_SEAL_HOSTNAME";
+pub const ENV_SEAL_HOSTNAME: &str = "CAPSULE_EMIT_MESH_SEAL_HOSTNAME";
 
 fn hostname_opt_in() -> bool {
-    hostname_opt_in_for(std::env::var(ENV_SEAL_HOSTNAME).ok().as_deref())
+    hostname_opt_in_for(crate::settings::var(ENV_SEAL_HOSTNAME).ok().as_deref())
 }
 
 fn hostname_opt_in_for(raw: Option<&str>) -> bool {
@@ -450,10 +450,7 @@ impl CapsuleState {
         let keys = keys::load_or_create(&data_dir.join("keys"))?;
         let ledger_dir = data_dir.join("ledger");
         let (ledger, report) = crate::producer::index::open_ledger(&ledger_dir)?;
-        tracing::info!(
-            recovered_entries = report.valid_entries,
-            "capsule-producer ledger opened"
-        );
+        tracing::info!(recovered_entries = report.valid_entries, "ledger opened");
         let sequence_counters = SequenceCounterStore::open(data_dir.join("sequence_counters.json"));
         let learned_self_node_id =
             LearnedSelfNodeId::open(data_dir.join("learned_self_node_id.json"));
@@ -618,7 +615,7 @@ impl CapsuleState {
             action_id: format!("mesh-poc/capsule-emit-mesh-integration/{agent_input_digest}"),
             action_type: "decide".to_string(),
             operator: "capsule-emit-mesh-poc-rust".to_string(),
-            developer: "capsule-producer/0.2.0".to_string(),
+            developer: crate::producer::capsule::LOCAL_RECORD_DEVELOPER.to_string(),
             timestamp: utc_now_minute(),
             domain: Some("action".to_string()),
             provenance: Some("collector".to_string()),
@@ -728,7 +725,7 @@ impl CapsuleState {
             effect_attestation: "gate_executed".to_string(),
             disposition_decision: "accept".to_string(),
             // §5.4: disposition.approver MUST be `human` or `policy` -- the
-            // admission-policy plugin is the latter (an automated policy
+            // plugin is the latter (an automated policy
             // engine, not a human disposer), never its own plugin name.
             disposition_approver: "policy".to_string(),
             disposition_human_disposed: false,
@@ -793,7 +790,7 @@ fn hex_sha256(bytes: &[u8]) -> String {
 /// fabricated digest/class). Runtime name identifies the serving runtime
 /// this plugin fronts.
 fn runtime_field(att: &Option<crate::producer::runtime_attest::BinaryAttestation>) -> Value {
-    const NAME: &str = "admission-policy-plugin/mesh-llm-host-runtime";
+    const NAME: &str = "capsule-emit-mesh/mesh-llm-host-runtime";
     match att {
         Some(a) => a.runtime_value(NAME),
         None => json!({"name": NAME}),
@@ -807,7 +804,7 @@ fn runtime_field(att: &Option<crate::producer::runtime_attest::BinaryAttestation
 fn observer_runtime_field(
     att: &Option<crate::producer::runtime_attest::BinaryAttestation>,
 ) -> Value {
-    const NAME: &str = "observer/admission-policy-plugin";
+    const NAME: &str = "observer/capsule-emit-mesh";
     match att {
         Some(a) => a.runtime_value(NAME),
         None => json!({"name": NAME}),
@@ -1160,7 +1157,7 @@ impl CapsuleState {
         // HONESTY BOUND: on this path the binary that actually SERVED the
         // inference is the mesh-llm HOST's native runtime, which this plugin
         // never runs and cannot hash -- so this attestation is of the OBSERVING/
-        // EMITTING binary (this admission-policy plugin), NOT the serving one.
+        // EMITTING binary (this plugin), NOT the serving one.
         // It is still self_measured/os_measured OF THE EMITTING NODE'S OWN
         // BINARY (never the host's), and is labeled as the observer's binary
         // via the runtime name, so no reader can mistake it for a measurement
@@ -1183,7 +1180,7 @@ impl CapsuleState {
             // Observed, not admitted: this plugin decided nothing here.
             action_type: "fyi".to_string(),
             operator: "capsule-emit-mesh-poc-rust".to_string(),
-            developer: "capsule-producer/0.2.0".to_string(),
+            developer: crate::producer::capsule::LOCAL_RECORD_DEVELOPER.to_string(),
             timestamp: utc_now_minute(),
             domain: Some("action".to_string()),
             provenance: Some("collector".to_string()),

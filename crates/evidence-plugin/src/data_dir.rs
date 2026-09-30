@@ -6,7 +6,7 @@
 //! and a node started from somewhere else would mint a NEW key and a second,
 //! forked chain. So the directory is always absolute:
 //!
-//! 1. `ADMISSION_POLICY_DATA_DIR`, made absolute at startup;
+//! 1. `CAPSULE_EMIT_MESH_DATA_DIR`, made absolute at startup;
 //! 2. else `$XDG_DATA_HOME/capsule-emit-mesh`;
 //! 3. else `$HOME/.local/share/capsule-emit-mesh`.
 //!
@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
 
-pub const ENV_DATA_DIR: &str = "ADMISSION_POLICY_DATA_DIR";
+pub const ENV_DATA_DIR: &str = "CAPSULE_EMIT_MESH_DATA_DIR";
 const APP_DIR: &str = "capsule-emit-mesh";
 /// The default before the directory was absolute, relative to the working
 /// directory.
@@ -86,7 +86,7 @@ fn check_no_second_key(dir: &Path, chosen: bool, cwd: &Path) -> anyhow::Result<(
 pub fn data_dir() -> anyhow::Result<PathBuf> {
     let cwd = std::env::current_dir().context("read the working directory")?;
     let (dir, chosen) = resolve(
-        std::env::var(ENV_DATA_DIR).ok().as_deref(),
+        crate::settings::var(ENV_DATA_DIR).ok().as_deref(),
         std::env::var("XDG_DATA_HOME").ok().as_deref(),
         std::env::var("HOME").ok().as_deref(),
         &cwd,

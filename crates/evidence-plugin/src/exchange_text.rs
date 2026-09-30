@@ -1,6 +1,6 @@
 //! The owner's opt-in to keep the TEXT of each exchange (prompt and answer)
 //! beside its sealed record, so the twin comparison and "Your records" can
-//! show it. Off unless `ADMISSION_POLICY_KEEP_EXCHANGE_TEXT=1`; nothing is
+//! show it. Off unless `CAPSULE_EMIT_MESH_KEEP_EXCHANGE_TEXT=1`; nothing is
 //! written otherwise.
 //!
 //! The text comes from the host, and only when its operator hands exchange
@@ -11,7 +11,7 @@
 //! Each exchange gets one file, `<ledger>/disclosures/by-exchange/<exchange_id>.json`
 //! (both directories 0700, file 0600, written whole by rename), keyed by the
 //! host's `exchange_id`, which this plugin seals in `serving_provenance`.
-//! Files older than `ADMISSION_POLICY_KEEP_EXCHANGE_TEXT_DAYS` (default 30)
+//! Files older than `CAPSULE_EMIT_MESH_KEEP_EXCHANGE_TEXT_DAYS` (default 30)
 //! are removed: at plugin start, every hour after that ([`spawn_retention`]),
 //! and on a write (at most once an hour per directory). The age-out runs
 //! whether or not keeping is still on, so text kept before the owner turned
@@ -37,9 +37,9 @@ use serde_json::{json, Value};
 use crate::lifecycle_channel::{ExchangeBodies, OpenAiExchangeEnvelope, Phase};
 
 /// Set to `1` to keep prompt and answer text. Off by default.
-pub const KEEP_EXCHANGE_TEXT_ENV: &str = "ADMISSION_POLICY_KEEP_EXCHANGE_TEXT";
+pub const KEEP_EXCHANGE_TEXT_ENV: &str = "CAPSULE_EMIT_MESH_KEEP_EXCHANGE_TEXT";
 /// How many days a kept text stays; a positive whole number, else the default.
-pub const KEEP_EXCHANGE_TEXT_DAYS_ENV: &str = "ADMISSION_POLICY_KEEP_EXCHANGE_TEXT_DAYS";
+pub const KEEP_EXCHANGE_TEXT_DAYS_ENV: &str = "CAPSULE_EMIT_MESH_KEEP_EXCHANGE_TEXT_DAYS";
 const DEFAULT_KEEP_DAYS: u64 = 30;
 /// The largest exchange text file this plugin writes.
 pub const MAX_FILE_BYTES: usize = 256 * 1024;
@@ -47,7 +47,7 @@ pub const MAX_FILE_BYTES: usize = 256 * 1024;
 const PRUNE_EVERY: Duration = Duration::from_secs(60 * 60);
 
 pub fn enabled() -> bool {
-    enabled_from(std::env::var(KEEP_EXCHANGE_TEXT_ENV).ok().as_deref())
+    enabled_from(crate::settings::var(KEEP_EXCHANGE_TEXT_ENV).ok().as_deref())
 }
 
 fn enabled_from(value: Option<&str>) -> bool {
@@ -66,7 +66,11 @@ fn retention(days: Option<&str>) -> Duration {
 
 /// How many days a kept text stays, as configured.
 pub fn configured_retention_days() -> u64 {
-    retention_days(std::env::var(KEEP_EXCHANGE_TEXT_DAYS_ENV).ok().as_deref())
+    retention_days(
+        crate::settings::var(KEEP_EXCHANGE_TEXT_DAYS_ENV)
+            .ok()
+            .as_deref(),
+    )
 }
 
 /// One exchange's text, taken off its event, waiting to be written.
@@ -197,7 +201,11 @@ fn prune_if_due(dir: &Path) {
         }
         last.insert(dir.to_path_buf(), now);
     }
-    let max_age = retention(std::env::var(KEEP_EXCHANGE_TEXT_DAYS_ENV).ok().as_deref());
+    let max_age = retention(
+        crate::settings::var(KEEP_EXCHANGE_TEXT_DAYS_ENV)
+            .ok()
+            .as_deref(),
+    );
     if let Err(error) = prune(dir, max_age, SystemTime::now()) {
         tracing::warn!(%error, "could not prune kept exchange text");
     }
@@ -215,7 +223,11 @@ pub fn age_out(ledger_dir: &Path) -> std::io::Result<usize> {
     if !dir.is_dir() {
         return Ok(0);
     }
-    let max_age = retention(std::env::var(KEEP_EXCHANGE_TEXT_DAYS_ENV).ok().as_deref());
+    let max_age = retention(
+        crate::settings::var(KEEP_EXCHANGE_TEXT_DAYS_ENV)
+            .ok()
+            .as_deref(),
+    );
     prune(&dir, max_age, SystemTime::now())
 }
 

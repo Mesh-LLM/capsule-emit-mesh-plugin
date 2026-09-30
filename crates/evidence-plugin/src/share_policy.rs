@@ -7,10 +7,10 @@
 //!
 //! **Declarative only.** mesh-llm 0.76 gives a plugin its own declared
 //! `config_schema` but there is no live host-to-plugin config channel wired
-//! yet -- an operator sets the four `ADMISSION_POLICY_SHARE_*`
-//! / `ADMISSION_POLICY_WITNESS` env vars directly on the node today. This
+//! yet -- an operator sets the four `CAPSULE_EMIT_MESH_SHARE_*`
+//! / `CAPSULE_EMIT_MESH_WITNESS` env vars directly on the node today. This
 //! module's setting keys match those env var suffixes byte for byte
-//! (`share_record_at_completion` -> `ADMISSION_POLICY_SHARE_RECORD_AT_COMPLETION`,
+//! (`share_record_at_completion` -> `CAPSULE_EMIT_MESH_SHARE_RECORD_AT_COMPLETION`,
 //! etc.) so wiring the host's resolved value into this process's env later
 //! is a direct 1:1 map, not a re-naming exercise. Adding this schema does
 //! not by itself flip any runtime behavior -- it only makes the four
@@ -27,14 +27,18 @@ pub const WITNESS_KEY: &str = "witness";
 /// see the module doc's "declarative only" note: no live host->plugin
 /// config channel exists yet, so an operator sets this directly on the
 /// node.
-pub const ENV_RECORD_AT_COMPLETION: &str = "ADMISSION_POLICY_SHARE_RECORD_AT_COMPLETION";
+pub const ENV_RECORD_AT_COMPLETION: &str = "CAPSULE_EMIT_MESH_SHARE_RECORD_AT_COMPLETION";
 
 /// This process's runtime `share_record_at_completion` value: `true` only
 /// when explicitly set to `"off"`; unset or any other value resolves to the
 /// documented default (`"counterparty"`, i.e. NOT off).
 /// Seam A1.
 pub fn record_at_completion_is_off() -> bool {
-    record_at_completion_is_off_for(std::env::var(ENV_RECORD_AT_COMPLETION).ok().as_deref())
+    record_at_completion_is_off_for(
+        crate::settings::var(ENV_RECORD_AT_COMPLETION)
+            .ok()
+            .as_deref(),
+    )
 }
 
 fn record_at_completion_is_off_for(raw: Option<&str>) -> bool {
@@ -42,13 +46,13 @@ fn record_at_completion_is_off_for(raw: Option<&str>) -> bool {
 }
 
 /// This process's own env var for `share_history_segments`.
-pub const ENV_HISTORY_SEGMENTS: &str = "ADMISSION_POLICY_SHARE_HISTORY_SEGMENTS";
+pub const ENV_HISTORY_SEGMENTS: &str = "CAPSULE_EMIT_MESH_SHARE_HISTORY_SEGMENTS";
 
 /// Who may read one of this node's records back: `off`, `counterparties`,
 /// `prospective` or `peers`. Unset or unknown is the documented default,
 /// `prospective`.
 pub fn history_segments() -> &'static str {
-    history_segments_for(std::env::var(ENV_HISTORY_SEGMENTS).ok().as_deref())
+    history_segments_for(crate::settings::var(ENV_HISTORY_SEGMENTS).ok().as_deref())
 }
 
 fn history_segments_for(raw: Option<&str>) -> &'static str {
@@ -141,8 +145,8 @@ mod tests {
 
     #[test]
     fn declares_all_four_switches_under_the_plugin_id() {
-        let schema = as_config_schema(share_policy_config_schema("admission-policy"));
-        assert_eq!(schema.plugin_name, "admission-policy");
+        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
+        assert_eq!(schema.plugin_name, "capsule-emit-mesh");
         let keys: Vec<&str> = schema.settings.iter().map(|s| s.key.as_str()).collect();
         assert_eq!(
             keys,
@@ -167,7 +171,7 @@ mod tests {
     #[test]
     fn setting_keys_match_the_python_env_var_suffix_convention() {
         // Each env var is the setting key with the shared
-        // ADMISSION_POLICY_ prefix -- this module's whole "no
+        // CAPSULE_EMIT_MESH_ prefix -- this module's whole "no
         // re-naming exercise later" claim rests on this correspondence.
         let expected_env_suffix = [
             (RECORD_AT_COMPLETION_KEY, "SHARE_RECORD_AT_COMPLETION"),
@@ -186,7 +190,7 @@ mod tests {
 
     #[test]
     fn record_at_completion_and_adjudications_default_to_the_documented_on_state() {
-        let schema = as_config_schema(share_policy_config_schema("admission-policy"));
+        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
         let by_key = |k: &str| schema.settings.iter().find(|s| s.key == k).unwrap();
         assert_eq!(
             by_key(RECORD_AT_COMPLETION_KEY).default_json.as_deref(),
@@ -206,7 +210,7 @@ mod tests {
     fn witness_has_no_default_url_and_is_not_required() {
         // Design note S1: "witness: off | <url> # default: off" -- off IS
         // the absence of a default, never a magic sentinel string.
-        let schema = as_config_schema(share_policy_config_schema("admission-policy"));
+        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
         let witness = schema
             .settings
             .iter()
@@ -218,7 +222,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_optional_shipping_this_schema_flips_no_runtime_behavior() {
-        let schema = as_config_schema(share_policy_config_schema("admission-policy"));
+        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
         assert!(schema.settings.iter().all(|s| !s.required));
     }
 

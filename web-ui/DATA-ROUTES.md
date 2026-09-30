@@ -20,7 +20,7 @@ plugin keeps on disk arrive wrapped in JSON.
 | `panes/pane-b` | pane B JSON (`PaneBJson`) | the ledger |
 | `panes/pane-c[?limit=&after_seq=]` | pane C list (`PaneCListJson`) | the ledger |
 | `panes/pane-c?exchange_id=<id>` | pane C drilldown (`PaneCDrilldownJson`) | the ledger |
-| `peer-key?peer=<64 hex>` | `{ "announced_key_id": "<hex>" \| null }`: the key the operator announced for that peer (`ADMISSION_POLICY_PEER_KEYS`); "Ask them for their record" judges a reply only under it, never under a key the reply names | the plugin's environment |
+| `peer-key?peer=<64 hex>` | `{ "announced_key_id": "<hex>" \| null }`: the key the operator announced for that peer (`CAPSULE_EMIT_MESH_PEER_KEYS`); "Ask them for their record" judges a reply only under it, never under a key the reply names | the plugin's environment |
 | POST `tools/mesh_ledger_fetch` (a tool, not under `http/`) | the plugin's `mesh_ledger_fetch` tool: `LedgerFetchResponse` (`found` / `not_found` / `not_authorized` / `error`) | a peer's plugin, over a mesh stream |
 | POST `tools/mesh_evidence_request` (a tool) | the plugin's `mesh_evidence_request` tool, `{peer_id, request}`, verifying by default: `{ "answer": <the peer's reply, unchanged: an artifact, or the refusal it signed>, "request_digest": "<64 hex: the bytes the plugin sent>", "verification": { "state": "refusal" \| "artifact" \| "not_evidence" \| "no_announced_key", ... } }` (`evidence_answer::verify_response`, under the peer's announced key; `"verify": false` returns the reply alone). The page's "Ask them for their record" sends a -00 `correlation` request by the exchange's client nonce, trusts only a verified reply, and says on the row whether it was verified | a peer's plugin, over a mesh stream |
 

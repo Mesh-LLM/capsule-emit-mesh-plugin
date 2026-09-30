@@ -141,12 +141,12 @@ pub const RECORD_PUSH_CHANNEL: &str = "record-push/1";
 pub const RECORD_PUSH_CONTENT_TYPE: &str = "application/x-admission-policy-record-push+json";
 
 fn requester_idle_timeout_ms() -> u64 {
-    env_millis("ADMISSION_POLICY_MESH_REQUEST_TIMEOUT_MS", 8_000).as_millis() as u64
+    env_millis("CAPSULE_EMIT_MESH_MESH_REQUEST_TIMEOUT_MS", 8_000).as_millis() as u64
 }
 
 fn env_millis(var: &str, default_ms: u64) -> Duration {
     Duration::from_millis(
-        std::env::var(var)
+        crate::settings::var(var)
             .ok()
             .and_then(|raw| raw.parse().ok())
             .unwrap_or(default_ms),
@@ -352,7 +352,7 @@ async fn receive_pushed_record(
     let capsules = capsules.clone();
     let sender_peer_id = sender_peer_id.to_string();
     let body = body.to_vec();
-    let peer_keys = std::env::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let peer_keys = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
     let record_at_completion_off = crate::share_policy::record_at_completion_is_off();
     tokio::task::spawn_blocking(move || {
         let receiver = crate::record_push_receive::Receiver {

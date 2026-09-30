@@ -3,13 +3,13 @@
   "capsule": {
     "spec_version": "draft-mih-scitt-agent-action-capsule-05",
     "format_version": "4",
-    "capsule_id": "2c9a39e6a593bd15a91aabd2ea79e31f357c2474055dee7032d8cb51ed4ec480",
+    "capsule_id": "9c317700b78ac389beed558783369dd1d2794f47fc09ab9845e16ad6a35b0bca",
     "canonicalization_id": "jcs",
     "action_id": "mesh-poc/capsule-emit-mesh-host-served/unknown-request:m",
     "action_type": "fyi",
     "operator": "capsule-emit-mesh-poc-rust",
-    "developer": "capsule-producer/0.2.0",
-    "timestamp": "2026-09-28T04:27:00.000Z",
+    "developer": "capsule-emit-mesh/0.1.0",
+    "timestamp": "2026-09-30T03:38:00.000Z",
     "domain": "action",
     "provenance": "collector",
     "model_attestation": {
@@ -18,8 +18,8 @@
       "compute_attestation": {
         "agent_input_digest": "unknown-request:m",
         "runtime": {
-          "name": "observer/admission-policy-plugin",
-          "runtime_digest": "2e5fcf14411bc0c913f49b8b75d67a4010aedcc24600d57a7301bad677e66a65",
+          "name": "observer/capsule-emit-mesh",
+          "runtime_digest": "3ecc82eb88fe2e31c84651ae71b25429ed8e973c037502b5fd5ceb3270880219",
           "measurement_class": "os_measured",
           "platform_integrity": {
             "sip_enabled": true,
@@ -89,15 +89,15 @@
             "binary_attestation": {
               "type": "binary_attestation",
               "measurement_class": "os_measured",
-              "digest": "2e5fcf14411bc0c913f49b8b75d67a4010aedcc24600d57a7301bad677e66a65",
+              "digest": "3ecc82eb88fe2e31c84651ae71b25429ed8e973c037502b5fd5ceb3270880219",
               "digest_alg": "sha256",
-              "binary_path": "admission_policy_plugin-6f48632cac574537",
-              "binary_size_bytes": 22226664,
-              "signature": "9b1b59c279bfa3d4ed3cab1f8f855ad18aa7273e0e21f6eba86f1dd0075b3010fd2d4e278a48a05d5b3a989093e356e79c82d6cc81b9e82f6f5c190cc3464906",
+              "binary_path": "capsule_emit_mesh-0a4c29644f1ab224",
+              "binary_size_bytes": 35172496,
+              "signature": "1818571fa2eb9c59ec22d59a10bfaec18ab77c0dcaffdb7789a58327b45f3da455726f5e9d86a51a8deeee923341ce5370e5081856e28964b92b4f88fcfd8800",
               "signature_algorithm": "ed25519",
-              "signer_key_id": "e5c71357e09112e8",
-              "measured_at": "2026-09-28T04:27:00.000Z",
-              "code_directory_hash": "418889a15a824588a7b0ec6e98198315f54591ab",
+              "signer_key_id": "3dfa9afff2e25711",
+              "measured_at": "2026-09-30T03:38:00.000Z",
+              "code_directory_hash": "077984018d067d4296146afb478aeafc97c8f80d",
               "cdhash_source": "csops(CS_OPS_CDHASH)",
               "kernel_valid": true,
               "kernel_signed": true,
@@ -109,7 +109,7 @@
             }
           }
         },
-        "store_nonce": "ffb078f48981e400fa4c686bef214feebaefdb1449f7bc9148d4637951cccaf1",
+        "store_nonce": "af8ec23acbc61e0c8352ecade48c7529e123ce19fa2903b101bc0d9c54cab66d",
         "x-mesh-stage-v1": {
           "v": 1,
           "side": "coordinator",
@@ -195,7 +195,7 @@
               "bundle_ref": {
                 "type": "capsule",
                 "digest_alg": "SHA-256",
-                "digest": "64eedfdeeb33c966e336366d05f2b4c9ea70bed7a6a122c764eeb90d1c1b1b50"
+                "digest": "ee550164e1c49cf5ba0f91ce1b5acc98d7d41a10c343639d88085ca83243b9cd"
               }
             },
             {
@@ -204,7 +204,7 @@
               "bundle_ref": {
                 "type": "capsule",
                 "digest_alg": "SHA-256",
-                "digest": "474b3451b8b344c382e4ed4bb21631655e2993784dc3c219e2e88cba73daad75"
+                "digest": "c695144e2aa6e7ec92d1e5219b9754871e34ef61a2906a1b61d991c4203e52ce"
               }
             }
           ],
@@ -231,25 +231,25 @@
       "verdict_class": "executed"
     },
     "chain": {
-      "parent_capsule_id": "910be0466d01d973a2e4021060112d0d8a4e16c042242725af942d87f02767a0",
+      "parent_capsule_id": "ed941ccd425fc6b18a0500439672cd6014384162c7c76345d8ac496e51d9ce22",
       "relation": "follows"
     },
     "references": [
       {
         "type": "capsule",
         "digest_alg": "SHA-256",
-        "digest": "c4fd26bce716ff73ac4b40cebf76eb80a3b899d05649a1f0144b4d6cc79b3389",
+        "digest": "bdbc634cfe4e1b18788ec2df8327f97b8cf57417dbfdb087aea0b7fb4f349b9d",
         "citation_purpose": "split_stage"
       },
       {
         "type": "capsule",
         "digest_alg": "SHA-256",
-        "digest": "910be0466d01d973a2e4021060112d0d8a4e16c042242725af942d87f02767a0",
+        "digest": "ed941ccd425fc6b18a0500439672cd6014384162c7c76345d8ac496e51d9ce22",
         "citation_purpose": "split_stage"
       }
     ],
-    "signature": "d284584ca301270378236170706c69636174696f6e2f6167656e742d616374696f6e2d63617073756c652d69640458207acda437dad615c9d6a22963063a45c830b88310f65992027e594e9863e95039a058202c9a39e6a593bd15a91aabd2ea79e31f357c2474055dee7032d8cb51ed4ec4805840a796e42103aee95d996b55672a1b8fa2237f03413a1d749cf8fb72124d132e0a025d27b9a6d7dea63c84e201c4d2f6e257574894bc52e22eb64319cd1f9e1f04",
-    "key_id": "7acda437dad615c9d6a22963063a45c830b88310f65992027e594e9863e95039"
+    "signature": "d284584ca301270378236170706c69636174696f6e2f6167656e742d616374696f6e2d63617073756c652d69640458208c1a8b3d249ca4aa8722743c407a57c2a2650d30a90ad08c3af01cbea1401000a058209c317700b78ac389beed558783369dd1d2794f47fc09ab9845e16ad6a35b0bca5840268a34ac49ccc7e9e48a5b77d4a88f0fca625cd2373c7cbb1c17ec5d2c0d5fa14c5fd878b8d02c5b9140a78464e64a7da58500ea3ee0f1a12a2beb8818f7bb0f",
+    "key_id": "8c1a8b3d249ca4aa8722743c407a57c2a2650d30a90ad08c3af01cbea1401000"
   },
   "inclusion": {
     "leaf_index": 2,
@@ -260,7 +260,7 @@
       "leaf_index": 2,
       "witness": [],
       "peaks_left": [
-        "0232a01a65b5355972e4cd6935ebf910b663a8d5ec78c1fee87e128a9c764ccf"
+        "035ae7cece3000debd021379f276cdee209abe446398bd7107edeee2bdba9d92"
       ],
       "peaks_right": []
     }
@@ -270,24 +270,24 @@
     "kind": "mmr_checkpoint",
     "log_id": "rust-node",
     "mmr_size": 4,
-    "root": "93596e0698723f9fdabcbabcc17fc0427da2d77ec1906f9f12b93bd172cfe080",
+    "root": "9348907967e0a44e131a7c9c96386e884dcc1c4cbb3f12b26c73b2a1a84e251c",
     "prev_size": 0,
     "prev_root": "",
-    "key_id": "7acda437dad615c9d6a22963063a45c830b88310f65992027e594e9863e95039",
-    "timestamp": "2026-09-28T04:27:00.000Z",
-    "signature": "1b5801c30215aac3cff2c8f54d1d23e500874015445f30a6e424535618bd254ef1c183fe6ef715b036fbe017c8f02b1331a98b01ee526efc0a7eb9deb2142901"
+    "key_id": "8c1a8b3d249ca4aa8722743c407a57c2a2650d30a90ad08c3af01cbea1401000",
+    "timestamp": "2026-09-30T03:38:00.000Z",
+    "signature": "4e01950b5c56003e7527cfc74aa71dfa4d05909f8ad104504e6f00dd742b76b489daf49d89f328155572d64553b4599512ece3eb93ff1db585f8ea1018f0e70e"
   },
   "split_stage_records": [
     {
-      "capsule_id": "64eedfdeeb33c966e336366d05f2b4c9ea70bed7a6a122c764eeb90d1c1b1b50",
+      "capsule_id": "ee550164e1c49cf5ba0f91ce1b5acc98d7d41a10c343639d88085ca83243b9cd",
       "spec_version": "draft-mih-scitt-agent-action-capsule-05",
       "format_version": "4",
       "canonicalization_id": "jcs",
       "action_id": "mesh-poc/split-stage/stage/node-coordinator-c/mesh-split-1790000000000000000-g2/18446744073709551615/1",
       "action_type": "fyi",
       "operator": "capsule-emit-mesh-poc-rust",
-      "developer": "capsule-producer/0.2.0",
-      "timestamp": "2026-09-28T04:27:00.000Z",
+      "developer": "capsule-emit-mesh/0.1.0",
+      "timestamp": "2026-09-30T03:38:00.000Z",
       "domain": "action",
       "provenance": "collector",
       "model_attestation": {
@@ -339,7 +339,7 @@
             },
             "terminal_state": "completed"
           },
-          "store_nonce": "2c69c72602c198df98650fed87f7e50e0c8b5c00eaff96d0b8f74f1bf4352bd2"
+          "store_nonce": "9256c3c097529b06f7b3bce621f4159b2ac9fcbe30581ebf221091ecf2832104"
         }
       },
       "assurance": {
@@ -353,19 +353,19 @@
         "human_disposed": false,
         "verdict_class": "executed"
       },
-      "signature": "d284584ca301270378236170706c69636174696f6e2f6167656e742d616374696f6e2d63617073756c652d69640458205505d3661b6adc262bb2bd2dffada84c57b97c319b2d1cfa154e061fe2c73f62a0582064eedfdeeb33c966e336366d05f2b4c9ea70bed7a6a122c764eeb90d1c1b1b50584058249bcabec90a63f527fe5fb505a57368e7b0cacf9996614fe7a36ec1fce96a928d2407123e954ea93983b927e29382e74fc73c91c2b63943cb076e0f3f9f0b",
-      "key_id": "5505d3661b6adc262bb2bd2dffada84c57b97c319b2d1cfa154e061fe2c73f62"
+      "signature": "d284584ca301270378236170706c69636174696f6e2f6167656e742d616374696f6e2d63617073756c652d6964045820e74b97f06c437c8056392be8ab7b7da541a89d69d1871d8b4665513ec6f0d231a05820ee550164e1c49cf5ba0f91ce1b5acc98d7d41a10c343639d88085ca83243b9cd5840ea2bfec0f5f02a0563bbe03620fa677d77ce55fe5848ae59252e8329c6b7b7dba57fd2e79d5fe1d38d3155565c34878e1ada561d6fd98b0a5943e486cc250103",
+      "key_id": "e74b97f06c437c8056392be8ab7b7da541a89d69d1871d8b4665513ec6f0d231"
     },
     {
-      "capsule_id": "474b3451b8b344c382e4ed4bb21631655e2993784dc3c219e2e88cba73daad75",
+      "capsule_id": "c695144e2aa6e7ec92d1e5219b9754871e34ef61a2906a1b61d991c4203e52ce",
       "spec_version": "draft-mih-scitt-agent-action-capsule-05",
       "format_version": "4",
       "canonicalization_id": "jcs",
       "action_id": "mesh-poc/split-stage/stage/node-coordinator-c/mesh-split-1790000000000000000-g2/18446744073709551615/2",
       "action_type": "fyi",
       "operator": "capsule-emit-mesh-poc-rust",
-      "developer": "capsule-producer/0.2.0",
-      "timestamp": "2026-09-28T04:27:00.000Z",
+      "developer": "capsule-emit-mesh/0.1.0",
+      "timestamp": "2026-09-30T03:38:00.000Z",
       "domain": "action",
       "provenance": "collector",
       "model_attestation": {
@@ -407,7 +407,7 @@
             },
             "terminal_state": "completed"
           },
-          "store_nonce": "3c7150185fb8c5197e508406e0b1910b180751f440356e5b6413cfbdd728b0bf"
+          "store_nonce": "2b43bce826d8c3f8a172b95e5034f937e77764954da88d8c7c74b244594c065e"
         }
       },
       "assurance": {
@@ -421,8 +421,8 @@
         "human_disposed": false,
         "verdict_class": "executed"
       },
-      "signature": "d284584ca301270378236170706c69636174696f6e2f6167656e742d616374696f6e2d63617073756c652d69640458206413d1df66b66f7be27fcb5c924c77dc79e9ccbd5c8eb9cae8f0709ac7fe4812a05820474b3451b8b344c382e4ed4bb21631655e2993784dc3c219e2e88cba73daad755840b61677785f9c3553c64d8baa302d15e5b1afd82bbe17675867c2e56bd6c644702a7f5ac067d50e6f0d0cac5a13004c16f016a738ed2bb903c427a0531e102e07",
-      "key_id": "6413d1df66b66f7be27fcb5c924c77dc79e9ccbd5c8eb9cae8f0709ac7fe4812"
+      "signature": "d284584ca301270378236170706c69636174696f6e2f6167656e742d616374696f6e2d63617073756c652d696404582057a88de9f9b27223cce110354161c699352c5fe4246a8cac31841df1e7a6dfada05820c695144e2aa6e7ec92d1e5219b9754871e34ef61a2906a1b61d991c4203e52ce584055e0e4df6cc2c663a94fc4e4a03376ba298493c612c266a530aadb6b0c842aa1c671912d10b1713653026e3726d5cda15628e66f6ab33af54353695e0cd8560d",
+      "key_id": "57a88de9f9b27223cce110354161c699352c5fe4246a8cac31841df1e7a6dfad"
     }
   ]
 }

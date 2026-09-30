@@ -55,7 +55,7 @@ traffic is registering as an **inference provider**
   remote backend already serves that exact model name
   (`network::openai::ingress::route_missing_local_model`).
 
-So an admission-policy plugin built on the real protocol enforces policy by
+So a plugin that enforces an admission policy on the real protocol does it by
 being the registered provider for every blocked model name it knows about in
 advance, advertised through its own `/v1/models`. "Abstain" is realized
 structurally — by simply not advertising a model — rather than as a per-call
@@ -79,7 +79,8 @@ evidence-unavailable state — the host granting or withholding body access —
 has no reachable analog on the provider path: the host always hands the
 plugin a complete body. `HttpBodyMode` is the real mechanism for the question
 it was designed to answer; it just answers a different question than the one
-an admission-policy plugin on the inference-provider path needs answered.
+a plugin enforcing an admission policy on the inference-provider path needs
+answered.
 
 ## Suggested #1331 addendum
 
@@ -91,7 +92,7 @@ an admission-policy plugin on the inference-provider path needs answered.
   capability is wanted, treat it as new surface to design, not a
   documentation gap in the existing kit.
 - Document the provider/exact-model-registration pattern as the sanctioned
-  approach for admission-policy-shaped plugins specifically — nothing in the
+  approach for plugins that enforce an admission policy — nothing in the
   current plugin docs frames `inference::provider()` as a policy mechanism,
   only as "serve this model yourself."
 - A working reference implementation is this repository's plugin

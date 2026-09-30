@@ -36,16 +36,16 @@ What they check:
 
 ## Mutant check
 
-The `mutant-allow-blocked` feature breaks the plugin's decision on purpose.
+The `mutant-blocked-model-served` feature breaks the plugin's decision on purpose.
 The same test must then fail, which shows the test exercises the plugin's
 decision through the real host:
 
 ```sh
-cargo test --test host_runtime_e2e --features mutant-allow-blocked \
+cargo test --test host_runtime_e2e --features mutant-blocked-model-served \
   -- --ignored --test-threads=1
 # expected: denies_blocked_model_end_to_end_through_real_host FAILS (200, not 403)
 ```
 
 The malformed-body case is refused by the host's own request parsing, so
-`mutant-allow-malformed` can only be seen through the stand-in host
+`mutant-malformed-body-served` can only be seen through the stand-in host
 (`tests/interop.rs`), not here.

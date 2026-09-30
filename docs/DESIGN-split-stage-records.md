@@ -50,7 +50,7 @@ coordinator ⟷ stage pair becomes an exchange of its own.
 |---|---|---|
 | Coordinator receipt binding stage order to per-stage record digests: three states `present / absent / not_requested`, and two arrays (`topology[]` = "I routed this", `stages[]` = "I hold proof of this") | Built, **Python only**, not on the live path | `mesh_coordinator_receipt_emitter.py`, `mesh_coordinator_bundle_flow.py`, `docs/TRUST-MODEL.md` §4.4 |
 | Per-hop lifecycle record carrying `hop_id` / `exchange_id` / `terminal_state` | Built, Python only | `mesh_record_emitter.py` (`x-mesh-lifecycle-v1`) |
-| Live exchange records: `role` ∈ `requested / served / conflict / unknown`; the other side cited with `citation_purpose: "counterparty_half"` | Live (Rust) | `plugins/capsule-producer/src/capsule.rs` (shape and constant), `plugins/admission-policy/src/capsule_emit.rs` (sealing) |
+| Live exchange records: `role` ∈ `requested / served / conflict / unknown`; the other side cited with `citation_purpose: "counterparty_half"` | Live (Rust) | `crates/evidence-plugin/src/producer/capsule.rs` (shape and constant), `crates/evidence-plugin/src/capsule_emit.rs` (sealing) |
 | Record push to a counterparty (`record-push/1` mesh channel) | Live | `crates/evidence-plugin/src/record_push_bridge.rs` |
 | Bundle form of that push (record + inclusion proof + checkpoint); coordinator bundle ask | **In progress, not on the reviewed refs** | separate branches |
 | **Anything per stage, per request, from the host** | **Missing** | see §2 |
@@ -534,7 +534,7 @@ earlier host ask has an answer. It asks the maintainers:
 
 1. **Twins nesting** (UI only, fixture mode). Parent/child rows by bracket key, role filter
    chips, tooltips and census entries. Splits reuse this.
-2. **Stage-record producer** (`capsule-producer`). `role: "stage"` and `x-mesh-stage-v1`, fed
+2. **Stage-record producer** (`crates/evidence-plugin/src/producer/stage.rs`). `role: "stage"` and `x-mesh-stage-v1`, fed
    from a *fixture* `skippy.stage.v1` event until the host seam exists. Tests:
    - an unknown role reads as `unknown`;
    - hop fields are present exactly per stage position;
@@ -604,7 +604,7 @@ The decisions in §10 are built as recommended.
   that terminal event instead of sealing it. A terminal event that arrives first is sealed as an
   ordinary exchange, and the late stage-0 event is refused and counted. This goes to the host
   issue alongside Q-H1 to Q-H5.
-- **Deadline.** `ADMISSION_POLICY_SPLIT_STAGE_DEADLINE_MS`, 2000 ms by default, counted from
+- **Deadline.** `CAPSULE_EMIT_MESH_SPLIT_STAGE_DEADLINE_MS`, 2000 ms by default, counted from
   stage 0's event and recorded in the receipt. A background tick seals released splits. The push
   to the requester waits for the next handler that has a host context, because pushing needs one.
 - **A received stage record is cited twice.** Its ordinary `counterparty_half` citing record is

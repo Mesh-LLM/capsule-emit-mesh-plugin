@@ -3,7 +3,7 @@
 // evidence request (draft-mih-agent-evidence-request-00) to that node over
 // the mesh. The tool verifies what comes back before handing it over
 // (`evidence_answer::verify_response`, under the key the operator announced
-// for that node in `ADMISSION_POLICY_PEER_KEYS`) and answers
+// for that node in `CAPSULE_EMIT_MESH_PEER_KEYS`) and answers
 // `{answer, request_digest, verification}`: the peer's reply unchanged, the
 // digest of the request bytes it actually sent, and what the reply proved.
 // This client carries that; `ask-for-record.ts` judges it.

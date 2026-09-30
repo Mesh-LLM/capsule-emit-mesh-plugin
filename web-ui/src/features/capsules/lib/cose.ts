@@ -1,5 +1,5 @@
 // Minimal COSE_Sign1 (RFC 9052 SS4.4) decode + verify, scoped to exactly the
-// shape capsule-producer's cose.rs emits: CBOR tag 18, definite-length array
+// shape capsule-emit's `cose` module emits: CBOR tag 18, definite-length array
 // of [protected: bstr, unprotected: map, payload: bstr, signature: bstr],
 // EdDSA over the "Signature1" Sig_structure with an empty external_aad and an
 // ATTACHED payload. Not a general CBOR/COSE library -- just enough to verify

@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn only_the_hosts_local_broadcast_is_accepted() {
         // The host's local broadcast: empty source, target = plugin name.
-        assert!(is_local_host_broadcast("", "admission-policy"));
+        assert!(is_local_host_broadcast("", "capsule-emit-mesh"));
         assert!(is_local_host_broadcast("", "capsule-emit-mesh"));
         // A peer's frame delivered here: target empty or our own peer id.
         let our_peer_id = "ab".repeat(32);
@@ -295,7 +295,7 @@ mod tests {
         // A named sender is never the local broadcast.
         assert!(!is_local_host_broadcast(
             &"cd".repeat(32),
-            "admission-policy"
+            "capsule-emit-mesh"
         ));
     }
     use serde_json::json;

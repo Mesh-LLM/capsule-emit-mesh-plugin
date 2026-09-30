@@ -50,7 +50,7 @@
 //!    Pane A's `verify_ok`) -- `content_binding`/`continuity` recompute the
 //!    capsule's own JCS digest and hash-chain link, `producer_signature`
 //!    verifies its COSE_Sign1 statement. All three are real cryptographic
-//!    re-verification, already written once in Rust in capsule-producer's
+//!    re-verification, already written once in Rust in capsule-emit's
 //!    `jcs`/`cose`/`verify` modules -- porting that in is real, bounded
 //!    follow-on work, deliberately out of this cut so it doesn't ship as a
 //!    silent partial implementation that looks byte-exact and quietly
@@ -933,7 +933,7 @@ fn distinct_exchange_count(
 }
 
 /// the id shared by BOTH halves of an ambient
-/// twin comparison, forwarded verbatim by the capsule-producer plugin off
+/// twin comparison, forwarded verbatim by this plugin off
 /// the terminal envelope's own `twin_bracket_id` -- rides alongside
 /// `exchange_id` under `x-mesh-poc-v1.serving_provenance` (the sibling
 /// convention `exchange_key_for` already reads). `None` on every record
@@ -946,7 +946,7 @@ fn twin_bracket_id(record: &Value) -> Option<&str> {
 }
 
 /// `` piece 3: the join key piece 1
-/// (`admission-policy::lifecycle_channel::peer_capsule_id_for_seal`) already
+/// (`crate::lifecycle_channel::peer_capsule_id_for_seal`) already
 /// threads onto a `RemoteMesh` record -- `serving_provenance.peer_capsule_id`
 /// is only ever non-null when `peer_capsule_id_provenance` is the literal
 /// `"peer_asserted"` (never `self_minted`/`unknown`, the mislabeling guard's
@@ -2595,7 +2595,7 @@ mod tests {
     /// record bodies the ONE gate reads). Run:
     ///   EVIDENCE_LEDGER_DIR=<plugin data>/ledger EVIDENCE_FIXTURE_OUT=<dir> \
     ///   cargo test regenerate_evidence_pane_fixtures -- --ignored
-    /// (from `plugins/admission-policy`).
+    /// (from `crates/evidence-plugin`).
     #[test]
     #[ignore = "dev tool: regenerates fixture JSON from a real ledger dir"]
     fn regenerate_evidence_pane_fixtures() {
@@ -4349,7 +4349,7 @@ mod tests {
         assert_eq!(pane["rows"][0]["twin_bracket_id"], Value::Null);
     }
 
-    /// a record whose `capsule-producer` plugin
+    /// a record whose plugin
     /// forwarded a `twin_bracket_id` off the terminal envelope surfaces that
     /// SAME id on its Pane C row, at the sibling JSON path `exchange_id`
     /// already lives at (`x-mesh-poc-v1.serving_provenance`). MUTANT: drop
