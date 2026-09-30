@@ -16,12 +16,14 @@
 //! mutation happens on a scratch copy; the collected directories are never
 //! changed.
 //!
-//! **Needs host b8.** A stock mesh-llm tells neither node who the other side
-//! was, so neither sends its record to the other and no exchange can be
-//! confirmed. [`needs_host_b8_each_side_holds_only_its_own_record`] asserts
-//! that honest one-sided state. When the pinned mesh-llm starts carrying the
-//! b8 fields it fails and says so: that is the moment to turn it into the
-//! confirmed / CLOSED assertions.
+//! **Needs the host to name the other side.** A stock mesh-llm tells neither
+//! node who the other side was, so neither sends its record to the other and
+//! no exchange can be confirmed.
+//! [`each_side_holds_only_its_own_record_until_the_host_names_the_other_side`]
+//! asserts that honest one-sided state. When the pinned mesh-llm starts naming
+//! the other side (`requested_by_node_id`, `served_by_node_id`) it fails and
+//! says so: that is the moment to turn it into the confirmed / CLOSED
+//! assertions.
 //!
 //! Ignored by default: they need the data directories of a real run.
 
@@ -440,7 +442,8 @@ fn attack_d_a_half_naming_other_weights_is_refused() {
     );
 }
 
-/// Expected-blocked, needs host b8: a confirmed exchange (each side holding
+/// Expected-blocked until the host names the other side: a confirmed exchange
+/// (each side holding
 /// the other's record, the row CLOSED) cannot happen on a host that does not
 /// say who the other side was. This asserts the honest one-sided state:
 ///
@@ -452,13 +455,14 @@ fn attack_d_a_half_naming_other_weights_is_refused() {
 ///   field changed) is not caught at receipt, because the requester's own
 ///   half names no weights to compare with.
 ///
-/// If the pinned host carries b8, this fails: replace it with the confirmed /
+/// If the pinned host names the other side, this fails: replace it with the
+/// confirmed /
 /// CLOSED assertions.
 #[test]
 #[ignore = "needs the data directories of a real two-node run (scripts/e2e-two-node.sh)"]
-fn needs_host_b8_each_side_holds_only_its_own_record() {
+fn each_side_holds_only_its_own_record_until_the_host_names_the_other_side() {
     let run = Run::from_env();
-    let b8 = "the pinned mesh-llm carries host b8: turn this test into the confirmed / CLOSED assertions";
+    let blocked = "the pinned mesh-llm names the other side of an exchange: turn this test into the confirmed / CLOSED assertions";
 
     let named = |events: &[Value], field: &str| {
         events.iter().any(|event| {
@@ -471,7 +475,10 @@ fn needs_host_b8_each_side_holds_only_its_own_record() {
     let provider_events = run.provider.lifecycle_events();
     let requester_events = run.requester.lifecycle_events();
     assert!(!provider_events.is_empty() && !requester_events.is_empty());
-    assert!(!named(&provider_events, "requested_by_node_id"), "{b8}");
+    assert!(
+        !named(&provider_events, "requested_by_node_id"),
+        "{blocked}"
+    );
     assert!(
         !requester_events
             .iter()
@@ -480,13 +487,13 @@ fn needs_host_b8_each_side_holds_only_its_own_record() {
                 .pointer("/serving_provenance/served_by_node_id")
                 .and_then(Value::as_str)
                 .is_some_and(|id| !id.is_empty() && id != "unknown")),
-        "{b8}"
+        "{blocked}"
     );
 
     for (side, node) in [("requester", &run.requester), ("provider", &run.provider)] {
         assert!(
             read_jsonl(&node.ledger_dir().join("received-capsules.jsonl")).is_empty(),
-            "{side} holds a record from the other side: {b8}"
+            "{side} holds a record from the other side: {blocked}"
         );
         let pane = crate::evidence_panes::build_pane_json("pane-b", &node.ledger_dir(), None)
             .expect("the peers pane");
@@ -494,7 +501,7 @@ fn needs_host_b8_each_side_holds_only_its_own_record() {
             assert_eq!(
                 row["confirmed_siblings"],
                 json!([]),
-                "{side}: a peer row confirms an exchange: {b8}"
+                "{side}: a peer row confirms an exchange: {blocked}"
             );
         }
     }
@@ -502,7 +509,7 @@ fn needs_host_b8_each_side_holds_only_its_own_record() {
     for half in run.requester.halves("requested") {
         assert!(
             crate::record_push_receive::weights_claims(&half).is_empty(),
-            "the requester's own half names weights: a consistent liar can now be caught ({b8})"
+            "the requester's own half names weights: a consistent liar can now be caught ({blocked})"
         );
     }
 }

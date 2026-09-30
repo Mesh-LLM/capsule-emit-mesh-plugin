@@ -93,7 +93,7 @@ in `crates/evidence-plugin/src/two_node_e2e.rs` run over what each node wrote:
 
 Confirming an exchange (each side holding the other's record, the row
 CLOSED) needs the exchange event to name the other side, which no mesh-llm
-release does yet. That check runs as "expected-blocked: needs host b8": it
+release does yet. That check runs as "expected-blocked until the host names the other side": it
 asserts the honest one-sided state, and fails once the pinned release names
 the other side, so it can become the confirmed / CLOSED check.
 
