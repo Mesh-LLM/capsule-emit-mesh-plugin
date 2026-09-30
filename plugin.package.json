@@ -1,0 +1,119 @@
+{
+  "config_schema": {
+    "plugin_name": "capsule-emit-mesh",
+    "schema_version": 1,
+    "allow_unvalidated_config": false,
+    "settings": [
+      {
+        "key": "share_record_at_completion",
+        "value_schema": {
+          "kind": "enum",
+          "enum_values": [
+            "counterparty",
+            "off"
+          ],
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "default_json": "\"counterparty\"",
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "Push this node's own sealed record of a completed exchange to the counterparty (counterparty), or don't (off). With checkpointing on, the push also carries a signed checkpoint of this node's log and the record's inclusion proof -- the checkpoint reveals the log's total size (records across all peers) and its time, never any other record's content. Symmetric: a node with this off also does not receive the other side's push -- fetch-on-request still works either way.",
+        "presentation": {
+          "label": "Record at completion",
+          "category_id": "share",
+          "category_label": "Sharing policy",
+          "category_summary": "What this node shares, with whom, by default. Every default keys on relationship (counterparty in the window), never proximity or latency.",
+          "category_order": 0
+        }
+      },
+      {
+        "key": "share_history_segments",
+        "value_schema": {
+          "kind": "enum",
+          "enum_values": [
+            "counterparties",
+            "prospective",
+            "peers",
+            "off"
+          ],
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "default_json": "\"prospective\"",
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "Who this node answers a chain-segment/record/correlation request from: past counterparties only, counterparties plus prospective ones (default), any peer, or nobody. A refusal is structural (not_authorized), never a score.",
+        "presentation": {
+          "label": "History segments",
+          "category_id": "share",
+          "category_label": "Sharing policy",
+          "category_summary": "What this node shares, with whom, by default. Every default keys on relationship (counterparty in the window), never proximity or latency.",
+          "category_order": 1
+        }
+      },
+      {
+        "key": "share_adjudications",
+        "value_schema": {
+          "kind": "enum",
+          "enum_values": [
+            "deliver_to_subjects",
+            "off"
+          ],
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "default_json": "\"deliver_to_subjects\"",
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "Deliver a sealed verdict to every node it judges (default), or don't. The subject acks or disputes on its own chain -- this is delivery, never a computed standing.",
+        "presentation": {
+          "label": "Adjudications",
+          "category_id": "share",
+          "category_label": "Sharing policy",
+          "category_summary": "What this node shares, with whom, by default. Every default keys on relationship (counterparty in the window), never proximity or latency.",
+          "category_order": 2
+        }
+      },
+      {
+        "key": "witness",
+        "value_schema": {
+          "kind": "url",
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "Witness service URL to checkpoint against. Empty is off (the default) -- no default witness URL, no network call without an operator-supplied one.",
+        "presentation": {
+          "label": "Witness",
+          "category_id": "share",
+          "category_label": "Sharing policy",
+          "category_summary": "What this node shares, with whom, by default. Every default keys on relationship (counterparty in the window), never proximity or latency.",
+          "category_order": 3
+        }
+      }
+    ]
+  },
+  "web_ui": {
+    "pages": [
+      {
+        "id": "evidence",
+        "label": "Evidence",
+        "route": "evidence",
+        "bundle_id": "main",
+        "entry_script": "register-mesh-plugin-ui.js"
+      }
+    ],
+    "bundles": [
+      {
+        "id": "main",
+        "root_path": "bundle"
+      }
+    ]
+  }
+}

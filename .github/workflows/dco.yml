@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+# DCO sign-off: every non-merge commit in a pull request carries a
+# Signed-off-by line (see CONTRIBUTING.md).
+#
+# Branch protection: require the "dco / dco" check (Settings → Branches →
+# Require status checks → search "dco").
+name: dco
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check all commits carry a DCO Signed-off-by line
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          missing=()
+          while IFS= read -r sha; do
+            msg=$(git log --format=%B -n 1 "$sha")
+            if ! echo "$msg" | grep -qiE "^Signed-off-by: .+ <.+@.+>"; then
+              missing+=("$(git log --format='%h %s' -n 1 "$sha")")
+            fi
+          done < <(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "ERROR: Missing DCO Signed-off-by on the following commits:"
+            printf '  %s\n' "${missing[@]}"
+            echo
+            echo "Fix: git commit --amend -s  (for last commit)"
+            echo "     git rebase --signoff HEAD~N  (for N commits)"
+            exit 1
+          fi
+          echo "All commits signed off. ✓"

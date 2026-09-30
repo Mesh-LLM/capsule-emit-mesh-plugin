@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: Apache-2.0
+# Neutrality check: this repository carries none of a small reserved
+# vocabulary. The list is not in the repository (a public check that listed it
+# would publish it); it comes from the NEUTRALITY_TERMS repository secret, and
+# scripts/neutrality-scan.mjs is matching logic only. It fails closed: with the
+# secret unset, every run fails.
+#
+# WHY pull_request_target, AND WHY IT IS SAFE HERE — read before editing.
+# Secrets are withheld from `pull_request` runs from forks, which would fail
+# every fork PR for a reason unrelated to its content. `pull_request_target`
+# runs in the base repository's context and does receive the secret. That is
+# dangerous only when a workflow executes the pull request's code. This one
+# never does:
+#   1. The workflow file and the scanner always come from the BASE branch; a
+#      pull request cannot change them for its own run.
+#   2. The pull request's files are checked out into ./pr as inert data and are
+#      only read as text by the trusted scanner.
+#   3. Nothing from ./pr is run, built, installed or sourced.
+#   4. Both checkouts use persist-credentials: false.
+#   5. permissions: contents: read.
+# IF YOU ADD A STEP THAT RUNS, BUILDS OR INSTALLS ANYTHING FROM ./pr, YOU HAVE
+# HANDED THE SECRET TO ANYONE WHO OPENS A PULL REQUEST. Put such a step in a
+# `pull_request` workflow instead.
+#
+# Unless the run is trusted (not a fork pull request), a failing scan prints one
+# constant verdict: no term, file, line or count. Printing the term would let a
+# stranger read the list back one term at a time from the public log, and
+# file:line would do the same through line numbers (one candidate per line).
+# A maintainer sees the details by re-running on a trusted event.
+name: neutrality
+
+on:
+  pull_request_target:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  neutrality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout base (trusted; provides the scanner)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Checkout the pull request head into ./pr (inert data, never executed)
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+          # checkout refuses a fork's code under pull_request_target unless
+          # told otherwise. The refusal protects workflows that go on to run
+          # that code; this one never does (rules 1-5 above). Remove this line
+          # in the same commit as anything that breaks those rules.
+          allow-unsafe-pr-checkout: true
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Scanner self-test
+        run: node scripts/neutrality-scan.mjs --self-test
+
+      - name: Reserved-vocabulary scan
+        env:
+          NEUTRALITY_TERMS: ${{ secrets.NEUTRALITY_TERMS }}
+          SCAN_ROOT: ${{ github.event_name == 'pull_request_target' && 'pr' || '.' }}
+          NEUTRALITY_REVEAL: ${{ github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: node scripts/neutrality-scan.mjs "$SCAN_ROOT"

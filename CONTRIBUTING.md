@@ -31,6 +31,7 @@ pnpm typecheck && pnpm test && pnpm build   # writes ../bundle/register-mesh-plu
 
 # Repository checks
 scripts/no-keys.sh
+node --test scripts/*.test.mjs
 (cd vectors && shasum -a 256 -c SHA256SUMS)
 ```
 
@@ -52,14 +53,18 @@ On Linux x86_64, Linux arm64 and macOS arm64 (`.github/workflows/ci.yml`):
 
 Once, on Linux:
 
-- `scripts/no-keys.sh`: no private key or token material in any tracked file.
+- `scripts/no-keys.sh`: no private key or token material in any tracked file,
+  and no file that never belongs here (Python, demo or red-team material, key
+  or token files, node ledgers or data directories, a NOTICE file).
 - The vector checksums in `vectors/SHA256SUMS`.
 - The release packaging, run twice on one build; the two archives must be
   byte-identical.
 - The neutrality check (`.github/workflows/neutrality.yml`): the repository
   carries none of a reserved vocabulary, supplied as a repository secret. On a
-  pull request from a fork, the log names the file and line of a hit but not
-  the term; a maintainer can re-run it on `main` to see the term. It runs on
+  pull request from a fork, a failing run says only that it failed, with no
+  term, file or line; a maintainer re-runs it on a trusted event to see the
+  details. The scanner's own tests (`node --test scripts/*.test.mjs`) run on every pull
+  request in `ci.yml`. The neutrality check runs on
   `pull_request_target` so that fork pull requests get the secret; that is
   safe only because the workflow never runs, builds or installs anything
   from the pull request (it reads the files as text with the base branch's
