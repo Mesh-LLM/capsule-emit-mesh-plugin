@@ -2259,6 +2259,7 @@ fn build_pane_c_list_with_settlements(
         "archived_segments": [],
         "settlement_unjoined": settlements.unjoined(joined_exchange_ids.iter().map(String::as_str)),
         "settlement_missing_exchange_id": settlements.missing_exchange_id(),
+        "settlement_provider_records": settlements.provider_records(),
     })
 }
 

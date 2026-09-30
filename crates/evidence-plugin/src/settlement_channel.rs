@@ -12,6 +12,15 @@
 //! lifecycle observed" (a free exchange, payments off, or a failure before
 //! authorization), never "unpaid".
 //!
+//! Hosts since `role` and `tokens` were added to the event emit it on both
+//! sides of a paid exchange, and this plugin seals both: each record names the
+//! side that observed it (`observed_by`: `payer` or `provider`), so a
+//! provider's records are never read as the payer's. An event with no `role`
+//! comes from a host that emitted the payer side only, and is read as the
+//! payer's. The provider side adds its own `terms_accepted`
+//! (`provider_asserted`) and a `delivered` phase carrying the delivered-token
+//! watermark (`tokens`).
+//!
 //! [`parse_and_check`] refuses an event whose own `event_ref` does not
 //! recompute, and any phase/source/segment/hash combination the host's
 //! emitter cannot produce. The combination rules mirror the emitter exactly
@@ -38,6 +47,9 @@ pub enum Phase {
     InputSettlementObserved,
     OutputSettlementObserved,
     FinalAccounted,
+    /// Provider side: the delivered-token watermark written when serving
+    /// closed.
+    Delivered,
 }
 
 impl Phase {
@@ -49,6 +61,7 @@ impl Phase {
             Phase::InputSettlementObserved => "input_settlement_observed",
             Phase::OutputSettlementObserved => "output_settlement_observed",
             Phase::FinalAccounted => "final_accounted",
+            Phase::Delivered => "delivered",
         }
     }
 }
@@ -88,6 +101,24 @@ impl Settlement {
     }
 }
 
+/// Which side of a paid exchange emitted an event (`role`). Absent on hosts
+/// that emitted the payer side only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    Payer,
+    Provider,
+}
+
+impl Role {
+    pub fn wire(self) -> &'static str {
+        match self {
+            Role::Payer => "payer",
+            Role::Provider => "provider",
+        }
+    }
+}
+
 /// One `payment.lifecycle.v1` event. Unknown extra fields are tolerated (a
 /// newer host may add some); every listed field is required, including the
 /// nullable ones -- `deserialize_with = "Option::deserialize"` turns off
@@ -107,6 +138,14 @@ pub struct PaymentLifecycleEvent {
     #[serde(deserialize_with = "Option::deserialize")]
     pub payment_hash: Option<String>,
     pub amount_msat: u64,
+    /// `payer` or `provider`; absent from a host that emitted the payer side
+    /// only.
+    #[serde(default)]
+    pub role: Option<Role>,
+    /// The provider's delivered-token watermark, on a `delivered` event;
+    /// `null` or absent on every other.
+    #[serde(default)]
+    pub tokens: Option<u64>,
 }
 
 impl PaymentLifecycleEvent {
@@ -123,6 +162,8 @@ impl PaymentLifecycleEvent {
             segment: self.segment,
             payment_hash: self.payment_hash.as_deref(),
             amount_msat: self.amount_msat,
+            observed_by: self.role.unwrap_or(Role::Payer).wire(),
+            tokens: self.tokens,
         }
     }
 }
@@ -143,6 +184,23 @@ pub enum SettlementEventError {
     EventRefMismatch { claimed: String, recomputed: String },
 }
 
+/// Recompute `event_ref` over the received object (extra fields included, as
+/// the host digested them) with `event_ref` set to `""`.
+fn check_event_ref(
+    mut object: serde_json::Map<String, Value>,
+    claimed: &str,
+) -> Result<(), SettlementEventError> {
+    object.insert("event_ref".into(), Value::String(String::new()));
+    let recomputed = jcs::json_digest(&Value::Object(object))?;
+    if recomputed != claimed {
+        return Err(SettlementEventError::EventRefMismatch {
+            claimed: claimed.to_string(),
+            recomputed,
+        });
+    }
+    Ok(())
+}
+
 /// Parse one channel body and check it before anything is sealed:
 /// 1. JSON object, typed into [`PaymentLifecycleEvent`] (unknown phase/source
 ///    refused, missing field refused, extra fields tolerated);
@@ -157,7 +215,7 @@ pub enum SettlementEventError {
 /// Duplicate JSON keys are not detected: `serde_json` keeps the last one.
 pub fn parse_and_check(bytes: &[u8]) -> Result<PaymentLifecycleEvent, SettlementEventError> {
     let value: Value = serde_json::from_slice(bytes)?;
-    let Value::Object(mut object) = value else {
+    let Value::Object(object) = value else {
         return Err(SettlementEventError::NotJson(
             "channel body is not a JSON object".into(),
         ));
@@ -167,45 +225,58 @@ pub fn parse_and_check(bytes: &[u8]) -> Result<PaymentLifecycleEvent, Settlement
         return Err(SettlementEventError::EmptyExchangeId);
     }
     check_combination(&event)?;
-    object.insert("event_ref".into(), Value::String(String::new()));
-    let recomputed = jcs::json_digest(&Value::Object(object))?;
-    if recomputed != event.event_ref {
-        return Err(SettlementEventError::EventRefMismatch {
-            claimed: event.event_ref,
-            recomputed,
-        });
-    }
+    check_event_ref(object, &event.event_ref)?;
     Ok(event)
 }
 
-/// The combinations the host's emitter (`paid_events.rs`) produces, and no
-/// stricter:
+/// The combinations the host's emitter produces (`paid_events.rs`, and its
+/// lifecycle observer on both sides), and no stricter:
 /// - `settlement` is `"terminal"` exactly when `source` is `wallet_reported`;
-/// - `terms_accepted` / `final_accounted`: `payer_asserted`, no segment, no
+/// - `terms_accepted`: asserted by the side that accepted them
+///   (`payer_asserted` from the payer, `provider_asserted` from the provider),
+///   no segment, no payment hash;
+/// - `final_accounted`: payer side only, `payer_asserted`, no segment, no
 ///   payment hash;
-/// - `*_invoice_issued`: `provider_asserted` with a segment and a payment hash;
+/// - `delivered`: provider side only, `provider_asserted`, no segment, no
+///   payment hash, and a `tokens` watermark;
+/// - `*_invoice_issued`: `provider_asserted` with a segment and a payment hash,
+///   on either side (the provider issues every invoice);
 /// - `*_settlement_observed`: `wallet_reported` with a segment; the payment
 ///   hash may be `null`;
-/// - `input_*` phases are segment 0, `output_*` phases a non-zero segment.
+/// - `input_*` phases are segment 0, `output_*` phases a non-zero segment;
+/// - `tokens` appears on `delivered` only.
+///
+/// An event with no `role` is the payer's.
 fn check_combination(event: &PaymentLifecycleEvent) -> Result<(), SettlementEventError> {
     use Phase::*;
     let impossible = |why| Err(SettlementEventError::Impossible(why));
+    let role = event.role.unwrap_or(Role::Payer);
     if (event.source == Source::WalletReported) != (event.settlement == Some(Settlement::Terminal))
     {
         return impossible("settlement is \"terminal\" exactly when source is wallet_reported");
     }
-    let expected_source = match event.phase {
-        TermsAccepted | FinalAccounted => Source::PayerAsserted,
-        InputInvoiceIssued | OutputInvoiceIssued => Source::ProviderAsserted,
-        InputSettlementObserved | OutputSettlementObserved => Source::WalletReported,
+    let expected_source = match (event.phase, role) {
+        (TermsAccepted, Role::Payer) | (FinalAccounted, Role::Payer) => Source::PayerAsserted,
+        (TermsAccepted, Role::Provider) | (Delivered, Role::Provider) => Source::ProviderAsserted,
+        (FinalAccounted, Role::Provider) => {
+            return impossible("final_accounted is the payer side's");
+        }
+        (Delivered, Role::Payer) => return impossible("delivered is the provider side's"),
+        (InputInvoiceIssued | OutputInvoiceIssued, _) => Source::ProviderAsserted,
+        (InputSettlementObserved | OutputSettlementObserved, _) => Source::WalletReported,
     };
     if event.source != expected_source {
         return impossible("source does not match phase");
     }
+    if (event.phase == Delivered) != event.tokens.is_some() {
+        return impossible("tokens is carried by a delivered event, and only by one");
+    }
     match event.phase {
-        TermsAccepted | FinalAccounted => {
+        TermsAccepted | FinalAccounted | Delivered => {
             if event.segment.is_some() || event.payment_hash.is_some() {
-                return impossible("payer-asserted phase carries no segment or payment_hash");
+                return impossible(
+                    "a terms, final or delivered event carries no segment or payment_hash",
+                );
             }
         }
         InputInvoiceIssued
@@ -281,6 +352,7 @@ pub(crate) fn host_shaped_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn only_the_hosts_local_broadcast_is_accepted() {
@@ -529,5 +601,356 @@ mod tests {
             parse_and_check(&bytes(&body)),
             Err(SettlementEventError::Digest(_))
         ));
+    }
+
+    // ---- the event shape with `role` and `tokens` -------------------------
+    // Hosts that emit both sides of a paid exchange add `role` and `tokens`,
+    // and digest them into `event_ref` like every other member. The two bodies
+    // below are in the host's member order, with `event_ref` computed by the
+    // Agent Action Capsule reference implementation's JSON-DIGEST
+    // (`agent_action_capsule.canonical.json_digest`), not by this crate.
+
+    const MERGED_PAYER_TERMS: &[u8] = br#"{"exchange_id":"host-exchange-7","event_ref":"acbe0fedd8dab68c42610adecd964c31b780f85f752ceda75c168fb9740ac089","terms_digest":"7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d","role":"payer","phase":"terms_accepted","source":"payer_asserted","settlement":null,"segment":null,"payment_hash":null,"amount_msat":100,"tokens":null}"#;
+
+    const MERGED_PROVIDER_DELIVERED: &[u8] = br#"{"exchange_id":"3f0c9a2e-6b1d-4c8e-9a57-1d2e3f4a5b6c","event_ref":"272c8c1799e8649427106f7b12a2c3ae571f8b4253017b32a20bb0621ddbd78b","terms_digest":"8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e","role":"provider","phase":"delivered","source":"provider_asserted","settlement":null,"segment":null,"payment_hash":null,"amount_msat":0,"tokens":42}"#;
+
+    /// `event` with the members a both-sides host adds, re-digested.
+    fn with_role(mut event: Value, role: &str, tokens: Option<u64>) -> Value {
+        event["role"] = json!(role);
+        event["tokens"] = json!(tokens);
+        redigest(event)
+    }
+
+    #[test]
+    fn a_payer_event_with_role_and_tokens_matches_an_independent_digest() {
+        let event = parse_and_check(MERGED_PAYER_TERMS).unwrap();
+        assert_eq!(event.role, Some(Role::Payer));
+        assert_eq!(event.tokens, None);
+        assert_eq!(event.phase, Phase::TermsAccepted);
+        assert_eq!(event.exchange_id, "host-exchange-7");
+    }
+
+    #[test]
+    fn every_payer_phase_is_accepted_with_role_and_tokens() {
+        let hash = "aa".repeat(32);
+        for (phase, segment, payment_hash) in [
+            (Phase::TermsAccepted, None, None),
+            (Phase::InputInvoiceIssued, Some(0), Some(hash.as_str())),
+            (Phase::InputSettlementObserved, Some(0), Some(hash.as_str())),
+            (Phase::OutputInvoiceIssued, Some(1), Some(hash.as_str())),
+            (
+                Phase::OutputSettlementObserved,
+                Some(1),
+                Some(hash.as_str()),
+            ),
+            (Phase::FinalAccounted, None, None),
+        ] {
+            let body = with_role(
+                host_shaped_event("ex-9", phase, segment, payment_hash, 500),
+                "payer",
+                None,
+            );
+            let event = parse_and_check(&bytes(&body)).unwrap_or_else(|e| panic!("{phase:?}: {e}"));
+            assert_eq!(event.role, Some(Role::Payer));
+        }
+    }
+
+    #[test]
+    fn an_event_without_role_is_still_read_as_the_payers() {
+        let event = parse_and_check(&bytes(&settled_input())).unwrap();
+        assert_eq!(event.role, None);
+        assert_eq!(event.tokens, None);
+    }
+
+    /// A provider-side event of the merged shape, built the way the host's
+    /// lifecycle observer emits it, and re-digested.
+    fn provider(
+        phase: &str,
+        source: &str,
+        segment: Option<u32>,
+        hash: Option<&str>,
+        tokens: Option<u64>,
+    ) -> Value {
+        redigest(json!({
+            "exchange_id": "3f0c9a2e-6b1d-4c8e-9a57-1d2e3f4a5b6c",
+            "event_ref": "",
+            "terms_digest": "8e".repeat(32),
+            "role": "provider",
+            "phase": phase,
+            "source": source,
+            "settlement": (source == "wallet_reported").then_some("terminal"),
+            "segment": segment,
+            "payment_hash": hash,
+            "amount_msat": 0,
+            "tokens": tokens,
+        }))
+    }
+
+    #[test]
+    fn a_provider_delivered_event_matches_an_independent_digest() {
+        let event = parse_and_check(MERGED_PROVIDER_DELIVERED).unwrap();
+        assert_eq!(event.role, Some(Role::Provider));
+        assert_eq!(event.phase, Phase::Delivered);
+        assert_eq!(event.tokens, Some(42));
+        let observation = event.observation();
+        assert_eq!(observation.observed_by, "provider");
+        assert_eq!(observation.phase, "delivered");
+        assert_eq!(observation.tokens, Some(42));
+    }
+
+    #[test]
+    fn every_phase_the_provider_side_emits_is_accepted() {
+        let hash = "bb".repeat(32);
+        for body in [
+            provider("terms_accepted", "provider_asserted", None, None, None),
+            provider(
+                "input_invoice_issued",
+                "provider_asserted",
+                Some(0),
+                Some(&hash),
+                None,
+            ),
+            provider(
+                "input_settlement_observed",
+                "wallet_reported",
+                Some(0),
+                Some(&hash),
+                None,
+            ),
+            provider(
+                "output_invoice_issued",
+                "provider_asserted",
+                Some(1),
+                Some(&hash),
+                None,
+            ),
+            provider(
+                "output_settlement_observed",
+                "wallet_reported",
+                Some(1),
+                Some(&hash),
+                None,
+            ),
+            provider("delivered", "provider_asserted", None, None, Some(7)),
+        ] {
+            let event =
+                parse_and_check(&bytes(&body)).unwrap_or_else(|e| panic!("{}: {e}", body["phase"]));
+            assert_eq!(event.role, Some(Role::Provider));
+            assert_eq!(event.observation().observed_by, "provider");
+        }
+    }
+
+    #[test]
+    fn the_role_rules_refuse_what_neither_side_emits() {
+        let refused = |body: Value, why: &str| {
+            assert!(
+                matches!(
+                    parse_and_check(&bytes(&body)),
+                    Err(SettlementEventError::Impossible(_))
+                ),
+                "{why}"
+            );
+        };
+        refused(
+            provider("terms_accepted", "payer_asserted", None, None, None),
+            "the provider asserts its own acceptance",
+        );
+        refused(
+            provider("final_accounted", "payer_asserted", None, None, None),
+            "final_accounted is the payer side's",
+        );
+        refused(
+            provider("delivered", "provider_asserted", None, None, None),
+            "delivered carries a tokens watermark",
+        );
+        refused(
+            provider("delivered", "provider_asserted", Some(1), None, Some(7)),
+            "delivered carries no segment",
+        );
+        refused(
+            with_role(
+                host_shaped_event("ex-9", Phase::TermsAccepted, None, None, 500),
+                "payer",
+                Some(3),
+            ),
+            "tokens only on delivered",
+        );
+        let mut payer_delivered = with_role(
+            host_shaped_event("ex-9", Phase::TermsAccepted, None, None, 0),
+            "payer",
+            Some(3),
+        );
+        payer_delivered["phase"] = json!("delivered");
+        payer_delivered["source"] = json!("provider_asserted");
+        refused(
+            redigest(payer_delivered),
+            "delivered is the provider side's",
+        );
+    }
+
+    #[test]
+    fn a_provider_event_whose_event_ref_does_not_recompute_is_refused() {
+        let mut body: Value = serde_json::from_slice(MERGED_PROVIDER_DELIVERED).unwrap();
+        body["tokens"] = json!(43);
+        assert!(matches!(
+            parse_and_check(&bytes(&body)),
+            Err(SettlementEventError::EventRefMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn an_unknown_role_is_refused() {
+        let body = with_role(settled_input(), "broker", None);
+        assert!(matches!(
+            parse_and_check(&bytes(&body)),
+            Err(SettlementEventError::Shape(_))
+        ));
+    }
+
+    // ---- one subscriber to both channels ----------------------------------
+    // How a lifecycle event lines up with the `openai.exchange.v1` events for
+    // the same paid exchange, with both parsed by this plugin's own parsers.
+
+    fn exchange_envelope(exchange_id: &str, dispatch_path: &str, request_digest: &str) -> Value {
+        json!({
+            "exchange_id": exchange_id,
+            "dispatch_path": dispatch_path,
+            "phase": "terminal",
+            "model": "model-x",
+            "status": 200,
+            "request_digest": request_digest,
+        })
+    }
+
+    fn parse_envelope(v: &Value) -> crate::lifecycle_channel::OpenAiExchangeEnvelope {
+        serde_json::from_slice(&bytes(v)).unwrap()
+    }
+
+    /// The payer's host names its lifecycle events with its own OpenAI
+    /// exchange id, so they join the payer's exchange events exactly: the
+    /// settlement book keys on the same `exchange_id` the exchange rows carry.
+    #[test]
+    fn a_subscriber_joins_the_payers_two_channels_on_exchange_id() {
+        let exchange_id = "payer-exchange-1";
+        let envelope = parse_envelope(&exchange_envelope(
+            exchange_id,
+            "remote_mesh",
+            &"1a".repeat(32),
+        ));
+        let hash = "cc".repeat(32);
+        for body in [
+            with_role(
+                host_shaped_event(exchange_id, Phase::TermsAccepted, None, None, 500),
+                "payer",
+                None,
+            ),
+            with_role(
+                host_shaped_event(
+                    exchange_id,
+                    Phase::InputInvoiceIssued,
+                    Some(0),
+                    Some(&hash),
+                    200,
+                ),
+                "payer",
+                None,
+            ),
+        ] {
+            let event = parse_and_check(&bytes(&body)).unwrap();
+            assert_eq!(
+                Some(event.exchange_id.as_str()),
+                envelope.exchange_id.as_deref()
+            );
+        }
+    }
+
+    /// On the provider, the lifecycle events and the paid path's exchange
+    /// events each carry an id their host minted separately, and no other
+    /// member in common: the lifecycle events carry no request digest or
+    /// model, the exchange events no payment hash or terms digest. Nothing a
+    /// subscriber receives joins them; only timing and token counts come
+    /// close, and those are ambiguous when the same model serves two paid
+    /// requests at once. This is the host's current state, not a goal: once
+    /// the host mints one id per paid serving request and hands it to both
+    /// observers (proposed upstream), this test is replaced by one that joins
+    /// them, as the payer's already do.
+    #[test]
+    fn a_subscriber_cannot_join_the_providers_two_channels() {
+        let lifecycle: Value = serde_json::from_slice(MERGED_PROVIDER_DELIVERED).unwrap();
+        let exchange = exchange_envelope(
+            "5a1f2e3d-0000-4000-8000-00000000abcd",
+            "raw_proxy",
+            &"1a".repeat(32),
+        );
+        let envelope = parse_envelope(&exchange);
+        assert_ne!(
+            lifecycle["exchange_id"].as_str(),
+            envelope.exchange_id.as_deref()
+        );
+        let lifecycle_keys: BTreeSet<&str> = lifecycle
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let exchange_keys: BTreeSet<&str> = exchange
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let join_keys = ["request_digest", "model", "payment_hash", "terms_digest"];
+        for key in join_keys {
+            assert!(
+                !(lifecycle_keys.contains(key) && exchange_keys.contains(key)),
+                "{key} would be a join key"
+            );
+        }
+    }
+
+    /// Across the two nodes, the invoice is the one thing both sides see: the
+    /// provider issues it and the payer receives it, so an invoice event
+    /// carries the same `payment_hash` on each side, segment by segment.
+    #[test]
+    fn the_payer_and_provider_share_each_invoices_payment_hash() {
+        let hash = "dd".repeat(32);
+        let payer = with_role(
+            host_shaped_event(
+                "payer-exchange-1",
+                Phase::OutputInvoiceIssued,
+                Some(1),
+                Some(&hash),
+                300,
+            ),
+            "payer",
+            None,
+        );
+        let provider = with_role(
+            host_shaped_event(
+                "3f0c9a2e-6b1d-4c8e-9a57-1d2e3f4a5b6c",
+                Phase::OutputInvoiceIssued,
+                Some(1),
+                Some(&hash),
+                300,
+            ),
+            "provider",
+            None,
+        );
+        let payer_event = parse_and_check(&bytes(&payer)).unwrap();
+        let provider_event = parse_and_check(&bytes(&provider)).unwrap();
+        assert_eq!(provider_event.observation().observed_by, "provider");
+        assert_eq!(payer_event.observation().observed_by, "payer");
+        assert_eq!(
+            payer_event.payment_hash.as_deref(),
+            provider["payment_hash"].as_str()
+        );
+        assert_eq!(
+            payer_event.segment,
+            provider["segment"].as_u64().map(|s| s as u32)
+        );
+        assert_ne!(
+            payer_event.exchange_id,
+            provider["exchange_id"].as_str().unwrap()
+        );
     }
 }

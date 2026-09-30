@@ -6,7 +6,8 @@ import {
   settlementCloseLine,
   settlementEntryViews,
   settlementRowView,
-  unjoinedSettlementText
+  unjoinedSettlementText,
+  providerSettlementText
 } from '@/features/capsules/lib/settlement-view'
 
 function book(state: string): PayerBook {
@@ -193,6 +194,15 @@ describe('Close card counts', () => {
     expect(settlementCloseLine(counts, 'off')).toBe(
       '1 paid · 1 settled by your wallet · provider’s book: not available'
     )
+  })
+})
+
+describe('providerSettlementText', () => {
+  it('counts the records kept as the provider, and says nothing when there are none', () => {
+    expect(providerSettlementText(1)).toBe('1 payment record kept as the provider.')
+    expect(providerSettlementText(3)).toBe('3 payment records kept as the provider.')
+    expect(providerSettlementText(0)).toBeNull()
+    expect(providerSettlementText(undefined)).toBeNull()
   })
 })
 
