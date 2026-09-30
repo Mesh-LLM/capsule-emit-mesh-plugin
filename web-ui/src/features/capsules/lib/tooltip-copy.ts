@@ -256,7 +256,7 @@ export const ENTRY_CHIP_COVERED_TOOLTIP =
 
 /** The TWIN bracket's `not adjudicated` badge. */
 export const TWIN_NO_VERDICT_TOOLTIP =
-  'The same request went to two machines and both answers are recorded. This node has no referee yet, so no one compares them and seals a verdict.'
+  'The same request went to two machines and both answers are recorded. A referee is asked only when they differ at temperature 0 on the same model and weights, and until one signs a verdict nothing counts against either machine.'
 
 /** The one wording for "no witness holds your checkpoints": the hero, the
  *  Your records panel and the Integrity tile all say this. */
@@ -347,7 +347,7 @@ export const YOUR_DEALINGS_TITLE = 'Your dealings with them'
  *  the check actually run: `verdict_counts.rs` counts only the
  *  adjudication_received / adjudication_issued records on this node's chain,
  *  which the plugin seals after the door verifies the referee's signature
- *  (`adjudication_hold.verdict_facts`). */
+ *  (the plugin's `referee::hold::verdict_facts`). */
 export const REFEREE_VERDICTS_ABOUT_THEM = {
   sectionTitle: 'Referee verdicts about them',
   explainer:

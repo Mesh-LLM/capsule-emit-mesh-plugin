@@ -98,6 +98,50 @@
         }
       },
       {
+        "key": "adjudicate_differing_twins",
+        "value_schema": {
+          "kind": "enum",
+          "enum_values": [
+            "on",
+            "off"
+          ],
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "default_json": "\"on\"",
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "Ask a referee when two twins of a pair the host marked answered the same request at temperature 0, on the same model and weights, and differ (on, the default), or never (off). At most one call per pair, never retried. A pair with no ruling reads \"Not adjudicated\" with the reason, and never counts against either twin.",
+        "presentation": {
+          "label": "Ask a referee when twins differ",
+          "category_id": "referee",
+          "category_label": "Referee",
+          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; nothing is scored or sent.",
+          "category_order": 0
+        }
+      },
+      {
+        "key": "referee_bar_days",
+        "value_schema": {
+          "kind": "integer",
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "default_json": "30",
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "After a referee-signed contradiction for a model, a node is not asked to referee that model for this many days (default 30), counted from when this node recorded the verdict. A later corroboration does not end it early.",
+        "presentation": {
+          "label": "Bar window, days",
+          "category_id": "referee",
+          "category_label": "Referee",
+          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; nothing is scored or sent.",
+          "category_order": 1
+        }
+      },
+      {
         "key": "stop_routing_after_contradictions",
         "value_schema": {
           "kind": "integer",

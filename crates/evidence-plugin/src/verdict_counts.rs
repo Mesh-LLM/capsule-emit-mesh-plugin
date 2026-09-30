@@ -90,7 +90,7 @@ pub struct PeerVerdict {
 
 /// Which bucket `verdict` puts `node_id` in, when `node_id` is one of the two
 /// judged twins. A contradiction naming the OTHER twin means the referee's
-/// answer matched this one's (`live_referee.referee_verdict`), so it is
+/// answer matched this one's (`crate::referee::verdict::referee_verdict`), so it is
 /// corroborated for this one. An unknown ruling is in no bucket.
 pub fn ruling_about(
     verdict: &str,

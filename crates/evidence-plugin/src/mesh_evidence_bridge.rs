@@ -257,6 +257,65 @@ async fn answer_in_process(
     answered.ok().flatten()
 }
 
+/// Why an evidence request got no answer.
+#[derive(Debug)]
+pub(crate) enum SendError {
+    /// The stream to the peer's plugin could not be opened (unreachable, or
+    /// it runs no plugin that takes the channel).
+    NotOpened(String),
+    /// Opened, but nothing came back in time (the text says why, with a
+    /// leading ": " when there is detail).
+    NoAnswer(String),
+    /// Something came back that is not JSON.
+    Malformed(String),
+}
+
+/// Send `request` to `peer_id` over the evidence stream and read the answer:
+/// `(the request bytes sent, the peer's JSON)`.
+pub(crate) async fn send_evidence_request(
+    context: &mut PluginContext<'_>,
+    peer_id: &str,
+    request: &serde_json::Value,
+) -> Result<(Vec<u8>, serde_json::Value), SendError> {
+    let open_request = OpenMeshStreamRequest {
+        stream_id: next_stream_id("evidence-request"),
+        target_peer_id: peer_id.to_string(),
+        plugin_id: String::new(), // host fills this in from the connection.
+        channel: EVIDENCE_REQUEST_CHANNEL.to_string(),
+        purpose: mesh_llm_plugin::proto::StreamPurpose::Generic as i32,
+        mode: mesh_llm_plugin::proto::StreamMode::RawBytes as i32,
+        bidirectional: true,
+        content_type: Some("application/json".to_string()),
+        correlation_id: Some(next_stream_id("evidence-correlation")),
+        metadata_json: None,
+        expected_bytes: None,
+        idle_timeout_ms: Some(requester_idle_timeout_ms()),
+    };
+    let stream: LocalStream = context
+        .connect_mesh_stream(open_request)
+        .await
+        .map_err(|error| SendError::NotOpened(error.to_string()))?;
+    let (mut read_half, mut write_half) = stream.into_split();
+    let request_bytes =
+        serde_json::to_vec(request).map_err(|error| SendError::Malformed(error.to_string()))?;
+    let write_and_read = async {
+        write_half.write_all(&request_bytes).await?;
+        write_half.shutdown().await?;
+        // Bounded: the peer's answer is peer-controlled bytes too.
+        read_to_end_bounded(&mut read_half, "peer evidence-request response").await
+    };
+    let response_bytes = tokio::time::timeout(
+        Duration::from_millis(requester_idle_timeout_ms()),
+        write_and_read,
+    )
+    .await
+    .map_err(|_| SendError::NoAnswer(String::new()))?
+    .map_err(|error| SendError::NoAnswer(format!(": {error}")))?;
+    let answer = serde_json::from_slice(&response_bytes)
+        .map_err(|error| SendError::Malformed(error.to_string()))?;
+    Ok((request_bytes, answer))
+}
+
 /// The referee's answer to an `adjudicate` request, as wire bytes; `None`
 /// for any other request. `Some(None)` sends nothing: a verdict whose
 /// `adjudication_issued` record did not seal is never sent.
@@ -395,50 +454,25 @@ pub async fn handle_mesh_evidence_request(
         add_requester_id(&mut args.request, self_id.as_deref());
     }
 
-    let open_request = OpenMeshStreamRequest {
-        stream_id: next_stream_id("evidence-request"),
-        target_peer_id: args.peer_id.clone(),
-        plugin_id: String::new(), // host fills this in from the connection.
-        channel: EVIDENCE_REQUEST_CHANNEL.to_string(),
-        purpose: mesh_llm_plugin::proto::StreamPurpose::Generic as i32,
-        mode: mesh_llm_plugin::proto::StreamMode::RawBytes as i32,
-        bidirectional: true,
-        content_type: Some("application/json".to_string()),
-        correlation_id: Some(next_stream_id("evidence-correlation")),
-        metadata_json: None,
-        expected_bytes: None,
-        idle_timeout_ms: Some(requester_idle_timeout_ms()),
-    };
-
-    let stream: LocalStream = context
-        .connect_mesh_stream(open_request)
-        .await
-        .map_err(|error| PluginError::internal(format!("could not reach peer: {error}")))?;
-    let (mut read_half, mut write_half) = stream.into_split();
-
-    let request_bytes = serde_json::to_vec(&args.request)
-        .map_err(|error| PluginError::internal(format!("request is not valid JSON: {error}")))?;
-
-    let write_and_read = async {
-        write_half.write_all(&request_bytes).await?;
-        write_half.shutdown().await?;
-        // Bounded: the peer's answer is peer-controlled bytes too.
-        read_to_end_bounded(&mut read_half, "peer evidence-request response").await
-    };
-
-    let response_bytes = tokio::time::timeout(
-        Duration::from_millis(requester_idle_timeout_ms()),
-        write_and_read,
-    )
-    .await
-    .map_err(|_| PluginError::internal("peer does not answer evidence requests"))?
-    .map_err(|error| {
-        PluginError::internal(format!("peer does not answer evidence requests: {error}"))
-    })?;
-
-    let answer: serde_json::Value = serde_json::from_slice(&response_bytes).map_err(|error| {
-        PluginError::internal(format!("peer returned malformed response: {error}"))
-    })?;
+    let (request_bytes, answer) =
+        match send_evidence_request(context, &args.peer_id, &args.request).await {
+            Ok(sent) => sent,
+            Err(SendError::NotOpened(error)) => {
+                return Err(PluginError::internal(format!(
+                    "could not reach peer: {error}"
+                )))
+            }
+            Err(SendError::NoAnswer(error)) => {
+                return Err(PluginError::internal(format!(
+                    "peer does not answer evidence requests{error}"
+                )))
+            }
+            Err(SendError::Malformed(error)) => {
+                return Err(PluginError::internal(format!(
+                    "peer returned malformed response: {error}"
+                )))
+            }
+        };
     if !args.verify {
         return Ok(answer);
     }
@@ -472,7 +506,7 @@ fn verifying_key(key_id: &str) -> Option<ed25519_dalek::VerifyingKey> {
 }
 
 /// The file beside the ledger that lists every adjudicate request this node
-/// sent (`adjudication_hold.REQUESTED_ADJUDICATIONS_FILENAME`).
+/// sent (`crate::verdict_counts::REQUESTED_FILENAME`).
 pub const REQUESTED_ADJUDICATIONS_FILENAME: &str = "requested-adjudications.jsonl";
 
 /// `{referee, halves, twin_bracket_id, selection_tier, asked_at}` for an
@@ -504,7 +538,7 @@ pub fn requested_adjudication(
     }))
 }
 
-fn record_requested_adjudication(
+pub(crate) fn record_requested_adjudication(
     ledger_dir: &std::path::Path,
     asked: &serde_json::Value,
 ) -> std::io::Result<()> {

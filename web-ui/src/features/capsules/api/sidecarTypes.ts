@@ -510,6 +510,10 @@ export type TwinRowFacts = {
   verdict?: string | null
   verdict_capsule_id?: string | null
   referee_node_id?: string | null
+  /** The pair's outcome as this node recorded it (`referee::request`):
+   *  adjudicated, or not adjudicated with the reason. `null` until the pair
+   *  is complete here. */
+  referee_row?: import('@/features/capsules/lib/referee-row').RefereeRow | null
 }
 
 /** `"corroborated"` or `"contradicted:<node_id>"`, as the referee sealed it. */
@@ -567,6 +571,14 @@ export type PaneCListJson = {
    *  renders without it, just without a specific N in the sentence, never
    *  a hardcoded "50". */
   twin_sample_rate_denominator?: number | null
+  /** The independent check's state for this list: whether it is on, and
+   *  whether the host marks twins at all (no twin bracket on any row: "Not
+   *  adjudicated: this host does not mark twins"). */
+  referee?: {
+    adjudicate_differing_twins: boolean
+    twins_marked: boolean
+    unmarked_reason: string | null
+  }
   /** See `PaymentsPresence`. */
   payments?: PaymentsPresence
   /** Exchange ids with settlement records that no row carries. */

@@ -867,6 +867,24 @@ fn with_evidence_operations(
             }),
     );
     builder = builder.mcp_item(
+        mcp::tool(referee::live::ASK_AGAIN_OPERATION)
+            .description(
+                "Ask again for an independent check of a twin pair this node asked (by its twin \
+                 bracket id). A pair whose one referee call is used is not asked again; one that \
+                 found no eligible referee looks for one again. Returns the pair's row.",
+            )
+            .input::<referee::live::AskAgainArgs>()
+            .handle({
+                let capsules = capsules_for_delivery.clone();
+                let self_peer = self_peer.clone();
+                move |args, context| {
+                    let capsules = capsules.clone();
+                    let self_id = self_peer.current();
+                    Box::pin(referee::live::ask_again(args, context, capsules, self_id))
+                }
+            }),
+    );
+    builder = builder.mcp_item(
         mcp::tool(LEDGER_FETCH_OPERATION)
             .description(
                 "Ask a mesh peer's capsule-emit-mesh plugin for one of ITS sealed ledger entries by \
@@ -1139,6 +1157,14 @@ async fn main() -> anyhow::Result<()> {
                             &[],
                         )
                         .await;
+                        // A twin of a pair the host marked: when both twins'
+                        // halves are held here, the referee rules apply
+                        // (`referee::request`). No bracket id, nothing runs.
+                        if let (Some(bracket), Some(self_id)) =
+                            (envelope.twin_bracket_id.as_deref(), self_peer.current())
+                        {
+                            referee::live::consider(context, &capsules, bracket, &self_id, false).await;
+                        }
                     }
                 } else if message.channel == settlement_channel::PAYMENT_LIFECYCLE_CHANNEL
                     && !settlement_channel::is_local_host_broadcast(

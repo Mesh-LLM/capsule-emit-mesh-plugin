@@ -65,7 +65,7 @@ describe('TwinBracket — v3 §5, OBSERVE-ONLY', () => {
       </TwinBracket>
     )
     expect(screen.getByText('not adjudicated')).toBeInTheDocument()
-    expect(screen.getByText('Not adjudicated: this node has no referee yet.')).toBeInTheDocument()
+    expect(screen.getByText('Not adjudicated yet.')).toBeInTheDocument()
     expect(screen.queryByText(/\bPASS\b/)).not.toBeInTheDocument()
     expect(screen.queryByText(/\bFAIL\b/)).not.toBeInTheDocument()
     expect(screen.queryByText(/identical/i)).not.toBeInTheDocument()

@@ -44,8 +44,13 @@ repository, for macOS arm64 and Linux x86_64/arm64.
   checkpoint. It is held only if every check passes; anything else gets a
   signed refusal. Record requests are answered in-process too, under the
   sharing policy (see [docs/SHARING-POLICY.md](docs/SHARING-POLICY.md)).
-- This node has no referee yet: a twin pair that differs reads "Not
-  adjudicated: this node has no referee yet", never contradicted.
+- Twins that answered the same request differently get an independent check:
+  a referee, chosen by yes/no eligibility rules, re-answers and signs a
+  verdict ([docs/TWIN-REFEREE-SELECTION.md](docs/TWIN-REFEREE-SELECTION.md)).
+  Every pair with no verdict reads "Not adjudicated" with the reason, and is
+  never counted against either twin. This needs mesh-llm to mark twins (a
+  twin bracket id); until it does, the page reads "Not adjudicated: this host
+  does not mark twins" and nothing is called.
 
 **Not yet:** an exchange confirmed by both sides. That needs mesh-llm to tell
 the plugin which peer asked and which peer served (see

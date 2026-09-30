@@ -415,6 +415,134 @@ fn run_counts(case: &Value) -> Vec<Value> {
     answers
 }
 
+// --- select -------------------------------------------------------------------
+
+fn run_select(case: &Value) -> Vec<Value> {
+    use crate::referee::bar::Recorded;
+    use crate::referee::select::{select, Candidate};
+    let text = |v: &Value| v.as_str().map(str::to_string);
+    let candidates: Vec<Candidate> = case["peers"]
+        .as_array()
+        .expect("peers")
+        .iter()
+        .map(|p| Candidate {
+            node_id: p["node_id"].as_str().expect("node_id").to_string(),
+            model_hash: text(&p["model_hash"]),
+            weights_digest: text(&p["weights_digest"]),
+            announced_key: p["announced_key"].as_str().is_some_and(|k| !k.is_empty()),
+            blocked: p["blocked"] == json!(true),
+        })
+        .collect();
+    let verdicts: Vec<Recorded> = case["verdicts"]
+        .as_array()
+        .expect("verdicts")
+        .iter()
+        .map(|v| Recorded {
+            node_id: v["node_id"].as_str().expect("node_id").to_string(),
+            model_hash: v["model_hash"].as_str().expect("model_hash").to_string(),
+            bucket: v["bucket"].as_str().expect("bucket").to_string(),
+            recorded_at: time(v["recorded_at"].as_str().expect("recorded_at")),
+        })
+        .collect();
+    let twins: Vec<&str> = case["twins"]
+        .as_array()
+        .expect("twins")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let bar_days = case["referee_bar_days"]
+        .as_u64()
+        .map(|d| u32::try_from(d).expect("days"))
+        .unwrap_or(crate::referee::bar::DEFAULT_BAR_DAYS);
+    let selection = select(
+        time(case["now"].as_str().expect("now")),
+        bar_days,
+        case["model_hash"].as_str().expect("model_hash"),
+        case["weights_digest"].as_str().expect("weights_digest"),
+        [twins[0], twins[1]],
+        &candidates,
+        &verdicts,
+    );
+    let mut draws = case["draws"]
+        .as_array()
+        .expect("draws")
+        .iter()
+        .map(|d| d.as_u64().expect("draw") as usize);
+    let asked: Vec<String> = (0..case["draws"].as_array().map_or(0, Vec::len))
+        .filter_map(|_| {
+            let d = draws.next().expect("a draw");
+            selection
+                .pick(&mut |n| {
+                    assert!(d < n, "a draw inside the pool");
+                    d
+                })
+                .map(str::to_string)
+        })
+        .collect();
+    let answer = if selection.pool.is_empty() {
+        json!({"tier": null, "pool": [], "asked": [], "not_adjudicated": crate::referee::select::NO_ELIGIBLE_REFEREE})
+    } else {
+        json!({"tier": selection.tier, "pool": selection.pool, "asked": asked, "not_adjudicated": null})
+    };
+    vec![answer]
+}
+
+// --- request ------------------------------------------------------------------
+
+fn run_request(case: &Value) -> Vec<Value> {
+    use crate::referee::request::{counts_against, Book, Called, Chosen, Pair, Twin};
+    let on = case["adjudicate_differing_twins"] != json!(false);
+    let mut book = Book::default();
+    case["attempts"]
+        .as_array()
+        .expect("attempts")
+        .iter()
+        .map(|attempt| {
+            let pair = &attempt["pair"];
+            let twin = |h: &Value| Twin {
+                node_id: h["node_id"].as_str().expect("node_id").to_string(),
+                capsule_id: h["capsule_id"].as_str().unwrap_or_default().to_string(),
+                text: h["text"].as_str().unwrap_or_default().to_string(),
+                sampled: h["temperature"].as_f64().is_some_and(|t| t > 0.0),
+                model_hash: h["model_hash"].as_str().map(str::to_string),
+                weights_digest: h["weights_digest"].as_str().map(str::to_string),
+            };
+            let halves = pair["halves"].as_array().expect("halves");
+            let pair = Pair {
+                twin_bracket_id: pair["twin_bracket_id"].as_str().map(str::to_string),
+                request_digest: pair["request_digest"].as_str().expect("request_digest").to_string(),
+                twins: [twin(&halves[0]), twin(&halves[1])],
+            };
+            let selection = &attempt["selection"];
+            let choose = || match selection["asked"].as_str() {
+                Some(node) => Chosen::Referee { node_id: node.to_string(), tier: selection["tier"].as_u64().expect("tier") },
+                None => Chosen::NoEligible,
+            };
+            let referee = &attempt["referee"];
+            let call = |_: &str, _: u64| match referee["reanswer"].as_str() {
+                None => Called::Unreachable,
+                Some(_) if referee["signs"] != json!(true) => Called::CannotSign,
+                Some(reanswer) => {
+                    // The ruling the referee signs, by the referee's own rule.
+                    let half = |t: &Twin| Half {
+                        capsule: json!({}),
+                        request_body: json!({"messages": [{"role": "user", "content": "?"}]}),
+                        response_body: None,
+                        response_text: Some(t.text.clone()),
+                        node_id: Some(t.node_id.clone()),
+                        weights_digest: t.weights_digest.clone(),
+                    };
+                    let (a, b) = (half(&pair.twins[0]), half(&pair.twins[1]));
+                    let comparison = verdict::compare_transcripts(a.text(), b.text());
+                    Called::Verdict(verdict::referee_verdict(&a, &b, &comparison, reanswer))
+                }
+            };
+            let out = book.attempt(on, &pair, attempt["manual"] == json!(true), choose, call);
+            json!({"referee_calls": out.calls, "row": out.row, "counts_against": counts_against(&out.row)})
+        })
+        .collect()
+}
+
 // --- the run ------------------------------------------------------------------
 
 type Runner = fn(&Value) -> Vec<Value>;
@@ -427,8 +555,45 @@ pub(crate) fn paths() -> Vec<(&'static str, &'static str, Runner)> {
         ("hold", "golden", run_hold),
         ("deliver", "golden", run_deliver),
         ("classify", "golden", run_classify),
+        ("select", "rule_answers", run_select),
+        ("request", "rule_answers", run_request),
         ("counts", "rule_answers", run_counts),
     ]
+}
+
+/// Run the named cases (`path/case`); the ones that differ, with the
+/// difference.
+pub(crate) fn run_cases(names: &[&str]) -> Vec<(String, String)> {
+    let dir = referee_dir();
+    let mut differs = Vec::new();
+    for (path, expected_dir, runner) in paths() {
+        let wanted: Vec<&str> = names
+            .iter()
+            .filter_map(|n| n.strip_prefix(path).and_then(|rest| rest.strip_prefix('/')))
+            .collect();
+        if wanted.is_empty() {
+            continue;
+        }
+        let corpus = read_json(&dir.join(format!("corpus/{path}.json")));
+        let expected = read_json(&dir.join(format!("{expected_dir}/{path}.json")));
+        for name in wanted {
+            let case = corpus["cases"]
+                .as_array()
+                .expect("cases")
+                .iter()
+                .find(|c| c["name"] == json!(name))
+                .unwrap_or_else(|| panic!("no case {path}/{name}"));
+            let got = Value::Array(runner(case));
+            let want = &expected["answers"][name];
+            if canonical(&got) != canonical(want) {
+                differs.push((
+                    format!("{path}/{name}"),
+                    format!("expected {}\ngot      {}", canonical(want), canonical(&got)),
+                ));
+            }
+        }
+    }
+    differs
 }
 
 /// Run every case of every path; `(the cases that differ, with the
@@ -507,4 +672,271 @@ fn the_corpus_is_the_pinned_copy() {
         checked >= 16,
         "every referee corpus file is pinned ({checked})"
     );
+}
+
+/// The port's unit tests, by the names `port_tests.json` gives them: each
+/// holds its rule on the corpus cases listed for it.
+#[allow(non_snake_case)]
+mod port_tests {
+    macro_rules! port_test {
+        ($name:ident, [$($case:literal),+ $(,)?]) => {
+            #[test]
+            fn $name() {
+                let differs = super::run_cases(&[$($case),+]);
+                assert!(differs.is_empty(), "{:?}", differs);
+            }
+        };
+    }
+
+    port_test!(
+        differing_pair_triggers_one_call,
+        ["request/differing_pair_triggers_one_call"]
+    );
+    port_test!(
+        agreeing_pair_calls_nothing,
+        ["request/agreeing_pair_calls_nothing"]
+    );
+    port_test!(
+        sampled_pair_calls_nothing,
+        [
+            "request/sampled_pair_calls_nothing",
+            "request/one_sampled_half_calls_nothing"
+        ]
+    );
+    port_test!(
+        default_on_when_setting_unset,
+        ["request/default_on_when_setting_unset"]
+    );
+    port_test!(
+        operator_off_calls_nothing_and_says_so,
+        ["request/operator_off_calls_nothing_and_says_so"]
+    );
+    port_test!(
+        no_bracket_id_calls_nothing_and_says_so,
+        ["request/no_bracket_id_calls_nothing_and_says_so"]
+    );
+    port_test!(
+        second_call_same_pair_refused,
+        ["request/second_call_same_pair_refused"]
+    );
+    port_test!(
+        resealed_halves_same_exchange_still_capped,
+        ["request/resealed_halves_same_exchange_still_capped"]
+    );
+    port_test!(
+        referee_timeout_is_not_retried,
+        [
+            "request/referee_timeout_is_not_retried",
+            "request/another_referee_is_not_tried"
+        ]
+    );
+    port_test!(
+        referee_side_repeat_returns_issued_verdict,
+        [
+            "service/repeat_returns_the_issued_verdict",
+            "service/repeat_with_the_halves_swapped"
+        ]
+    );
+    port_test!(
+        same_model_hash_and_digest_only,
+        [
+            "select/same_model_hash_and_digest_only",
+            "select/different_model_hash_never_picked"
+        ]
+    );
+    port_test!(
+        different_digest_never_picked,
+        ["select/different_digest_never_picked"]
+    );
+    port_test!(twin_never_picked, ["select/twin_never_picked"]);
+    port_test!(
+        no_announced_key_never_picked,
+        ["select/no_announced_key_never_picked"]
+    );
+    port_test!(
+        blocked_node_never_picked,
+        ["select/blocked_node_never_picked"]
+    );
+    port_test!(
+        twins_with_different_digests_not_adjudicated,
+        [
+            "request/twins_with_different_digests_not_adjudicated",
+            "request/twins_with_unknown_digest_not_adjudicated"
+        ]
+    );
+    port_test!(tier1_before_tier2, ["select/tier1_before_tier2"]);
+    port_test!(
+        cold_picked_only_when_tier1_empty,
+        ["select/cold_picked_only_when_tier1_empty"]
+    );
+    port_test!(
+        pick_uniform_within_best_tier,
+        ["select/pick_uniform_within_best_tier"]
+    );
+    port_test!(
+        contradiction_for_X_never_picked_for_X_but_ok_for_Y,
+        [
+            "select/contradiction_for_x_never_picked_for_x",
+            "select/contradiction_for_x_ok_for_y"
+        ]
+    );
+    port_test!(
+        verdict_carries_selection_tier,
+        [
+            "service/contradicts_b",
+            "service/tier_two_referee",
+            "hold/verdict_carries_selection_tier"
+        ]
+    );
+    port_test!(
+        altered_tier_fails_verification,
+        ["hold/altered_tier_fails_verification"]
+    );
+    port_test!(
+        hold_refuses_tier_other_than_asked,
+        ["hold/hold_refuses_tier_other_than_asked"]
+    );
+    port_test!(no_eligible, ["request/no_eligible_referee"]);
+    port_test!(referee_without_plugin, ["request/referee_without_plugin"]);
+    port_test!(unreachable, ["request/referee_unreachable"]);
+    port_test!(off, ["request/operator_off_calls_nothing_and_says_so"]);
+    port_test!(twins_agree, ["request/agreeing_pair_calls_nothing"]);
+    port_test!(barred_inside_D, ["select/barred_inside_d"]);
+    port_test!(eligible_after_D, ["select/eligible_after_d"]);
+    port_test!(
+        corroboration_inside_D_does_not_clear,
+        ["select/corroboration_inside_d_does_not_clear"]
+    );
+    port_test!(bar_on_X_leaves_Y, ["select/bar_on_x_leaves_y"]);
+    port_test!(
+        D_from_setting_default_30,
+        [
+            "select/d_default_is_30",
+            "select/d_from_setting_shorter",
+            "select/d_from_setting_longer"
+        ]
+    );
+    port_test!(
+        history_still_visible_while_barred,
+        ["counts/history_still_visible_while_barred"]
+    );
+    port_test!(
+        received_at_not_the_referees_issued_at,
+        ["select/bar_runs_from_this_nodes_clock"]
+    );
+    port_test!(
+        stop_rule_off_by_default,
+        ["counts/stop_rule_off_by_default"]
+    );
+    port_test!(
+        fires_at_N_within_window,
+        [
+            "counts/fires_at_n_within_window",
+            "counts/outside_the_window_does_not_count"
+        ]
+    );
+    port_test!(
+        one_referee_contributes_at_most_N_minus_1,
+        ["counts/one_referee_contributes_at_most_n_minus_1"]
+    );
+    port_test!(
+        only_verified_and_asked_verdicts_count,
+        [
+            "counts/only_verified_and_asked_verdicts_count",
+            "counts/asked_another_referee_about_the_pair"
+        ]
+    );
+    port_test!(
+        one_count_per_referee_and_pair,
+        ["counts/one_count_per_referee_and_pair"]
+    );
+    port_test!(
+        undo_holds_until_new_contradictions,
+        [
+            "counts/undo_holds_until_new_contradictions",
+            "counts/already_blocked_is_not_blocked_again"
+        ]
+    );
+    port_test!(
+        host_without_hook_does_nothing,
+        ["counts/host_without_hook_does_nothing"]
+    );
+    port_test!(
+        forged_reference_verdict_counts_nowhere,
+        [
+            "classify/forged_unsigned",
+            "classify/forged_unannounced_key",
+            "classify/forged_referee_not_announced",
+            "classify/forged_no_referee",
+            "classify/forged_copied_block",
+            "classify/forged_many"
+        ]
+    );
+    port_test!(
+        ack_refusal_counts_only_with_verified_contradiction,
+        [
+            "classify/ack_refusal_of_a_verified_contradiction",
+            "classify/ack_refusal_without_the_verdict",
+            "classify/ack_refusal_of_a_forged_verdict",
+            "classify/ack_refusal_claiming_a_contradiction"
+        ]
+    );
+
+    /// Every test `port_tests.json` names is here.
+    #[test]
+    fn every_named_port_test_is_carried() {
+        const CARRIED: &[&str] = &[
+            "differing_pair_triggers_one_call",
+            "agreeing_pair_calls_nothing",
+            "sampled_pair_calls_nothing",
+            "default_on_when_setting_unset",
+            "operator_off_calls_nothing_and_says_so",
+            "no_bracket_id_calls_nothing_and_says_so",
+            "second_call_same_pair_refused",
+            "resealed_halves_same_exchange_still_capped",
+            "referee_timeout_is_not_retried",
+            "referee_side_repeat_returns_issued_verdict",
+            "same_model_hash_and_digest_only",
+            "different_digest_never_picked",
+            "twin_never_picked",
+            "no_announced_key_never_picked",
+            "blocked_node_never_picked",
+            "twins_with_different_digests_not_adjudicated",
+            "tier1_before_tier2",
+            "cold_picked_only_when_tier1_empty",
+            "pick_uniform_within_best_tier",
+            "contradiction_for_X_never_picked_for_X_but_ok_for_Y",
+            "verdict_carries_selection_tier",
+            "altered_tier_fails_verification",
+            "hold_refuses_tier_other_than_asked",
+            "no_eligible",
+            "referee_without_plugin",
+            "unreachable",
+            "off",
+            "twins_agree",
+            "barred_inside_D",
+            "eligible_after_D",
+            "corroboration_inside_D_does_not_clear",
+            "bar_on_X_leaves_Y",
+            "D_from_setting_default_30",
+            "history_still_visible_while_barred",
+            "received_at_not_the_referees_issued_at",
+            "stop_rule_off_by_default",
+            "fires_at_N_within_window",
+            "one_referee_contributes_at_most_N_minus_1",
+            "only_verified_and_asked_verdicts_count",
+            "one_count_per_referee_and_pair",
+            "undo_holds_until_new_contradictions",
+            "host_without_hook_does_nothing",
+            "forged_reference_verdict_counts_nowhere",
+            "ack_refusal_counts_only_with_verified_contradiction",
+        ];
+        let listed =
+            crate::record_push_parity::read_json(&super::referee_dir().join("port_tests.json"));
+        for tests in listed["tests"].as_object().expect("tests").values() {
+            for name in tests.as_object().expect("names").keys() {
+                assert!(CARRIED.contains(&name.as_str()), "{name} is not carried");
+            }
+        }
+    }
 }

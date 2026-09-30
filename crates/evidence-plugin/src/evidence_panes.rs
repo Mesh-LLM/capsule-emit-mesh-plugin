@@ -2264,12 +2264,12 @@ fn build_pane_c_list_with_settlements(
 }
 
 /// The referee's own record of a referee call: its sealed client nonce carries
-/// the referee prefix (`live_referee.REFEREE_NONCE_PREFIX`).
+/// the referee prefix (`crate::referee::live::REFEREE_NONCE_PREFIX`).
 fn is_referee_call(record: &Value) -> bool {
     poc_block(record)
         .and_then(|poc| poc.get("client_nonce"))
         .and_then(Value::as_str)
-        .is_some_and(|n| n.starts_with("referee-"))
+        .is_some_and(|n| n.starts_with(crate::referee::live::REFEREE_NONCE_PREFIX))
 }
 
 /// The host's digest of the answer text a record carries
@@ -2582,6 +2582,7 @@ pub(crate) fn build_pane_json(
                 ),
             };
             mark_claims_refused(&mut pane, &our_records, &read_claim_refusals(ledger_dir));
+            crate::referee::request::attach_rows(&mut pane, ledger_dir);
             Some(pane)
         }
         _ => None,

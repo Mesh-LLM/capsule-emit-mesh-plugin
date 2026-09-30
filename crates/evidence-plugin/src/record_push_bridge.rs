@@ -351,7 +351,10 @@ async fn bridge_inbound_record_push(
 /// Seal this node's `adjudication_received` record of a verdict its door
 /// held (`held`: the reply's `adjudication` facts). Keyed on the verdict id,
 /// so a repeat delivery seals nothing more.
-fn seal_received_verdict(capsules: &CapsuleState, held: &serde_json::Value) -> anyhow::Result<()> {
+pub(crate) fn seal_received_verdict(
+    capsules: &CapsuleState,
+    held: &serde_json::Value,
+) -> anyhow::Result<()> {
     let text = |key: &str| held.get(key).and_then(|v| v.as_str());
     let pair = |key: &str| -> Option<[&str; 2]> {
         match held.get(key)?.as_array()?.as_slice() {

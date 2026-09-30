@@ -50,30 +50,46 @@ pub async fn deliver(
             "this node does not know its own peer id yet, so it cannot name itself as the courier",
         ));
     };
-    let verdict_id = args
-        .verdict_capsule
+    push_verdict(
+        context,
+        &capsules,
+        &args.peer_id,
+        &self_id,
+        &args.verdict_capsule,
+    )
+    .await
+    .map_err(|error| PluginError::internal(error.to_string()))
+}
+
+/// Push `verdict_capsule` to `peer_id` as its courier (`self_id`) and return
+/// the receiver's answer; a refusal is sealed on this node's chain first
+/// (`adjudication_ack_refused`).
+pub(crate) async fn push_verdict(
+    context: &mut PluginContext<'_>,
+    capsules: &CapsuleState,
+    peer_id: &str,
+    self_id: &str,
+    verdict_capsule: &Value,
+) -> anyhow::Result<Value> {
+    let verdict_id = verdict_capsule
         .get("capsule_id")
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty())
-        .ok_or_else(|| PluginError::invalid_request("verdict_capsule has no capsule_id"))?
+        .ok_or_else(|| anyhow::anyhow!("verdict_capsule has no capsule_id"))?
         .to_string();
-    let body = json!({ DELIVERY_MARKER: 1, "verdict_capsule": args.verdict_capsule });
-    let reply = crate::record_push_bridge::send_push(context, &args.peer_id, &self_id, &body)
-        .await
-        .map_err(|error| PluginError::internal(error.to_string()))?;
+    let body = json!({ DELIVERY_MARKER: 1, "verdict_capsule": verdict_capsule });
+    let reply = crate::record_push_bridge::send_push(context, peer_id, self_id, &body).await?;
     if let Some(reason) = reply.get("reason").and_then(Value::as_str) {
         let digest = hex::encode(Sha256::digest(reply.to_string().as_bytes()));
         let refused = crate::producer::capsule::RefusedDelivery {
             verdict_capsule_id: &verdict_id,
-            refused_by: &args.peer_id,
+            refused_by: peer_id,
             reason,
             refusal_digest: &digest,
             refusal_key_id: reply.get("key_id").and_then(Value::as_str),
             refused_at: &crate::producer::timestamp::utc_now_iso8601(),
         };
-        capsules
-            .emit_adjudication_ack_refused(&refused)
-            .map_err(|error| PluginError::internal(error.to_string()))?;
+        capsules.emit_adjudication_ack_refused(&refused)?;
     }
     Ok(reply)
 }

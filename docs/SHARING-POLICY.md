@@ -86,9 +86,12 @@ record bodies and are answered under every tier. The golden answers are in
 ## Verdicts (`share_adjudications`)
 
 When a referee's verdict about an exchange exists, it is delivered to every
-node it concerns, and each seals its own record citing it. This build has no
-referee, so no verdicts are produced; a pair of differing answers shows as not
-adjudicated.
+node it concerns, and each seals its own record citing it. A node holds a
+delivered verdict only when the referee it names signed it with its announced
+key and the verdict concerns that node (it asked for it, or it judges one of
+that node's own records). With `share_adjudications: off` the node that asked
+still holds the verdict, and delivers it to no one. How a referee is chosen:
+[TWIN-REFEREE-SELECTION.md](TWIN-REFEREE-SELECTION.md).
 
 ## Witness
 
