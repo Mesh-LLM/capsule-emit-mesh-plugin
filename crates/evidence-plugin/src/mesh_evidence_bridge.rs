@@ -1,0 +1,464 @@
+//! Ask #5's carrier, minus ask #5's own build: mesh-llm's *existing*
+//! `OpenMeshStreamRequest`/`connect_stream` plugin-mesh-stream mechanism
+//! (`crates/mesh-llm-host-runtime/src/mesh/plugin_streams.rs`, verified on
+//! `main` at `cae3620` and reconfirmed against a fresh `mesh-llm` checkout for
+//! this task) already lets a plugin open a bidirectional QUIC stream to the
+//! *same plugin* on a target peer, gated on both ends declaring the channel
+//! in their manifest (`plugin_event_channel_declared`). This module declares
+//! `evidence-request/1` and bridges bytes on both ends -- mesh never parses
+//! either side. Zero upstream (`mesh-llm`) code.
+//!
+//! **Responder role** (`on_open_stream`): the host already gated this call on
+//! the channel being declared before `connect_stream` ever reaches us. This
+//! plugin also declares `ledger-fetch/1` and `record-push/1`; `main.rs`
+//! dispatches an inbound `OpenStreamRequest` to whichever module owns it
+//! before `handle_open_stream` below is called, so it only ever receives a
+//! mesh-inbound evidence request. We bind a local listener, hand its
+//! endpoint back, and once the host bridges the remote bytes to it, read the
+//! whole request (bounded in bytes and in time) and answer it **in-process**
+//! (`evidence_answer`, over the `capsule-emit-evidence-request` crate): an
+//! artifact or a signed refusal. At most [`MAX_IN_FLIGHT_ANSWERS`] requests
+//! are answered at once; one more is declined with a signed
+//! `policy_declined` before the ledger is read. Every answer is logged to
+//! the "asked of you" log (`received_log`).
+//!
+//! This node has no referee yet. A referee's `adjudicate` request is not a
+//! -00 subject, so it is answered like any other request that does not
+//! parse: a signed `request_malformed` refusal, never a verdict.
+//!
+//! **Requester role**: the streamed-HTTP-binding path mesh-llm ships
+//! (`handle_streamed_http_binding`) forwards a binding's *static* manifest
+//! path/method into `OpenStreamRequest.metadata_json` before any request body
+//! exists -- it cannot carry a caller-chosen `target_peer_id`, so it cannot
+//! drive an outbound `OpenMeshStreamRequest` on this plugin's behalf. The
+//! mechanism that CAN -- `mesh_llm_plugin`'s tool/operation router
+//! (`ToolRouter`/`invoke_operation`, reachable locally over
+//! `POST /api/plugins/capsule-emit-mesh/tools/mesh_evidence_request`) -- hands
+//! its handler the full JSON arguments AND a `&mut PluginContext` in the same
+//! call, so a local client drives this tool;
+//! the handler opens the mesh stream, writes the E14 request bytes, and
+//! returns whatever the peer's own responder wrote back (Artifact or signed
+//! Refusal, untouched) as the tool's JSON result. A peer that never declared
+//! the channel drops the stream at the host with no reply; bounded by
+//! `REQUESTER_IDLE_TIMEOUT` so that reads a clean failure, never a hang.
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+use mesh_llm_plugin::proto::{OpenMeshStreamRequest, OpenStreamRequest, OpenStreamResponse};
+use mesh_llm_plugin::{bind_side_stream, LocalStream, PluginContext, PluginError, PluginResult};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+/// The mesh channel this plugin declares on both ends -- gates both the
+/// outbound `open_outbound_plugin_mesh_stream` call (checked against THIS
+/// plugin's own manifest) and the inbound `handle_plugin_mesh_stream` call
+/// (checked against the responder's manifest).
+pub const EVIDENCE_REQUEST_CHANNEL: &str = "evidence-request/1";
+
+/// The tool name a local client calls
+/// (`POST /api/plugins/<plugin_id>/tools/mesh_evidence_request`).
+pub const EVIDENCE_REQUEST_OPERATION: &str = "mesh_evidence_request";
+
+/// How long the RESPONDER waits at each step of an already-open mesh stream:
+/// the requester's connection, its request bytes, and writing the answer.
+/// Bounds a silent peer; mesh-llm's own `idle_timeout_ms` on the
+/// `OpenMeshStreamRequest` bounds the mesh stream separately, host-side.
+/// Overridable so a test proving the bound is actually enforced does not
+/// have to wait out the production default.
+fn responder_http_timeout() -> Duration {
+    env_millis("ADMISSION_POLICY_EVIDENCE_HTTP_TIMEOUT_MS", 10_000)
+}
+
+/// How long the REQUESTER waits for a response once the mesh stream is open
+/// -- covers exactly the "peer never declared the channel, host drops the
+/// stream with no reply" case the acceptance check requires read as a clean
+/// failure, never a hang.
+fn requester_idle_timeout_ms() -> u64 {
+    env_millis("ADMISSION_POLICY_MESH_REQUEST_TIMEOUT_MS", 8_000).as_millis() as u64
+}
+
+/// Shared with `ledger_fetch_bridge`, the other plugin-mesh-stream carrier --
+/// same env-var-with-default shape, no reason for two copies.
+pub(crate) fn env_millis(var: &str, default_ms: u64) -> Duration {
+    Duration::from_millis(
+        std::env::var(var)
+            .ok()
+            .and_then(|raw| raw.parse().ok())
+            .unwrap_or(default_ms),
+    )
+}
+
+static STREAM_NONCE: AtomicU64 = AtomicU64::new(1);
+
+/// Shared with `ledger_fetch_bridge` -- one nonce space for every
+/// plugin-mesh-stream this process opens, so stream ids never collide
+/// between the two carriers.
+pub(crate) fn next_stream_id(prefix: &str) -> String {
+    format!(
+        "{prefix}-{}-{}",
+        std::process::id(),
+        STREAM_NONCE.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Cap on every peer-controlled side-stream read this plugin performs (both
+/// bridges, both roles). The SDK's 16 MiB frame cap does NOT apply to raw
+/// side-stream bytes and `expected_bytes` is never enforced, so an unbounded
+/// `read_to_end` here was a remote OOM: a peer could stream gigabytes into
+/// this process's memory. A capsule / E14 request / E15 answer is a few KB
+/// -- 1 MiB is generous headroom, not a constraint anyone legitimate hits.
+pub(crate) const MAX_SIDE_STREAM_BYTES: u64 = 1024 * 1024;
+
+/// Bounded replacement for `read_to_end` on a side-stream: reads at most
+/// [`MAX_SIDE_STREAM_BYTES`] and errors -- naming `what` -- when the peer
+/// sends more, instead of buffering an attacker-chosen amount of memory.
+pub(crate) async fn read_to_end_bounded<R>(reader: R, what: &str) -> std::io::Result<Vec<u8>>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut bytes = Vec::new();
+    // Read ONE byte past the cap so "exactly at the cap" and "over the cap"
+    // are distinguishable without trusting the peer to half-close honestly.
+    let mut bounded = reader.take(MAX_SIDE_STREAM_BYTES + 1);
+    bounded.read_to_end(&mut bytes).await?;
+    if bytes.len() as u64 > MAX_SIDE_STREAM_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "{what} exceeded the {MAX_SIDE_STREAM_BYTES}-byte side-stream cap -- refusing \
+                 an unbounded peer-controlled read"
+            ),
+        ));
+    }
+    Ok(bytes)
+}
+
+// ---------------------------------------------------------------------
+// Responder role: mesh-inbound `evidence-request/1` stream -> answered in-process
+// ---------------------------------------------------------------------
+
+/// Registered as this plugin's `on_open_stream` handler. Never fabricates an
+/// Artifact/Refusal itself -- a transport failure (the peer went silent)
+/// just drops the stream; only `evidence_answer` ever produces a signed
+/// response, so nothing unsigned is ever returned in its place.
+pub async fn handle_open_stream(
+    request: OpenStreamRequest,
+    _context: &mut PluginContext<'_>,
+    capsules: std::sync::Arc<crate::capsule_emit::CapsuleState>,
+) -> PluginResult<Option<OpenStreamResponse>> {
+    let listener = bind_side_stream(crate::PLUGIN_ID, &request.stream_id)
+        .await
+        .map_err(|error| PluginError::internal(error.to_string()))?;
+    let response = listener.open_stream_response(&request);
+
+    tokio::spawn(async move {
+        if let Err(error) = bridge_inbound_evidence_stream(listener, capsules).await {
+            tracing::warn!(%error, "mesh evidence-request responder bridge failed");
+        }
+    });
+
+    Ok(Some(response))
+}
+
+/// The most evidence requests answered at once; see the module doc.
+pub const MAX_IN_FLIGHT_ANSWERS: usize = 8;
+
+static IN_FLIGHT: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+
+async fn bridge_inbound_evidence_stream(
+    listener: mesh_llm_plugin::LocalListener,
+    capsules: std::sync::Arc<crate::capsule_emit::CapsuleState>,
+) -> anyhow::Result<()> {
+    let bound = responder_http_timeout();
+    let local = tokio::time::timeout(bound, listener.accept()).await??;
+    let (mut read_half, mut write_half) = local.into_split();
+
+    // The remote requester writes the whole request then half-closes
+    // (mesh-llm's own streamed-http-binding convention: a full write
+    // followed by `shutdown()`, never a length prefix) -- read to EOF, but
+    // BOUNDED in bytes (see `read_to_end_bounded`) and in time: the
+    // requester controls these bytes and must never control this process's
+    // memory, or hold a stream open by going silent.
+    let request_bytes = tokio::time::timeout(
+        bound,
+        read_to_end_bounded(&mut read_half, "mesh-inbound evidence request"),
+    )
+    .await??;
+
+    let response_bytes = match answer_in_process(capsules, request_bytes).await {
+        Some(bytes) => bytes,
+        // Nothing this node can sign: send nothing, never an unsigned
+        // stand-in. The requester records an absence.
+        None => return Ok(()),
+    };
+
+    tokio::time::timeout(bound, async {
+        write_half.write_all(&response_bytes).await?;
+        write_half.shutdown().await
+    })
+    .await??;
+    Ok(())
+}
+
+/// Answer in-process, on the blocking pool (the answer reads the ledger and
+/// signs), and log it. `None` when there is nothing to send.
+async fn answer_in_process(
+    capsules: std::sync::Arc<crate::capsule_emit::CapsuleState>,
+    request_bytes: Vec<u8>,
+) -> Option<Vec<u8>> {
+    let permit = IN_FLIGHT
+        .get_or_init(|| tokio::sync::Semaphore::new(MAX_IN_FLIGHT_ANSWERS))
+        .try_acquire();
+    let answered = tokio::task::spawn_blocking(move || {
+        let now = crate::evidence_answer::now_utc();
+        let responder = crate::evidence_answer::Responder {
+            ledger_dir: capsules.ledger_dir(),
+            signing_key: capsules.signing_key(),
+            now: &now,
+            history_segments: crate::share_policy::history_segments(),
+        };
+        let log_dir = capsules
+            .ledger_dir()
+            .parent()
+            .and_then(crate::evidence_routes::EvidenceSource::received_log_dir);
+        let outcome = crate::evidence_answer::answer_and_log(
+            &request_bytes,
+            permit.is_err(),
+            &responder,
+            log_dir.as_deref(),
+        );
+        drop(permit);
+        if let crate::evidence_answer::Outcome::Unanswerable(why) = &outcome {
+            tracing::warn!(%why, "an evidence request was not answered");
+        }
+        outcome.wire_bytes()
+    })
+    .await;
+    answered.ok().flatten()
+}
+
+// ---------------------------------------------------------------------
+// Requester role: local tool call -> outbound `evidence-request/1` stream
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MeshEvidenceRequestArgs {
+    /// Hex-encoded mesh peer id to ask, e.g. `iroh::EndpointId::to_string()`.
+    pub peer_id: String,
+    /// The request map (draft-mih-agent-evidence-request-00), sent as given.
+    /// When it names no `requester_id`, this node's own mesh id is added
+    /// (the responder's sharing policy reads it; it is this node's word).
+    pub request: serde_json::Value,
+    /// Check what comes back against the peer's announced key
+    /// (`ADMISSION_POLICY_PEER_KEYS`). **On unless the caller turns it off**
+    /// with an explicit `"verify": false`. The result is
+    /// `{"answer": <the peer's JSON>, "request_digest", "verification"}`
+    /// (`evidence_answer::verify_response`, or `no_announced_key` when the
+    /// registry names no key for the peer). With `"verify": false` it is the
+    /// peer's JSON alone, for a caller that verifies it itself.
+    #[serde(default = "verify_by_default")]
+    pub verify: bool,
+}
+
+/// `verify` is on unless a caller names the opt-out.
+fn verify_by_default() -> bool {
+    true
+}
+
+/// Registered as the `mesh_evidence_request` tool/operation handler
+/// (`ToolRouter::add_json`). Returns the peer's Artifact-or-Refusal JSON,
+/// unchanged, beside its verification (or alone with `"verify": false`); any
+/// failure (unroutable peer, channel undeclared on the peer, response never
+/// arrives) surfaces as a tool error -- `PluginError` -- which the host's
+/// `/tools/` HTTP route reports as a `502`, never a hang.
+pub async fn handle_mesh_evidence_request(
+    mut args: MeshEvidenceRequestArgs,
+    context: &mut PluginContext<'_>,
+    ledger_dir: std::path::PathBuf,
+    self_id: Option<String>,
+) -> PluginResult<serde_json::Value> {
+    if args.peer_id.trim().is_empty() {
+        return Err(PluginError::invalid_params("peer_id must not be empty"));
+    }
+    // An adjudicate request names the referee this node CHOSE for a pair:
+    // recorded before it is sent, so a verdict about that pair is only ever
+    // taken from that referee.
+    if let Some(asked) = requested_adjudication(&args.peer_id, &args.request) {
+        record_requested_adjudication(&ledger_dir, &asked).map_err(|e| {
+            PluginError::internal(format!("could not record the adjudication request: {e}"))
+        })?;
+    } else {
+        add_requester_id(&mut args.request, self_id.as_deref());
+    }
+
+    let open_request = OpenMeshStreamRequest {
+        stream_id: next_stream_id("evidence-request"),
+        target_peer_id: args.peer_id.clone(),
+        plugin_id: String::new(), // host fills this in from the connection.
+        channel: EVIDENCE_REQUEST_CHANNEL.to_string(),
+        purpose: mesh_llm_plugin::proto::StreamPurpose::Generic as i32,
+        mode: mesh_llm_plugin::proto::StreamMode::RawBytes as i32,
+        bidirectional: true,
+        content_type: Some("application/json".to_string()),
+        correlation_id: Some(next_stream_id("evidence-correlation")),
+        metadata_json: None,
+        expected_bytes: None,
+        idle_timeout_ms: Some(requester_idle_timeout_ms()),
+    };
+
+    let stream: LocalStream = context
+        .connect_mesh_stream(open_request)
+        .await
+        .map_err(|error| PluginError::internal(format!("could not reach peer: {error}")))?;
+    let (mut read_half, mut write_half) = stream.into_split();
+
+    let request_bytes = serde_json::to_vec(&args.request)
+        .map_err(|error| PluginError::internal(format!("request is not valid JSON: {error}")))?;
+
+    let write_and_read = async {
+        write_half.write_all(&request_bytes).await?;
+        write_half.shutdown().await?;
+        // Bounded: the peer's answer is peer-controlled bytes too.
+        read_to_end_bounded(&mut read_half, "peer evidence-request response").await
+    };
+
+    let response_bytes = tokio::time::timeout(
+        Duration::from_millis(requester_idle_timeout_ms()),
+        write_and_read,
+    )
+    .await
+    .map_err(|_| PluginError::internal("peer does not answer evidence requests"))?
+    .map_err(|error| {
+        PluginError::internal(format!("peer does not answer evidence requests: {error}"))
+    })?;
+
+    let answer: serde_json::Value = serde_json::from_slice(&response_bytes).map_err(|error| {
+        PluginError::internal(format!("peer returned malformed response: {error}"))
+    })?;
+    if !args.verify {
+        return Ok(answer);
+    }
+    let registry = std::env::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let verification = match crate::peer_keys::announced_key_in(registry.as_deref(), &args.peer_id)
+        .and_then(|key_id| verifying_key(&key_id))
+    {
+        Some(key) => crate::evidence_answer::verify_response(&request_bytes, &answer, &key),
+        None => serde_json::json!({"state": "no_announced_key"}),
+    };
+    Ok(serde_json::json!({
+        "answer": answer,
+        "request_digest": capsule_emit_evidence_request::digest::request_digest(&request_bytes),
+        "verification": verification,
+    }))
+}
+
+/// Add this node's id as the request's `requester_id`, unless the request
+/// already names one (or is not a map, or this node does not know its id).
+fn add_requester_id(request: &mut serde_json::Value, self_id: Option<&str>) {
+    if let (Some(map), Some(id)) = (request.as_object_mut(), self_id) {
+        map.entry("requester_id")
+            .or_insert_with(|| serde_json::json!(id));
+    }
+}
+
+/// An announced `key_id` (raw Ed25519 public key, lowercase hex) as a key.
+fn verifying_key(key_id: &str) -> Option<ed25519_dalek::VerifyingKey> {
+    let bytes: [u8; 32] = hex::decode(key_id).ok()?.try_into().ok()?;
+    ed25519_dalek::VerifyingKey::from_bytes(&bytes).ok()
+}
+
+/// The file beside the ledger that lists every adjudicate request this node
+/// sent (`adjudication_hold.REQUESTED_ADJUDICATIONS_FILENAME`).
+pub const REQUESTED_ADJUDICATIONS_FILENAME: &str = "requested-adjudications.jsonl";
+
+/// `{referee, halves, twin_bracket_id, asked_at}` for an adjudicate request,
+/// or `None` for any other evidence request.
+pub fn requested_adjudication(
+    peer_id: &str,
+    request: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    if request.pointer("/subject/kind").and_then(|k| k.as_str()) != Some("adjudicate") {
+        return None;
+    }
+    let halves: Vec<&str> = request
+        .get("halves")?
+        .as_array()?
+        .iter()
+        .map(|h| h.pointer("/capsule/capsule_id").and_then(|id| id.as_str()))
+        .collect::<Option<_>>()?;
+    if halves.len() != 2 {
+        return None;
+    }
+    Some(serde_json::json!({
+        "referee": peer_id,
+        "halves": halves,
+        "twin_bracket_id": request.get("twin_bracket_id").cloned().unwrap_or(serde_json::Value::Null),
+        "asked_at": crate::producer::timestamp::utc_now_minute(),
+    }))
+}
+
+fn record_requested_adjudication(
+    ledger_dir: &std::path::Path,
+    asked: &serde_json::Value,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    std::fs::create_dir_all(ledger_dir)?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(ledger_dir.join(REQUESTED_ADJUDICATIONS_FILENAME))?;
+    writeln!(file, "{asked}")?;
+    file.sync_all()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The remote-OOM bound: bytes up to the cap pass through untouched; one
+    /// byte over is a descriptive error, never an unbounded buffer.
+    #[tokio::test]
+    async fn read_to_end_bounded_accepts_at_cap_and_refuses_over_cap() {
+        let at_cap = vec![7u8; MAX_SIDE_STREAM_BYTES as usize];
+        let ok = read_to_end_bounded(at_cap.as_slice(), "test bytes")
+            .await
+            .expect("exactly-at-cap must be accepted");
+        assert_eq!(ok.len() as u64, MAX_SIDE_STREAM_BYTES);
+
+        let over_cap = vec![7u8; MAX_SIDE_STREAM_BYTES as usize + 1];
+        let err = read_to_end_bounded(over_cap.as_slice(), "test bytes")
+            .await
+            .expect_err("over-cap must be refused");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("side-stream cap"), "{err}");
+    }
+
+    #[test]
+    fn an_adjudicate_request_is_recorded_with_its_referee_and_pair() {
+        let dir = tempfile::tempdir().unwrap();
+        let request = serde_json::json!({
+            "subject": {"kind": "adjudicate"},
+            "twin_bracket_id": "bracket-1",
+            "halves": [{"capsule": {"capsule_id": "a"}}, {"capsule": {"capsule_id": "b"}}],
+        });
+        let asked =
+            requested_adjudication("referee-node", &request).expect("an adjudicate request");
+        record_requested_adjudication(dir.path(), &asked).unwrap();
+        let line =
+            std::fs::read_to_string(dir.path().join(REQUESTED_ADJUDICATIONS_FILENAME)).unwrap();
+        let recorded: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(recorded["referee"], serde_json::json!("referee-node"));
+        assert_eq!(recorded["halves"], serde_json::json!(["a", "b"]));
+        assert_eq!(recorded["twin_bracket_id"], serde_json::json!("bracket-1"));
+    }
+
+    #[test]
+    fn any_other_evidence_request_is_not_an_adjudication() {
+        let request =
+            serde_json::json!({"subject": {"kind": "correlation", "by": "nonce", "value": "n"}});
+        assert!(requested_adjudication("peer", &request).is_none());
+        let one_half = serde_json::json!({"subject": {"kind": "adjudicate"}, "halves": [{"capsule": {"capsule_id": "a"}}]});
+        assert!(requested_adjudication("peer", &one_half).is_none());
+    }
+}

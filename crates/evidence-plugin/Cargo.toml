@@ -1,0 +1,76 @@
+[package]
+name = "evidence-plugin"
+version = "0.2.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "The capsule-emit-mesh mesh-llm plugin: a signed, hash-chained record of every exchange and the Evidence page."
+publish = false
+
+[[bin]]
+name = "capsule-emit-mesh"
+path = "src/main.rs"
+
+[features]
+# Deliberately-broken variant: never denies a blocked model (fail-open bug).
+# Built and run against the same interop test to prove the test actually
+# distinguishes correct behavior from this specific regression.
+mutant-allow-blocked = []
+# Deliberately-broken variant: treats an unparseable body as allow instead of
+# deny (silently fail-open on malformed input instead of failing safe).
+mutant-allow-malformed = []
+# Deliberately-broken receiver: skips the claim checks on a served half (who
+# served it, which weights). CI builds it and requires the record-push parity
+# run to FAIL, so the parity run is shown to catch a receiver that drops a
+# check, not only a changed answer file.
+mutant-record-push-skips-claims = []
+# Deliberately-broken responder: answers evidence requests without the
+# sharing-policy gate. CI builds it and requires the evidence-request parity
+# run to FAIL on the not_authorized cases.
+mutant-evidence-skips-policy-gate = []
+
+[dependencies]
+mesh-llm-plugin = "0.77"
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+anyhow = "1"
+thiserror = "1"
+sha2 = "0.10"
+hex = "0.4"
+ed25519-dalek = "2"
+# The `ledger-fetch/1` responder (`ledger_fetch_bridge`) base64-encodes raw
+# COSE_Sign1 bytes for its JSON carrier.
+base64 = "0.22"
+tracing = "0.1"
+# Record and answer timestamps (`exchange_text`, `evidence_answer`).
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The capsule producer: every record this plugin seals, its ledger,
+# checkpoints and offline verification come from the capsule-emit crate; the
+# mesh record kinds are written against its extension points in `producer`.
+# A pushed record's checks, `capsule_id` and producer signature are checked
+# with it too, and a bundle's inclusion proof with `cll`. Renamed because
+# this crate already has a `capsule_emit` module.
+capsule-emit-lib = { package = "capsule-emit", version = "0.0.1" }
+cll = { package = "checkpointed-local-log", version = "0.2.0" }
+# Evidence requests are answered in-process (`evidence_answer`): parsing,
+# resolution, signed refusals and the artifact answer come from the protocol
+# crate (draft-mih-agent-evidence-request-00). 0.0.2 carries the answer path.
+capsule-emit-evidence-request = "0.0.2"
+
+[dev-dependencies]
+# The interop tests drive the plugin's HTTP routes over real HTTP.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# The record-push parity run reads its own golden answers, which hold a record
+# nested at the strict parser's limit inside the answer's own nesting. Only
+# the test's fixture reader lifts the limit (`disable_recursion_limit`); a
+# pushed body is still parsed under the default one.
+serde_json = { version = "1", features = ["unbounded_depth"] }
+# Temporary ledger directories in the Evidence route and pane tests.
+tempfile = "3"
+# Decodes the `CallToolResult` a `tools/call` `RpcResponse` carries, in
+# `tests/mesh_evidence_bridge_interop.rs` -- same version mesh-llm-plugin
+# itself pins, so the wire shape matches exactly.
+rmcp = "1.8"

@@ -1,0 +1,268 @@
+# SPDX-License-Identifier: Apache-2.0
+# Plugin release: builds the plugin for each target mesh-llm's plugin installer
+# resolves, packages it with its web UI bundle, and uploads one archive per
+# target, one SHA256SUMS file and build provenance attestations to the GitHub
+# Release.
+#
+# Packaging is scripts/package.sh, so a local build of the same inputs gives
+# the same archive. It follows mesh-llm's plugin package contract
+# (docs/plugins/README.md in Mesh-LLM/mesh-llm):
+#   - asset name:      <plugin-name>-<version>-<target-triple>.tar.gz
+#   - archive root:    one directory named exactly <plugin-name>
+#   - inside the root: the executable, plugin.toml, plugin-manifest.json
+#     (printed by the executable itself and required to equal the reviewed
+#     plugin.package.json), bundle/ (the Evidence page), README.md
+#     (INSTALL.md), LICENSE. Nothing else: never keys, ledgers or
+#     demo data.
+# `<plugin-name>` is `capsule-emit-mesh` throughout (the plugin's id, and the
+# name `mesh-llm plugins install --name` takes).
+#
+# Unix targets ship .tar.gz only: mesh-llm's .zip extractor does not restore
+# the executable bit.
+#
+# Only this workflow's CI builds are published. A locally built package is a
+# dry run: its executable embeds the build machine's paths.
+#
+# Rebuildable from the tag: every action is pinned to a commit, the toolchain
+# is pinned, cargo runs with --locked and path prefixes remapped, pnpm with
+# --frozen-lockfile, and the archive itself is deterministic
+# (SOURCE_DATE_EPOCH = the tagged commit's time). Linux builds on Ubuntu 22.04
+# so the executable needs glibc 2.35 or newer (checked below); macOS targets
+# macOS 11 or newer.
+#
+# Triggered on a tag push matching vMAJOR.MINOR.PATCH or
+# vMAJOR.MINOR.PATCH-rc.N; an -rc tag publishes a GitHub pre-release. This
+# workflow never creates or moves a tag. `workflow_dispatch` re-runs the build
+# for a tag that already exists (e.g. after a runner-side failure); it builds
+# the commit that tag points to, never the dispatching branch.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and attach assets to (e.g. v0.2.0-rc.1)"
+        required: true
+
+permissions: {}
+
+env:
+  PLUGIN_NAME: capsule-emit-mesh
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  RUST_TOOLCHAIN: "1.97.1"
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+  MAX_GLIBC: "2.35"
+
+jobs:
+  tag:
+    name: validate the tag
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: The tag is a release tag and is what was checked out
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "::error::'$RELEASE_TAG' is not vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N"
+            exit 1
+          fi
+          tagged="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+          head="$(git rev-parse HEAD)"
+          if [ "$tagged" != "$head" ]; then
+            echo "::error::checked out $head, but $RELEASE_TAG points to $tagged"
+            exit 1
+          fi
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: tag
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: crates/evidence-plugin
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master @ 2026-09-12 (the action publishes no release tags)
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/evidence-plugin/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-release-${{ env.RUST_TOOLCHAIN }}-${{ matrix.target }}-${{ hashFiles('crates/evidence-plugin/Cargo.lock') }}
+
+      - name: Build (release, local paths remapped)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}=/build --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo --remap-path-prefix=${HOME}=/home"
+          cargo build --locked --release --target ${{ matrix.target }} --bin "$PLUGIN_NAME"
+
+      - name: No build-machine paths in the executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/${{ matrix.target }}/release/$PLUGIN_NAME"
+          if strings "$bin" | grep -F -e "$GITHUB_WORKSPACE" -e "$HOME/"; then
+            echo "::error::the executable embeds a build-machine path"
+            exit 1
+          fi
+
+      - name: glibc floor (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/${{ matrix.target }}/release/$PLUGIN_NAME"
+          needed="$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)"
+          echo "highest glibc symbol version: $needed"
+          if [ "$(printf '%s\n%s\n' "$needed" "$MAX_GLIBC" | sort -V | tail -1)" != "$MAX_GLIBC" ]; then
+            echo "::error::needs glibc $needed, above the stated floor $MAX_GLIBC"
+            exit 1
+          fi
+
+      # Every target builds on a runner of its own OS and architecture, so the
+      # executable runs here and prints its own package manifest; the package
+      # job (Linux, for GNU tar) checks it against plugin.package.json.
+      - name: Print the package manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp "target/${{ matrix.target }}/release/$PLUGIN_NAME" out/
+          "out/$PLUGIN_NAME" --print-package-manifest > out/plugin-manifest.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bin-${{ matrix.target }}
+          path: crates/evidence-plugin/out/
+          if-no-files-found: error
+
+  package:
+    name: package (all targets)
+    needs: [tag, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: web-ui/package.json
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+
+      - name: Build the web UI bundle
+        working-directory: web-ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: bin-*
+          path: bins
+
+      - name: Package every target (deterministic archives)
+        shell: bash
+        env:
+          VERSION: ${{ needs.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          for target in aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            dir="bins/bin-$target"
+            chmod +x "$dir/$PLUGIN_NAME"   # artifacts do not keep the executable bit
+            scripts/package.sh "$VERSION" "$target" "$dir/$PLUGIN_NAME" dist "$dir/plugin-manifest.json"
+          done
+          (cd dist && sha256sum ./*.tar.gz | sed 's#  \./#  #' | sort -k2 > SHA256SUMS && cat SHA256SUMS)
+          test "$(wc -l < dist/SHA256SUMS)" -eq 3
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packages
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: publish (attestations, release assets)
+    needs: [tag, package]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: packages
+          path: dist
+
+      - name: Check the archives against SHA256SUMS
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          prerelease: ${{ contains(env.RELEASE_TAG, '-rc.') }}
+          body_path: INSTALL.md
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
