@@ -35,7 +35,7 @@ pub(crate) fn read_json(path: &Path) -> Value {
 }
 
 /// Canonical JSON (sorted keys, compact) for comparing answers by value.
-fn canonical(value: &Value) -> String {
+pub(crate) fn canonical(value: &Value) -> String {
     fn sorted(value: &Value) -> Value {
         match value {
             Value::Object(map) => {
@@ -60,7 +60,7 @@ pub(crate) fn body_bytes(push: &Value) -> Vec<u8> {
     }
 }
 
-fn line_counts(dir: &Path) -> BTreeMap<String, usize> {
+pub(crate) fn line_counts(dir: &Path) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
     for entry in std::fs::read_dir(dir).expect("read ledger dir").flatten() {
         if entry.path().is_file() {
@@ -74,7 +74,7 @@ fn line_counts(dir: &Path) -> BTreeMap<String, usize> {
     counts
 }
 
-fn appended(dir: &Path, before: &BTreeMap<String, usize>) -> Value {
+pub(crate) fn appended(dir: &Path, before: &BTreeMap<String, usize>) -> Value {
     let mut out = Map::new();
     let mut names: Vec<_> = std::fs::read_dir(dir)
         .expect("read ledger dir")
@@ -102,7 +102,12 @@ fn appended(dir: &Path, before: &BTreeMap<String, usize>) -> Value {
 
 /// The reply as the harness compares it: a refusal's signature is checked
 /// against this node's key rather than copied.
-fn normalize_reply(reply: &Value, body: &[u8], node_key: &VerifyingKey, now: &str) -> Value {
+pub(crate) fn normalize_reply(
+    reply: &Value,
+    body: &[u8],
+    node_key: &VerifyingKey,
+    now: &str,
+) -> Value {
     let Some(reason) = reply.get("reason") else {
         return reply.clone();
     };

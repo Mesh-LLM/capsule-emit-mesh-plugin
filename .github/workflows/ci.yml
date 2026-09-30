@@ -103,6 +103,13 @@ jobs:
           fi
           grep -q "record_to_a_stranger" <<<"$out" || { echo "$out"; echo "::error::the mutant failed, but not on the policy cases"; exit 1; }
 
+      # The referee's mutants (vectors/parity/referee/mutants.json): each build
+      # with one deliberate fault must fail the referee parity run on every
+      # case listed for it.
+      - name: Referee parity catches each implementation mutant
+        shell: bash
+        run: bash ../../scripts/referee-mutants.sh
+
       # serde_json's `unbounded_depth` is for the parity runner's fixture
       # reader only (a dev-dependency). It must never reach the plugin binary,
       # where a pushed body is parsed under the default nesting limit.

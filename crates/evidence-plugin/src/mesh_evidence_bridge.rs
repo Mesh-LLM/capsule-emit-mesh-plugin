@@ -372,7 +372,9 @@ fn verifying_key(key_id: &str) -> Option<ed25519_dalek::VerifyingKey> {
 /// sent (`adjudication_hold.REQUESTED_ADJUDICATIONS_FILENAME`).
 pub const REQUESTED_ADJUDICATIONS_FILENAME: &str = "requested-adjudications.jsonl";
 
-/// `{referee, halves, twin_bracket_id, asked_at}` for an adjudicate request,
+/// `{referee, halves, twin_bracket_id, selection_tier, asked_at}` for an
+/// adjudicate request (the tier it was asked at: a verdict that seals another
+/// is refused when delivered, `crate::referee::hold`),
 /// or `None` for any other evidence request.
 pub fn requested_adjudication(
     peer_id: &str,
@@ -394,6 +396,7 @@ pub fn requested_adjudication(
         "referee": peer_id,
         "halves": halves,
         "twin_bracket_id": request.get("twin_bracket_id").cloned().unwrap_or(serde_json::Value::Null),
+        "selection_tier": request.get("selection_tier").cloned().unwrap_or(serde_json::Value::Null),
         "asked_at": crate::producer::timestamp::utc_now_minute(),
     }))
 }
@@ -440,6 +443,7 @@ mod tests {
         let request = serde_json::json!({
             "subject": {"kind": "adjudicate"},
             "twin_bracket_id": "bracket-1",
+            "selection_tier": 2,
             "halves": [{"capsule": {"capsule_id": "a"}}, {"capsule": {"capsule_id": "b"}}],
         });
         let asked =
@@ -451,6 +455,7 @@ mod tests {
         assert_eq!(recorded["referee"], serde_json::json!("referee-node"));
         assert_eq!(recorded["halves"], serde_json::json!(["a", "b"]));
         assert_eq!(recorded["twin_bracket_id"], serde_json::json!("bracket-1"));
+        assert_eq!(recorded["selection_tier"], serde_json::json!(2));
     }
 
     #[test]

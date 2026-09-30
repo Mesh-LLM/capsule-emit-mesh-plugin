@@ -1,24 +1,25 @@
 //! A referee's signed verdict, on the chains it concerns.
 //!
-//! This node has no referee yet: it neither issues nor delivers verdicts,
-//! and it refuses a verdict delivered to it (`record_push_bridge`), signed,
-//! with `adjudication_unavailable`. A twin pair whose answers differ stays
-//! recorded and reads "Not adjudicated: this node has no referee yet".
+//! The referee holds each verdict it issues beside its ledger
+//! (`issued-adjudications.jsonl`); a node the verdict concerns holds the ones
+//! delivered to it (`received-adjudications.jsonl`, `crate::referee::hold`).
+//! Neither file is a chain: each node's chain carries its own
+//! `adjudication_issued` / `adjudication_received` record citing the verdict.
 //!
-//! What remains here reads what an earlier run of this node holds: the
-//! verdict files beside the ledger, and the `adjudication_issued` /
-//! `adjudication_received` records on its chain, for the page's verdict view.
+//! Delivery is a courier's push over the record-push stream
+//! (`deliver_adjudication`); when the receiver refuses it, the courier seals
+//! an `adjudication_ack_refused` record, so its own chain shows the decline.
 use std::sync::Arc;
 
 use mesh_llm_plugin::{PluginContext, PluginError, PluginResult};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::capsule_emit::CapsuleState;
 
-/// The member of a record-push body that marks a delivered verdict: such a
-/// body is refused (`record_push_bridge`), never received as a record.
+/// The member of a record-push body that marks a delivered verdict.
 pub const DELIVERY_MARKER: &str = "adjudication_delivery";
 pub const DELIVER_OPERATION: &str = "deliver_adjudication";
 
@@ -26,29 +27,55 @@ pub fn is_delivery_body(body: &Value) -> bool {
     body.get(DELIVERY_MARKER).is_some()
 }
 
-/// The tool's input, kept so its schema stays published; the call is
-/// refused before any field is read.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[allow(dead_code)]
 pub struct DeliverAdjudicationArgs {
-    /// The node the verdict would go to. Never read: the call is refused.
+    /// The node the verdict goes to.
     pub peer_id: String,
     /// The referee's signed verdict record, as it issued it.
     pub verdict_capsule: Value,
 }
 
-/// The `deliver_adjudication` tool: refused. This node has no referee yet,
-/// so it has no verdict of its own to deliver and no way to check anyone
-/// else's; a caller gets that answer, never a silent success.
+/// The `deliver_adjudication` tool: push a referee's signed verdict to a node
+/// it concerns, as its courier. The receiver's answer comes back unchanged.
+/// A refusal is sealed on this node's own chain (`adjudication_ack_refused`)
+/// before the answer is returned.
 pub async fn deliver(
-    _args: DeliverAdjudicationArgs,
-    _context: &mut PluginContext<'_>,
-    _capsules: Arc<CapsuleState>,
-    _self_id: Option<String>,
+    args: DeliverAdjudicationArgs,
+    context: &mut PluginContext<'_>,
+    capsules: Arc<CapsuleState>,
+    self_id: Option<String>,
 ) -> PluginResult<Value> {
-    Err(PluginError::invalid_request(
-        "not available: this node has no referee yet, so it neither issues nor delivers verdicts",
-    ))
+    let Some(self_id) = self_id else {
+        return Err(PluginError::invalid_request(
+            "this node does not know its own peer id yet, so it cannot name itself as the courier",
+        ));
+    };
+    let verdict_id = args
+        .verdict_capsule
+        .get("capsule_id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| PluginError::invalid_request("verdict_capsule has no capsule_id"))?
+        .to_string();
+    let body = json!({ DELIVERY_MARKER: 1, "verdict_capsule": args.verdict_capsule });
+    let reply = crate::record_push_bridge::send_push(context, &args.peer_id, &self_id, &body)
+        .await
+        .map_err(|error| PluginError::internal(error.to_string()))?;
+    if let Some(reason) = reply.get("reason").and_then(Value::as_str) {
+        let digest = hex::encode(Sha256::digest(reply.to_string().as_bytes()));
+        let refused = crate::producer::capsule::RefusedDelivery {
+            verdict_capsule_id: &verdict_id,
+            refused_by: &args.peer_id,
+            reason,
+            refusal_digest: &digest,
+            refusal_key_id: reply.get("key_id").and_then(Value::as_str),
+            refused_at: &crate::producer::timestamp::utc_now_iso8601(),
+        };
+        capsules
+            .emit_adjudication_ack_refused(&refused)
+            .map_err(|error| PluginError::internal(error.to_string()))?;
+    }
+    Ok(reply)
 }
 
 /// The held verdict files beside the ledger, as an earlier run may have
@@ -110,14 +137,22 @@ fn recorded_as(ledger_dir: &std::path::Path, verdict_capsule_id: &str) -> Option
     None
 }
 
-/// `http/ledger/verdict?capsule_id=`: one held verdict, as an earlier run of
-/// this node left it. Nothing in this plugin issues or holds verdicts now,
-/// and it does not check who signed one against the referee's announced
-/// key, so a held verdict is always `"legacy": true` and never `verify_ok`.
-/// The signature's own check (`signed_by_key_id` / `signature_error`) and
-/// how this node's chain records it (`recorded_as`) are reported as facts,
-/// not as a verdict on the verdict. `null` capsule when none is held.
+/// `http/ledger/verdict?capsule_id=`: one held verdict. `verify_ok` is true
+/// only when it verifies as signed, with its announced key, by the referee
+/// it names (`crate::referee::hold::verdict_facts`). The signature's own
+/// check (`signed_by_key_id` / `signature_error`) and how this node's chain
+/// records it (`recorded_as`) are reported beside it. `null` capsule when
+/// none is held.
 pub fn verdict_json(ledger_dir: &std::path::Path, verdict_capsule_id: &str) -> Value {
+    let peer_keys = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    verdict_json_with(ledger_dir, verdict_capsule_id, peer_keys.as_deref())
+}
+
+fn verdict_json_with(
+    ledger_dir: &std::path::Path,
+    verdict_capsule_id: &str,
+    peer_keys: Option<&str>,
+) -> Value {
     let Some(capsule) = held_verdict(ledger_dir, verdict_capsule_id) else {
         return json!({ "capsule": null, "signed_by_key_id": null, "verify_ok": false });
     };
@@ -127,10 +162,10 @@ pub fn verdict_json(ledger_dir: &std::path::Path, verdict_capsule_id: &str) -> V
         .pointer("/model_attestation/compute_attestation/adjudication/referee_node_id")
         .cloned()
         .unwrap_or(Value::Null);
+    let verified = crate::referee::hold::verdict_facts(&capsule, peer_keys).is_some();
     json!({
-        "legacy": true,
         "signed_by_key_id": signature.as_ref().ok(),
-        "verify_ok": false,
+        "verify_ok": verified,
         "signature_error": signature.as_ref().err(),
         "recorded_as": recorded,
         "referee_node_id": referee,
@@ -173,23 +208,42 @@ mod tests {
     }
 
     #[test]
-    fn a_held_verdict_is_legacy_and_never_verified() {
+    fn a_held_verdict_verifies_only_under_its_referees_announced_key() {
         let (dir, id) = held_dir(true);
-        let out = verdict_json(dir.path(), &id);
-        assert_eq!(out["legacy"], json!(true));
+        let out = verdict_json_with(dir.path(), &id, None);
         assert_eq!(
             out["verify_ok"],
             json!(false),
-            "its signer is not checked against an announced key"
+            "no announced key for its referee"
         );
         assert_eq!(out["recorded_as"], json!("received"));
         assert_eq!(out["signed_by_key_id"], fixture()["referee_key_id"]);
 
-        let (unrecorded, id) = held_dir(false);
+        // A verdict from the referee corpus, with the corpus's announced keys.
+        let corpus = crate::record_push_parity::read_json(
+            &crate::referee::parity::referee_dir().join("corpus/hold.json"),
+        );
+        let case = &corpus["cases"][0];
+        let body: Value =
+            serde_json::from_str(case["pushes"][0]["body"].as_str().unwrap()).unwrap();
+        let capsule = body["verdict_capsule"].clone();
+        let id = capsule["capsule_id"].as_str().unwrap().to_string();
+        let dir = tempfile::tempdir().unwrap();
+        let held = json!({ "verdict_capsule_id": id, "verdict_capsule": capsule });
+        std::fs::write(
+            dir.path().join(RECEIVED_ADJUDICATIONS_FILENAME),
+            format!("{held}\n"),
+        )
+        .unwrap();
+        let keys = case["node"]["peer_keys_env"].as_str();
         assert_eq!(
-            verdict_json(unrecorded.path(), &id)["verify_ok"],
+            verdict_json_with(dir.path(), &id, keys)["verify_ok"],
+            json!(true)
+        );
+        assert_eq!(
+            verdict_json_with(dir.path(), &id, Some("{}"))["verify_ok"],
             json!(false),
-            "held but never recorded"
+            "the same record, with its referee's key not announced"
         );
     }
 

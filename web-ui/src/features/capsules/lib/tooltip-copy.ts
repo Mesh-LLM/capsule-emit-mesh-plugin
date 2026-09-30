@@ -343,6 +343,24 @@ export const HANDOFF_TOOLTIPS = {
 /** §7.5: the drill's "your dealings with them" section title (console copy). */
 export const YOUR_DEALINGS_TITLE = 'Your dealings with them'
 
+/** The drill's "Referee verdicts about them" section. Plain words first, then
+ *  the check actually run: `verdict_counts.rs` counts only the
+ *  adjudication_received / adjudication_issued records on this node's chain,
+ *  which the plugin seals after the door verifies the referee's signature
+ *  (`adjudication_hold.verdict_facts`). */
+export const REFEREE_VERDICTS_ABOUT_THEM = {
+  sectionTitle: 'Referee verdicts about them',
+  explainer:
+    'How often a referee, re-answering a request both this peer and another peer served, agreed or disagreed with this peer. Counted from verdicts this node asked a referee for, as this node recorded them: its door records one only after checking the referee’s signature against the key that referee announced. A verdict nobody here asked for isn’t counted, and one referee counts once per pair of answers. Open a record to see whether the referee’s signature checks here. The four counts stay on this node, are never sent to anyone, and are never combined into one number.',
+  notShown: 'Not shown: this plugin version doesn’t count referee verdicts.',
+  bucketTooltip: {
+    corroborated: 'The referee’s answer matched this peer’s answer.',
+    contradicted: 'The referee’s answer matched the other peer’s answer, not this one’s.',
+    inconclusive: 'The referee’s answer matched neither answer, so it named no one.',
+    not_comparable: 'The two answers were sampled, not greedy, so they can’t be compared and the referee named no one.'
+  }
+} as const
+
 /** The drill's routing section. Stopping routing to a peer needs the host's
  *  local block list, which this page does not reach, so the page says so
  *  instead of offering a button that could not act. */

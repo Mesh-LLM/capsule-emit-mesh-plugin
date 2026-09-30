@@ -2560,12 +2560,16 @@ pub(crate) fn build_pane_json(
         // halves AND our citing records (they ARE our chained log entries) --
         // never the foreign bodies (those are evidence we hold, not ours).
         "pane-a" => Some(build_pane_a(&our_records, read_checkpoint_card(ledger_dir))),
-        "pane-b" => Some(build_pane_b_with_refusals(
-            &pane_bc_records,
-            &received_provenance,
-            &read_claim_refusals(ledger_dir),
-            &settlements,
-        )),
+        "pane-b" => {
+            let mut pane = build_pane_b_with_refusals(
+                &pane_bc_records,
+                &received_provenance,
+                &read_claim_refusals(ledger_dir),
+                &settlements,
+            );
+            crate::verdict_counts::attach(&mut pane, &our_records, ledger_dir);
+            Some(pane)
+        }
         "pane-c" => {
             let mut pane = match exchange_id {
                 Some(id) if !id.is_empty() => {
@@ -3900,6 +3904,7 @@ mod tests {
             halves,
             half_node_ids: nodes,
             twin_bracket_id: Some("twin-1"),
+            model_hash: None,
         }
     }
 

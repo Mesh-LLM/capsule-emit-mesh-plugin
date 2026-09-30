@@ -96,6 +96,45 @@
           "category_summary": "What this node shares, with whom, by default. Every default keys on relationship (counterparty in the window), never proximity or latency.",
           "category_order": 3
         }
+      },
+      {
+        "key": "stop_routing_after_contradictions",
+        "value_schema": {
+          "kind": "integer",
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "Stop routing to a peer after this many contradictions within the window below. Off when empty or 0 (the default). Only verdicts this node asked a referee for, and whose signature it checked, count, once per referee and pair of answers; with N of 2 or more, no single referee can reach N alone. When it fires, the host blocks the peer until you undo it, exactly like Stop routing, and the sealed record names this rule and cites the verdicts. Undo it the same way. Nothing is scored or sent.",
+        "presentation": {
+          "label": "Stop routing after N contradictions",
+          "category_id": "routing_rule",
+          "category_label": "Routing rule",
+          "category_summary": "An optional rule of yours for when this node stops routing to a peer. Off by default.",
+          "category_order": 0
+        }
+      },
+      {
+        "key": "stop_routing_window_days",
+        "value_schema": {
+          "kind": "integer",
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "default_json": "30",
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "The window, in days, the contradictions must fall in (default 30).",
+        "presentation": {
+          "label": "Within D days",
+          "category_id": "routing_rule",
+          "category_label": "Routing rule",
+          "category_summary": "An optional rule of yours for when this node stops routing to a peer. Off by default.",
+          "category_order": 1
+        }
       }
     ]
   },

@@ -21,11 +21,14 @@ are in the plugin crate and run with `cargo test`.
 | `intended_differences.json` | Cases where the Rust receiver is held to a stricter answer than the reference, each with its reason. | `record_push_parity` |
 | `evidence_request/corpus.json` | Inputs for the evidence-request responder's served summary and received log. | `evidence_request_parity` |
 | `evidence_request/golden.json` | The expected answers. | `evidence_request_parity` |
+| `referee/` | The referee's corpus: eight paths (checking and comparing two halves, the referee's signed answer, a verdict received over record-push or at the deliver door, the verdicts a node's references hold, choosing a referee, when one is asked, and the counts with the stop-routing rule). `golden/` holds the reference implementation's answers where it follows the rules, and the rule's where it does not (`intended_differences.json` lists each, with the rule); `rule_answers/` holds the answers stated from the rules for the three paths the reference does not follow. | `referee::parity` |
 
 A runner fails when a single answer differs. Two deliberately broken builds
 (`--features mutant-record-push-skips-claims`,
 `--features mutant-evidence-skips-policy-gate`) must fail their runner; CI
-checks that they do.
+checks that they do. The referee's mutants are listed in
+`referee/mutants.json`, each with the cases that must catch it;
+`scripts/referee-mutants.sh` builds each and checks it fails on those cases.
 
 Evidence-request protocol answers are judged by the
 `capsule-emit-evidence-request` crate's own conformance vectors, not by these
