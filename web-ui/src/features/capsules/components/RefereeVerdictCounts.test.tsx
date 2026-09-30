@@ -8,6 +8,7 @@ import { fetchVerdictRecord } from '@/features/capsules/api/verdictClient'
 import { RefereeVerdictCounts } from '@/features/capsules/components/RefereeVerdictCounts'
 import { HARNESS_PANE_B_PAYLOAD } from '@/features/capsules/lib/peer-fixtures'
 import { REFEREE_VERDICTS_ABOUT_THEM } from '@/features/capsules/lib/tooltip-copy'
+import { GRADING_WORDS } from '@/features/capsules/lib/banned-terms'
 
 vi.mock('@/features/capsules/api/verdictClient', () => ({
   fetchVerdictRecord: vi.fn().mockResolvedValue({
@@ -46,7 +47,7 @@ describe('RefereeVerdictCounts -- four counts, never one number', () => {
     expect(screen.getByTestId('referee-verdicts-inconclusive')).toHaveTextContent('inconclusive 0')
     expect(screen.getByTestId('referee-verdicts-not_comparable')).toHaveTextContent('not comparable 1')
     expect(screen.getByText(REFEREE_VERDICTS_ABOUT_THEM.explainer)).toBeInTheDocument()
-    expect(screen.queryByText(/score:|rating|\d+%/)).toBeNull()
+    expect(screen.queryByText(new RegExp(`${GRADING_WORDS.join('|')}|\\d+%`, 'i'))).toBeNull()
   })
 
   it('a count opens its verdict records, and a record opens the signed verdict', async () => {

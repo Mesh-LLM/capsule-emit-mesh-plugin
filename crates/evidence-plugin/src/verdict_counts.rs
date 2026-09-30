@@ -22,8 +22,8 @@
 //! differently-signed verdicts a referee issues about it.
 //!
 //! Four counts per peer, each a list of the verdicts' capsule ids so the page
-//! can open every one. No score, no rating, nothing blended into one number;
-//! the counts are this node's and are never sent to anyone.
+//! can open every one. No computed figure about a peer, nothing blended into
+//! one number; the counts are this node's and are never sent to anyone.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
@@ -473,7 +473,7 @@ mod tests {
             "names no twin"
         );
         assert_eq!(
-            ruling_about("score:9", ["a", "b"], "a"),
+            ruling_about("figure:9", ["a", "b"], "a"),
             None,
             "an unknown ruling counts nowhere"
         );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { STANDING_WORD } from '@/features/capsules/lib/banned-terms'
+import { GRADING_WORDS, STANDING_WORD } from '@/features/capsules/lib/banned-terms'
 import {
   NOT_ADJUDICATED_LINES,
   NOT_ADJUDICATED_YET,
@@ -29,7 +29,7 @@ describe('the not-adjudicated reason lines', () => {
   })
 
   it('not comparable says why', () => {
-    for (const because of ['sampled', 'model_hash_differs', 'weights_differ', 'weights_unknown']) {
+    for (const because of ['sampled', 'model_hash_differs', 'model_hash_unknown', 'weights_differ', 'weights_unknown']) {
       expect(notAdjudicatedLine({ state: 'not_adjudicated', reason: 'not_comparable', because })).toMatch(
         /^Not adjudicated: not comparable, .+\.$/
       )
@@ -44,7 +44,7 @@ describe('the not-adjudicated reason lines', () => {
   })
 
   it('no line grades a machine', () => {
-    const graded = new RegExp(`${STANDING_WORD}|score|rating|rank|trust`, 'i')
+    const graded = new RegExp([STANDING_WORD, ...GRADING_WORDS].join('|'), 'i')
     for (const line of [...Object.values(NOT_ADJUDICATED_LINES), NOT_ADJUDICATED_YET]) {
       expect(line).not.toMatch(graded)
     }

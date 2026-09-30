@@ -354,22 +354,76 @@ async fn ask(
     }
 }
 
+/// What [`consider`] came to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Considered {
+    /// The pair's row after this attempt.
+    Row(Value),
+    /// The pair is not complete here yet.
+    NotComplete,
+    /// The pair is being decided already (the exchange handler, or the
+    /// operator asking again): this attempt did nothing.
+    Deciding,
+    /// The call could not be recorded before it was made, so it was not made.
+    NotRecorded,
+}
+
+/// A pair whose decision this attempt holds: the pair, its book, the gate's
+/// answer (`None`: a referee is due), and the marker, released on drop.
+pub struct Begun {
+    pub live: LivePair,
+    pub book: Book,
+    pub gated: Option<request::Attempted>,
+    /// Held to the end of the decision.
+    pub deciding: request::Deciding,
+}
+
+/// The first step of [`consider`]: assemble the pair, take its marker, and
+/// apply the gate. `Err` when this attempt goes no further: the pair is not
+/// complete here, or is being decided already. Synchronous and without the
+/// host, so a test can hold the marker and see a second attempt return at
+/// once.
+pub fn begin(
+    ledger_dir: &Path,
+    bracket: &str,
+    on: bool,
+    manual: bool,
+) -> Result<Begun, Considered> {
+    let live = assemble(ledger_dir, bracket).ok_or(Considered::NotComplete)?;
+    let deciding = request::Deciding::claim(&live.pair).ok_or(Considered::Deciding)?;
+    let book = Book::load(ledger_dir);
+    let gated = book.gate(on, &live.pair, manual);
+    Ok(Begun {
+        live,
+        book,
+        gated,
+        deciding,
+    })
+}
+
 /// Apply the rules to the pair in `bracket` and, when a referee is due, ask
-/// one. `manual`: the operator asked again. Returns the pair's row, `None`
-/// while the pair is not complete here.
+/// one. `manual`: the operator asked again. One decision per pair at a time,
+/// and the pair's one call is recorded as in flight before it is made.
 pub async fn consider(
     context: &mut PluginContext<'_>,
     capsules: &Arc<CapsuleState>,
     bracket: &str,
     self_id: &str,
     manual: bool,
-) -> Option<Value> {
+) -> Considered {
     let ledger_dir = capsules.ledger_dir().to_path_buf();
-    let live = assemble(&ledger_dir, bracket)?;
-    let peer_keys = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
-    let mut book = Book::load(&ledger_dir);
     let on = request::adjudicate_differing_twins();
-    let attempted = match book.gate(on, &live.pair, manual) {
+    let Begun {
+        live,
+        mut book,
+        gated,
+        deciding: _held_until_decided,
+    } = match begin(&ledger_dir, bracket, on, manual) {
+        Ok(begun) => begun,
+        Err(considered) => return considered,
+    };
+    let peer_keys = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let attempted = match gated {
         Some(done) => done,
         None => {
             let [a, _] = &live.pair.twins;
@@ -386,6 +440,13 @@ pub async fn consider(
             match (pool.pick(&mut random_draw), pool.tier) {
                 (Some(referee), Some(tier)) => {
                     let referee = referee.to_string();
+                    let at = crate::producer::timestamp::utc_now_iso8601();
+                    if let Err(error) =
+                        request::record_in_flight(&ledger_dir, &live.pair, &referee, tier, &at)
+                    {
+                        tracing::warn!(%error, bracket, "the call could not be recorded; not made");
+                        return Considered::NotRecorded;
+                    }
                     let (called, verdict) = ask(
                         context,
                         &ledger_dir,
@@ -409,7 +470,7 @@ pub async fn consider(
     if let Err(error) = request::record(&ledger_dir, &live.pair, &attempted, &now) {
         tracing::warn!(%error, bracket, "the pair's outcome could not be recorded");
     }
-    Some(attempted.row)
+    Considered::Row(attempted.row)
 }
 
 /// Hold the verdict here (this node asked for it) and deliver it to both
@@ -485,8 +546,14 @@ pub async fn ask_again(
         ));
     };
     match consider(context, &capsules, &args.twin_bracket_id, &self_id, true).await {
-        Some(row) => Ok(row),
-        None => Err(mesh_llm_plugin::PluginError::invalid_request(
+        Considered::Row(row) => Ok(row),
+        Considered::Deciding => Err(mesh_llm_plugin::PluginError::invalid_request(
+            "this pair is being decided right now; ask again once that is done",
+        )),
+        Considered::NotRecorded => Err(mesh_llm_plugin::PluginError::internal(
+            "the call could not be recorded beside the ledger, so no referee was asked",
+        )),
+        Considered::NotComplete => Err(mesh_llm_plugin::PluginError::invalid_request(
             "no complete twin pair with that bracket id is held here: both twins' kept texts and \
              both providers' signed halves are needed",
         )),
@@ -603,6 +670,33 @@ mod tests {
             Some(2),
             "the tier this node asked at is sealed"
         );
+    }
+
+    /// The operator asking again while the exchange handler is deciding the
+    /// same pair returns at once: no second decision, no second call.
+    #[test]
+    fn asking_again_while_a_decision_is_in_flight_returns_at_once() {
+        let (dir, _) = requester_with_the_pair();
+        let first = begin(dir.path(), "bracket-1", true, false).expect("free to decide");
+        assert!(first.gated.is_none(), "a referee is due");
+        let started = std::time::Instant::now();
+        let again = begin(dir.path(), "bracket-1", true, true);
+        assert!(
+            matches!(again, Err(Considered::Deciding)),
+            "the second attempt goes no further"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "and does not wait"
+        );
+        drop(first);
+        let after =
+            begin(dir.path(), "bracket-1", true, true).expect("free once the first is done");
+        assert!(after.gated.is_none());
+        assert!(matches!(
+            begin(dir.path(), "bracket-9", true, true),
+            Err(Considered::NotComplete)
+        ));
     }
 
     #[test]

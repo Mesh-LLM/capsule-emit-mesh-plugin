@@ -117,7 +117,7 @@
           "label": "Ask a referee when twins differ",
           "category_id": "referee",
           "category_label": "Referee",
-          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; nothing is scored or sent.",
+          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; no figure about a peer is computed, and nothing is sent.",
           "category_order": 0
         }
       },
@@ -137,7 +137,7 @@
           "label": "Bar window, days",
           "category_id": "referee",
           "category_label": "Referee",
-          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; nothing is scored or sent.",
+          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; no figure about a peer is computed, and nothing is sent.",
           "category_order": 1
         }
       },
@@ -151,7 +151,7 @@
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Stop routing to a peer after this many contradictions within the window below. Off when empty or 0 (the default). Only verdicts this node asked a referee for, and whose signature it checked, count, once per referee and pair of answers; with N of 2 or more, no single referee can reach N alone. When it fires, the host blocks the peer until you undo it, exactly like Stop routing, and the sealed record names this rule and cites the verdicts. Undo it the same way. Nothing is scored or sent.",
+        "description": "Stop routing to a peer after this many contradictions within the window below. Off when empty or 0 (the default). Only verdicts this node asked a referee for, and whose signature it checked, count, once per referee and pair of answers; with N of 2 or more, no single referee can reach N alone. When it fires, the host blocks the peer until you undo it, exactly like Stop routing, and the sealed record names this rule and cites the verdicts. Undo it the same way. No figure about a peer is computed, and nothing is sent.",
         "presentation": {
           "label": "Stop routing after N contradictions",
           "category_id": "routing_rule",

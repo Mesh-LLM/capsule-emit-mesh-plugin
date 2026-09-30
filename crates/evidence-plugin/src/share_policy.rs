@@ -99,7 +99,7 @@ const REFEREE_CATEGORY_ID: &str = "referee";
 const REFEREE_CATEGORY_LABEL: &str = "Referee";
 const REFEREE_CATEGORY_SUMMARY: &str =
     "An independent check of two twins that answered the same request differently. \
-    Eligibility is yes or no, from this node's own records; nothing is scored or sent.";
+    Eligibility is yes or no, from this node's own records; no figure about a peer is computed, and nothing is sent.";
 
 const RULE_CATEGORY_ID: &str = "routing_rule";
 const RULE_CATEGORY_LABEL: &str = "Routing rule";
@@ -192,7 +192,7 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
                      for, and whose signature it checked, count, once per referee and pair of \
                      answers; with N of 2 or more, no single referee can reach N alone. When it fires, the host blocks the peer until you undo \
                      it, exactly like Stop routing, and the sealed record names this rule and \
-                     cites the verdicts. Undo it the same way. Nothing is scored or sent.",
+                     cites the verdicts. Undo it the same way. No figure about a peer is computed, and nothing is sent.",
                 )
                 .label("Stop routing after N contradictions")
                 .category(RULE_CATEGORY_ID, RULE_CATEGORY_LABEL, RULE_CATEGORY_SUMMARY, 0),

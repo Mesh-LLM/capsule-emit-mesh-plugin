@@ -68,7 +68,7 @@ either twin:
 | the check is off | Not adjudicated: the independent check is turned off on this node. |
 | no twin bracket id | Not adjudicated: this host does not mark twins. |
 | the answers agree | Not adjudicated: the two answers agree. |
-| sampled, another model, other or unknown weights | Not adjudicated: not comparable, with why. |
+| sampled, another or unnamed model, other or unknown weights | Not adjudicated: not comparable, with why. |
 | nobody eligible | Not adjudicated: no eligible referee. |
 | the referee cannot sign | Not adjudicated: the referee asked cannot sign a verdict. |
 | the referee did not answer | Not adjudicated: the referee asked did not answer. |
@@ -80,6 +80,21 @@ the pair's one call.
 
 Without a twin bracket id from the host nothing is ever called: pairs are never
 guessed from timing.
+
+A pair is decided once at a time, and its one call is recorded before it is
+made: if this node stops mid-call, the call counts as made and not answered,
+and no further call follows on its own.
+
+## Known limits
+
+- This node records a verdict's time to the minute, so a bar can end up to
+  59 seconds before exactly `t + D`.
+- A contradiction that names no model hash bars nothing: a bar is per model,
+  and such a verdict names none. Every verdict this plugin's referee signs
+  seals the model hash.
+- The referee call (the re-answer, then the adjudicate request) runs in the
+  handler of the exchange that completed the pair, so that handler can wait up
+  to the re-answer and stream timeouts.
 
 ## 5. What this is not
 

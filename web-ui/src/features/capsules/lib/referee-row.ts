@@ -11,6 +11,7 @@ export type RefereeRow =
 const NOT_COMPARABLE_BECAUSE: Record<string, string> = {
   sampled: 'an answer was sampled (temperature above 0)',
   model_hash_differs: 'the two machines served different models',
+  model_hash_unknown: 'a machine did not say which model it served',
   weights_differ: 'the two machines served different weights',
   weights_unknown: 'a machine did not say which weights it served'
 }

@@ -49,6 +49,9 @@ pub const REASON_REFEREE_UNREACHABLE: &str = "referee_unreachable";
 
 pub const BECAUSE_SAMPLED: &str = "sampled";
 pub const BECAUSE_MODEL_HASH_DIFFERS: &str = "model_hash_differs";
+/// A twin's record names no model: its model cannot be compared, and no
+/// referee can be chosen for it.
+pub const BECAUSE_MODEL_HASH_UNKNOWN: &str = "model_hash_unknown";
 pub const BECAUSE_WEIGHTS_UNKNOWN: &str = "weights_unknown";
 pub const BECAUSE_WEIGHTS_DIFFER: &str = "weights_differ";
 
@@ -140,6 +143,13 @@ pub fn before_asking(on: bool, pair: &Pair) -> Option<Value> {
         return Some(not_adjudicated(
             REASON_NOT_COMPARABLE,
             Some(BECAUSE_SAMPLED),
+        ));
+    }
+    let named = |m: &Option<String>| m.as_deref().is_some_and(|m| !m.is_empty());
+    if !named(&a.model_hash) || !named(&b.model_hash) {
+        return Some(not_adjudicated(
+            REASON_NOT_COMPARABLE,
+            Some(BECAUSE_MODEL_HASH_UNKNOWN),
         ));
     }
     if a.model_hash != b.model_hash {
@@ -324,15 +334,28 @@ pub fn record(
     attempted: &Attempted,
     at: &str,
 ) -> std::io::Result<Value> {
+    write_line(ledger_dir, pair, attempted, at, None)
+}
+
+fn write_line(
+    ledger_dir: &Path,
+    pair: &Pair,
+    attempted: &Attempted,
+    at: &str,
+    in_flight: Option<Value>,
+) -> std::io::Result<Value> {
     use std::io::Write;
     let (bracket, request_digest, nodes) = pair.key();
-    let line = json!({
+    let mut line = json!({
         "pair": {"twin_bracket_id": bracket, "request_digest": request_digest, "node_ids": nodes},
         "capsule_ids": [pair.twins[0].capsule_id, pair.twins[1].capsule_id],
         "row": attempted.row,
         "called": attempted.calls > 0,
         "at": at,
     });
+    if let Some(in_flight) = in_flight {
+        line["in_flight"] = in_flight;
+    }
     std::fs::create_dir_all(ledger_dir)?;
     let mut file = std::fs::OpenOptions::new()
         .create(true)
@@ -341,6 +364,65 @@ pub fn record(
     writeln!(file, "{line}")?;
     file.sync_data()?;
     Ok(line)
+}
+
+/// Record, BEFORE the referee is asked, that `pair`'s one call is being made
+/// to `referee` from `tier`. Until the answer is recorded the pair reads as a
+/// call made and not answered, so if this node stops mid-call, the call is
+/// still used after a restart: no further call is made on its own.
+pub fn record_in_flight(
+    ledger_dir: &Path,
+    pair: &Pair,
+    referee: &str,
+    tier: u64,
+    at: &str,
+) -> std::io::Result<()> {
+    let attempted = Attempted {
+        calls: 1,
+        row: not_adjudicated(REASON_REFEREE_UNREACHABLE, None),
+    };
+    write_line(
+        ledger_dir,
+        pair,
+        &attempted,
+        at,
+        Some(json!({"referee": referee, "tier": tier})),
+    )
+    .map(|_| ())
+}
+
+/// The pairs this process is deciding right now. One decision per pair at a
+/// time: the exchange handler and the operator's "ask again" take the same
+/// marker, so the two can never both make the pair's one call.
+fn deciding() -> &'static std::sync::Mutex<std::collections::HashSet<PairKey>> {
+    static DECIDING: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<PairKey>>> =
+        std::sync::OnceLock::new();
+    DECIDING.get_or_init(Default::default)
+}
+
+/// Held while a pair is being decided; released when dropped.
+pub struct Deciding(PairKey);
+
+impl Deciding {
+    /// The marker for `pair`, or `None` when it is already being decided.
+    pub fn claim(pair: &Pair) -> Option<Self> {
+        let key = pair.key();
+        let mut set = deciding()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Built only when the claim succeeds: a marker built and dropped
+        // here would take this same lock in its `Drop` and never return.
+        set.insert(key.clone()).then(|| Self(key))
+    }
+}
+
+impl Drop for Deciding {
+    fn drop(&mut self) {
+        deciding()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.0);
+    }
 }
 
 /// The latest row for each twin bracket this node has an outcome for.
@@ -542,6 +624,68 @@ mod tests {
         assert_eq!(
             pane["rows"][0]["twin"]["referee_row"]["reason"],
             json!(REASON_NO_ELIGIBLE_REFEREE)
+        );
+    }
+
+    #[test]
+    fn twins_with_no_model_named_are_not_comparable() {
+        let mut p = pair(Some("bracket-1"));
+        p.twins[0].model_hash = None;
+        p.twins[1].model_hash = None;
+        let out = Book::default().attempt(
+            true,
+            &p,
+            false,
+            || panic!("nobody chosen"),
+            |_, _| panic!("no call"),
+        );
+        assert_eq!(
+            out.row,
+            not_adjudicated(REASON_NOT_COMPARABLE, Some(BECAUSE_MODEL_HASH_UNKNOWN))
+        );
+        p.twins[1].model_hash = Some("m".into());
+        assert_eq!(
+            before_asking(true, &p),
+            Some(not_adjudicated(
+                REASON_NOT_COMPARABLE,
+                Some(BECAUSE_MODEL_HASH_UNKNOWN)
+            ))
+        );
+    }
+
+    /// A call recorded as in flight, and never answered (the node stopped
+    /// mid-call), has used the pair's one call after a restart.
+    #[test]
+    fn a_call_recorded_in_flight_is_the_one_call_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pair(Some("bracket-1"));
+        record_in_flight(dir.path(), &p, "node-c", 1, "2026-09-29T00:00:00Z").unwrap();
+        let mut book = Book::load(dir.path());
+        let again = book.attempt(true, &p, true, chosen, |_, _| panic!("no second call"));
+        assert_eq!(
+            (again.calls, again.row["reason"].clone()),
+            (0, json!(REASON_REFEREE_UNREACHABLE))
+        );
+        assert!(book.gate(true, &p, false).is_some(), "nor on its own");
+    }
+
+    /// The handler and "ask again" share one marker per pair.
+    #[test]
+    fn only_one_decision_per_pair_at_a_time() {
+        let p = pair(Some("bracket-1"));
+        let first = Deciding::claim(&p).expect("free");
+        assert!(
+            Deciding::claim(&p).is_none(),
+            "a second decision waits its turn"
+        );
+        assert!(
+            Deciding::claim(&pair(Some("bracket-2"))).is_some(),
+            "another pair is free"
+        );
+        drop(first);
+        assert!(
+            Deciding::claim(&p).is_some(),
+            "released when the first is done"
         );
     }
 }
