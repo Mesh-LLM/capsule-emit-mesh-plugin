@@ -14,14 +14,6 @@ if [ ${#features[@]} -eq 0 ]; then
   mapfile -t features < <(python3 -c 'import json,sys; [print(m["feature"]) for m in json.load(open(sys.argv[1]))["mutants"]]' "$mutants")
 fi
 
-# Cases a mutant is listed for that no implementation following the rules can
-# fail. The lists were made by faulting the reference implementation, which
-# still compares twins whose weights are unknown and still answers a request
-# that states no tier; under the rules the first are "not comparable" and the
-# second are refused before any referee's answer is read, so the fault cannot
-# reach them. Each is a correction owed to the corpus at its source.
-unreachable="adjudicate/weights_unknown_on_one_side adjudicate/weights_unknown_on_both_sides service/selection_tier_missing service/selection_tier_out_of_range"
-
 status=0
 for feature in "${features[@]}"; do
   cargo test --locked --bin capsule-emit-mesh --features "$feature" --no-run -q
@@ -30,12 +22,11 @@ for feature in "${features[@]}"; do
     status=1
     continue
   fi
-  missing=$(RUN_OUTPUT="$out" UNREACHABLE="$unreachable" python3 - "$mutants" "$feature" <<'EOF'
+  missing=$(RUN_OUTPUT="$out" python3 - "$mutants" "$feature" <<'EOF'
 import json, os, re, sys
 mutant = next(m for m in json.load(open(sys.argv[1]))["mutants"] if m["feature"] == sys.argv[2])
 reported = set(re.findall(r"^differs: (\S+)$", os.environ["RUN_OUTPUT"], re.M))
-unreachable = set(os.environ["UNREACHABLE"].split())
-print(" ".join(sorted(set(mutant["must_fail"]) - reported - unreachable)))
+print(" ".join(sorted(set(mutant["must_fail"]) - reported)))
 EOF
 )
   if [ -n "$missing" ]; then
