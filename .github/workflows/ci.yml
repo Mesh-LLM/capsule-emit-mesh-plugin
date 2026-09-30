@@ -184,8 +184,11 @@ jobs:
       - name: Neutrality scanner self-test (the scan itself is neutrality.yml)
         run: node scripts/neutrality-scan.mjs --self-test
 
+      # The test files are named: a bare directory argument is read as a
+      # module path by some Node versions (24 fails with "Cannot find module"),
+      # and as a directory to search by others.
       - name: Neutrality scanner tests (never follows a symlink out of the tree)
-        run: node --test scripts/
+        run: node --test scripts/*.test.mjs
 
   # The release packaging, end to end on a debug build, twice: the two archives
   # must be byte-identical.

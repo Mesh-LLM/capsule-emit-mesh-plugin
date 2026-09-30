@@ -2,7 +2,7 @@
 // Tests for the neutrality scanner: it scans tracked regular files, never
 // follows a symlink out of the tree, fails closed, and prints nothing that
 // varies with the input unless the run is trusted.
-// Run: node --test scripts/
+// Run: node --test scripts/*.test.mjs
 
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'

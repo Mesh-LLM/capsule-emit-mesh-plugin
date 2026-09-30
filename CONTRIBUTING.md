@@ -31,7 +31,7 @@ pnpm typecheck && pnpm test && pnpm build   # writes ../bundle/register-mesh-plu
 
 # Repository checks
 scripts/no-keys.sh
-node --test scripts/
+node --test scripts/*.test.mjs
 (cd vectors && shasum -a 256 -c SHA256SUMS)
 ```
 
@@ -63,7 +63,7 @@ Once, on Linux:
   carries none of a reserved vocabulary, supplied as a repository secret. On a
   pull request from a fork, a failing run says only that it failed, with no
   term, file or line; a maintainer re-runs it on a trusted event to see the
-  details. The scanner's own tests (`node --test scripts/`) run on every pull
+  details. The scanner's own tests (`node --test scripts/*.test.mjs`) run on every pull
   request in `ci.yml`. The neutrality check runs on
   `pull_request_target` so that fork pull requests get the secret; that is
   safe only because the workflow never runs, builds or installs anything
