@@ -40,6 +40,8 @@ mod settlement_channel;
 mod share_policy;
 mod split_stage;
 mod strict_json;
+#[cfg(test)]
+mod two_node_e2e;
 mod web_ui_manifest;
 
 use crate::producer::capsule::TokenUsage;

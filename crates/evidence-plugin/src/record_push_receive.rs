@@ -788,7 +788,7 @@ fn named_server(record: &Value) -> Option<String> {
 /// Every weights digest a record names for its model: the producer's
 /// `weights_digest.digest`, the host's `serving_provenance.model.weights_digest`,
 /// and a `sha256-<hex>` / `sha256:<hex>` inside `model_attestation.model_id`.
-fn weights_claims(record: &Value) -> BTreeSet<String> {
+pub(crate) fn weights_claims(record: &Value) -> BTreeSet<String> {
     let ca = record.pointer("/model_attestation/compute_attestation");
     let mut candidates: Vec<String> = Vec::new();
     if let Some(d) = ca
