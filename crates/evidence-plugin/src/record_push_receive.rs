@@ -89,9 +89,6 @@ pub const REASON_MODEL_MISMATCH: &str = "model_mismatch";
 pub const REASON_INCLUSION_UNVERIFIED: &str = "inclusion_unverified";
 pub const REASON_CHECKPOINT_STALE: &str = "checkpoint_stale";
 pub const REASON_CHECKPOINT_EQUIVOCATION: &str = "checkpoint_equivocation";
-/// A referee's verdict delivered here: this node has no referee yet, so it
-/// neither checks nor holds verdicts, and refuses every delivery.
-pub const REASON_ADJUDICATION_UNAVAILABLE: &str = "adjudication_unavailable";
 
 /// The held-artifact stores, beside `capsules.jsonl`. Nothing chains or
 /// checkpoints them.
@@ -194,6 +191,40 @@ pub fn receive(
     let Ok(parsed) = strict_json::parse(body) else {
         return Ok(refuse(REASON_REQUEST_MALFORMED));
     };
+
+    // A referee's verdict, delivered by a courier (`crate::referee::hold`):
+    // the same policy gate and sender requirement as a pushed half.
+    if parsed.get(crate::referee::hold::DELIVERY_MARKER).is_some() && parsed.is_object() {
+        if node.record_at_completion_off {
+            return Ok(refuse(REASON_POLICY_DECLINE));
+        }
+        let Some(sender) = sender.filter(|s| !s.is_empty()) else {
+            return Ok(refuse(REASON_SIGNATURE_UNVERIFIED));
+        };
+        let own_key_id = hex::encode(node.signing_key.verifying_key().to_bytes());
+        let door = crate::referee::hold::Node {
+            ledger_dir: node.ledger_dir,
+            peer_keys: node.peer_keys,
+            own_key_id: &own_key_id,
+        };
+        return match crate::referee::hold::hold_delivered_verdict(&door, &parsed, sender, now)? {
+            Ok(reply) => Ok(reply),
+            Err(reason) => {
+                let entry = json!({
+                    "capsule_id": null,
+                    "claimed_sender_peer_id": sender,
+                    "reason": reason,
+                    "rejected_at": now,
+                });
+                // Refused before, or because, the verdict's signature is
+                // checked: the small share of the log, like any other
+                // unauthenticated refusal.
+                let limit = node.rejected_log_limit / UNAUTHENTICATED_LOG_SHARE;
+                append_capped(node.ledger_dir, REJECTED_PUSHES_FILENAME, &entry, limit)?;
+                Ok(refuse(reason))
+            }
+        };
+    }
 
     let (half, bundle, malformed) = match parsed.get(BUNDLE_MARKER) {
         Some(_) if parsed.is_object() => {
@@ -1268,18 +1299,26 @@ mod tests {
         assert_eq!(unknown["reason"], REASON_SIGNATURE_UNVERIFIED);
     }
 
-    /// A delivered verdict is refused, signed by this node over the body it
-    /// was sent, never acknowledged: this node has no referee yet.
+    /// A delivered verdict goes to the referee's door, not the record
+    /// checks: a malformed one is refused, signed, and logged without an id.
     #[test]
-    fn a_delivered_verdict_is_refused_signed() {
+    fn a_malformed_delivered_verdict_is_refused_signed() {
+        let dir = tempfile::tempdir().unwrap();
         let key = SigningKey::from_bytes(&[9; 32]);
-        let body = br#"{"adjudication_delivery": 1, "verdict_capsule": {}}"#;
-        let reply = refuse(&key, body, REASON_ADJUDICATION_UNAVAILABLE, NOW);
-        assert_eq!(reply["reason"], REASON_ADJUDICATION_UNAVAILABLE);
+        let node = Receiver {
+            ledger_dir: dir.path(),
+            signing_key: &key,
+            peer_keys: None,
+            record_at_completion_off: false,
+            rejected_log_limit: MAX_REJECTED_LOG_BYTES,
+        };
+        let body = br#"{"adjudication_delivery": 1, "verdict_capsule": {}, "extra": 1}"#;
+        let reply = receive(&node, body, Some("node-c"), NOW).unwrap();
+        assert_eq!(reply["reason"], REASON_REQUEST_MALFORMED);
         assert!(reply.get("status").is_none(), "never a receipt");
         assert_eq!(reply["request_digest"], hex::encode(Sha256::digest(body)));
         let signed = sorted_compact(&json!({
-            "issued_at": NOW, "reason": REASON_ADJUDICATION_UNAVAILABLE, "request_digest": reply["request_digest"],
+            "issued_at": NOW, "reason": REASON_REQUEST_MALFORMED, "request_digest": reply["request_digest"],
         }));
         let sig: [u8; 64] = hex::decode(reply["sig"].as_str().unwrap())
             .unwrap()
@@ -1288,5 +1327,7 @@ mod tests {
         key.verifying_key()
             .verify_strict(signed.as_bytes(), &Signature::from_bytes(&sig))
             .expect("signed by this node");
+        let logged = std::fs::read_to_string(dir.path().join(REJECTED_PUSHES_FILENAME)).unwrap();
+        assert!(logged.contains("\"capsule_id\":null"));
     }
 }

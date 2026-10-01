@@ -31,6 +31,26 @@ pub fn announced_key_in(registry: Option<&str>, peer_id: &str) -> Option<String>
     }
 }
 
+/// The one announced peer whose key is `key_id` in `registry`: this node's
+/// own id from its own key. `None` when no peer, or more than one, announces
+/// it: never a guess.
+pub fn peer_id_for_key_in(registry: Option<&str>, key_id: &str) -> Option<String> {
+    if key_id.is_empty() {
+        return None;
+    }
+    let raw = registry.filter(|raw| !raw.is_empty())?;
+    let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let mut named = parsed
+        .as_object()?
+        .iter()
+        .filter(|(_, key)| key.as_str() == Some(key_id))
+        .map(|(peer, _)| peer.clone());
+    match (named.next(), named.next()) {
+        (Some(peer), None) => Some(peer),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +86,26 @@ mod tests {
             None,
             "not an object"
         );
+    }
+
+    #[test]
+    fn a_key_names_a_peer_only_when_exactly_one_announces_it() {
+        let registry = r#"{"node-a": "ab", "node-b": "cd", "node-c": "cd"}"#;
+        assert_eq!(
+            peer_id_for_key_in(Some(registry), "ab").as_deref(),
+            Some("node-a")
+        );
+        assert_eq!(
+            peer_id_for_key_in(Some(registry), "cd"),
+            None,
+            "two peers announce it"
+        );
+        assert_eq!(
+            peer_id_for_key_in(Some(registry), "ef"),
+            None,
+            "nobody announces it"
+        );
+        assert_eq!(peer_id_for_key_in(Some(registry), ""), None, "no key");
+        assert_eq!(peer_id_for_key_in(None, "ab"), None, "unset");
     }
 }

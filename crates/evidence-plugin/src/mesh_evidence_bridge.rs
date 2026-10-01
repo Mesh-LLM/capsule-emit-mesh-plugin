@@ -22,9 +22,12 @@
 //! `policy_declined` before the ledger is read. Every answer is logged to
 //! the "asked of you" log (`received_log`).
 //!
-//! This node has no referee yet. A referee's `adjudicate` request is not a
-//! -00 subject, so it is answered like any other request that does not
-//! parse: a signed `request_malformed` refusal, never a verdict.
+//! An `adjudicate` request (a requester asking this node to referee two
+//! twins) is not a -00 subject: it is plugin-internal, carried on the same
+//! stream, and answered by the referee's door (`crate::referee::service`)
+//! with a signed verdict or a signed refusal. A verdict's
+//! `adjudication_issued` record is sealed on this node's chain before the
+//! reply leaves; if that seal fails, nothing is sent.
 //!
 //! **Requester role**: the streamed-HTTP-binding path mesh-llm ships
 //! (`handle_streamed_http_binding`) forwards a binding's *static* manifest
@@ -210,8 +213,21 @@ async fn answer_in_process(
     let permit = IN_FLIGHT
         .get_or_init(|| tokio::sync::Semaphore::new(MAX_IN_FLIGHT_ANSWERS))
         .try_acquire();
+    // A verdict this node issues lands on its own counts: the opt-in
+    // stop-routing rule looks again (it does nothing while off).
+    let adjudicate = serde_json::from_slice::<serde_json::Value>(&request_bytes)
+        .is_ok_and(|request| crate::referee::service::is_adjudicate_request(&request));
+    let for_rule = capsules.clone();
     let answered = tokio::task::spawn_blocking(move || {
         let now = crate::evidence_answer::now_utc();
+        // Past the in-flight cap, an adjudicate request is declined like any
+        // other (below), before any work on it.
+        if permit.is_ok() {
+            if let Some(verdict_or_refusal) = referee_answer(&capsules, &request_bytes, &now) {
+                drop(permit);
+                return verdict_or_refusal;
+            }
+        }
         let responder = crate::evidence_answer::Responder {
             ledger_dir: capsules.ledger_dir(),
             signing_key: capsules.signing_key(),
@@ -235,7 +251,153 @@ async fn answer_in_process(
         outcome.wire_bytes()
     })
     .await;
+    if adjudicate {
+        crate::routing_rule::spawn_evaluate(for_rule);
+    }
     answered.ok().flatten()
+}
+
+/// Why an evidence request got no answer.
+#[derive(Debug)]
+pub(crate) enum SendError {
+    /// The stream to the peer's plugin could not be opened (unreachable, or
+    /// it runs no plugin that takes the channel).
+    NotOpened(String),
+    /// Opened, but nothing came back in time (the text says why, with a
+    /// leading ": " when there is detail).
+    NoAnswer(String),
+    /// Something came back that is not JSON.
+    Malformed(String),
+}
+
+/// Send `request` to `peer_id` over the evidence stream and read the answer:
+/// `(the request bytes sent, the peer's JSON)`.
+pub(crate) async fn send_evidence_request(
+    context: &mut PluginContext<'_>,
+    peer_id: &str,
+    request: &serde_json::Value,
+) -> Result<(Vec<u8>, serde_json::Value), SendError> {
+    let open_request = OpenMeshStreamRequest {
+        stream_id: next_stream_id("evidence-request"),
+        target_peer_id: peer_id.to_string(),
+        plugin_id: String::new(), // host fills this in from the connection.
+        channel: EVIDENCE_REQUEST_CHANNEL.to_string(),
+        purpose: mesh_llm_plugin::proto::StreamPurpose::Generic as i32,
+        mode: mesh_llm_plugin::proto::StreamMode::RawBytes as i32,
+        bidirectional: true,
+        content_type: Some("application/json".to_string()),
+        correlation_id: Some(next_stream_id("evidence-correlation")),
+        metadata_json: None,
+        expected_bytes: None,
+        idle_timeout_ms: Some(requester_idle_timeout_ms()),
+    };
+    let stream: LocalStream = context
+        .connect_mesh_stream(open_request)
+        .await
+        .map_err(|error| SendError::NotOpened(error.to_string()))?;
+    let (mut read_half, mut write_half) = stream.into_split();
+    let request_bytes =
+        serde_json::to_vec(request).map_err(|error| SendError::Malformed(error.to_string()))?;
+    let write_and_read = async {
+        write_half.write_all(&request_bytes).await?;
+        write_half.shutdown().await?;
+        // Bounded: the peer's answer is peer-controlled bytes too.
+        read_to_end_bounded(&mut read_half, "peer evidence-request response").await
+    };
+    let response_bytes = tokio::time::timeout(
+        Duration::from_millis(requester_idle_timeout_ms()),
+        write_and_read,
+    )
+    .await
+    .map_err(|_| SendError::NoAnswer(String::new()))?
+    .map_err(|error| SendError::NoAnswer(format!(": {error}")))?;
+    let answer = serde_json::from_slice(&response_bytes)
+        .map_err(|error| SendError::Malformed(error.to_string()))?;
+    Ok((request_bytes, answer))
+}
+
+/// The referee's answer to an `adjudicate` request, as wire bytes; `None`
+/// for any other request. `Some(None)` sends nothing: a verdict whose
+/// `adjudication_issued` record did not seal is never sent.
+fn referee_answer(
+    capsules: &crate::capsule_emit::CapsuleState,
+    request_bytes: &[u8],
+    now: &str,
+) -> Option<Option<Vec<u8>>> {
+    let parsed: serde_json::Value = serde_json::from_slice(request_bytes).ok()?;
+    if !crate::referee::service::is_adjudicate_request(&parsed) {
+        return None;
+    }
+    let peer_keys = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let referee = crate::referee::service::Referee {
+        ledger_dir: capsules.ledger_dir(),
+        signing_key: capsules.signing_key(),
+        peer_keys: peer_keys.as_deref(),
+    };
+    let reply = match crate::referee::service::handle_adjudicate_request(
+        &referee,
+        request_bytes,
+        now,
+    ) {
+        Ok(reply) => reply,
+        Err(error) => {
+            tracing::warn!(%error, "an adjudicate request was not answered: the verdict could not be held");
+            return Some(None);
+        }
+    };
+    if reply
+        .get(crate::referee::service::ADJUDICATION_VERDICT_MARKER)
+        .is_some()
+    {
+        if let Err(error) = seal_issued_verdict(capsules, &reply) {
+            tracing::warn!(%error, "a verdict was issued but its record did not seal; nothing sent");
+            return Some(None);
+        }
+    }
+    Some(serde_json::to_vec(&reply).ok())
+}
+
+/// Seal this node's `adjudication_issued` record of the verdict in `reply`.
+/// Keyed on the verdict id: a repeated request seals nothing more.
+fn seal_issued_verdict(
+    capsules: &crate::capsule_emit::CapsuleState,
+    reply: &serde_json::Value,
+) -> anyhow::Result<()> {
+    use serde_json::Value;
+    let text = |key: &str| reply.get(key).and_then(Value::as_str);
+    let pair = |key: &str| -> Option<[&str; 2]> {
+        match reply.get(key)?.as_array()?.as_slice() {
+            [a, b] => Some([a.as_str()?, b.as_str()?]),
+            _ => None,
+        }
+    };
+    let (Some(verdict), Some(id), Some(referee), Some(halves), Some(nodes)) = (
+        text("verdict"),
+        text("verdict_capsule_id"),
+        text("referee_node_id"),
+        pair("halves"),
+        pair("half_node_ids"),
+    ) else {
+        anyhow::bail!("the issued verdict's facts are incomplete");
+    };
+    let model_hash = reply
+        .pointer("/verdict_capsule/model_attestation/compute_attestation/adjudication/model_hash")
+        .and_then(Value::as_str);
+    let facts = crate::capsule_emit::VerdictFacts {
+        verdict,
+        verdict_capsule_id: id,
+        referee_node_id: referee,
+        halves,
+        half_node_ids: nodes,
+        twin_bracket_id: text("twin_bracket_id"),
+        model_hash,
+    };
+    capsules.emit_adjudication_issued(
+        &facts,
+        text("referee_capsule_id"),
+        text("issued_at").unwrap_or_default(),
+    )?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------
@@ -292,50 +454,25 @@ pub async fn handle_mesh_evidence_request(
         add_requester_id(&mut args.request, self_id.as_deref());
     }
 
-    let open_request = OpenMeshStreamRequest {
-        stream_id: next_stream_id("evidence-request"),
-        target_peer_id: args.peer_id.clone(),
-        plugin_id: String::new(), // host fills this in from the connection.
-        channel: EVIDENCE_REQUEST_CHANNEL.to_string(),
-        purpose: mesh_llm_plugin::proto::StreamPurpose::Generic as i32,
-        mode: mesh_llm_plugin::proto::StreamMode::RawBytes as i32,
-        bidirectional: true,
-        content_type: Some("application/json".to_string()),
-        correlation_id: Some(next_stream_id("evidence-correlation")),
-        metadata_json: None,
-        expected_bytes: None,
-        idle_timeout_ms: Some(requester_idle_timeout_ms()),
-    };
-
-    let stream: LocalStream = context
-        .connect_mesh_stream(open_request)
-        .await
-        .map_err(|error| PluginError::internal(format!("could not reach peer: {error}")))?;
-    let (mut read_half, mut write_half) = stream.into_split();
-
-    let request_bytes = serde_json::to_vec(&args.request)
-        .map_err(|error| PluginError::internal(format!("request is not valid JSON: {error}")))?;
-
-    let write_and_read = async {
-        write_half.write_all(&request_bytes).await?;
-        write_half.shutdown().await?;
-        // Bounded: the peer's answer is peer-controlled bytes too.
-        read_to_end_bounded(&mut read_half, "peer evidence-request response").await
-    };
-
-    let response_bytes = tokio::time::timeout(
-        Duration::from_millis(requester_idle_timeout_ms()),
-        write_and_read,
-    )
-    .await
-    .map_err(|_| PluginError::internal("peer does not answer evidence requests"))?
-    .map_err(|error| {
-        PluginError::internal(format!("peer does not answer evidence requests: {error}"))
-    })?;
-
-    let answer: serde_json::Value = serde_json::from_slice(&response_bytes).map_err(|error| {
-        PluginError::internal(format!("peer returned malformed response: {error}"))
-    })?;
+    let (request_bytes, answer) =
+        match send_evidence_request(context, &args.peer_id, &args.request).await {
+            Ok(sent) => sent,
+            Err(SendError::NotOpened(error)) => {
+                return Err(PluginError::internal(format!(
+                    "could not reach peer: {error}"
+                )))
+            }
+            Err(SendError::NoAnswer(error)) => {
+                return Err(PluginError::internal(format!(
+                    "peer does not answer evidence requests{error}"
+                )))
+            }
+            Err(SendError::Malformed(error)) => {
+                return Err(PluginError::internal(format!(
+                    "peer returned malformed response: {error}"
+                )))
+            }
+        };
     if !args.verify {
         return Ok(answer);
     }
@@ -369,10 +506,12 @@ fn verifying_key(key_id: &str) -> Option<ed25519_dalek::VerifyingKey> {
 }
 
 /// The file beside the ledger that lists every adjudicate request this node
-/// sent (`adjudication_hold.REQUESTED_ADJUDICATIONS_FILENAME`).
+/// sent (`crate::verdict_counts::REQUESTED_FILENAME`).
 pub const REQUESTED_ADJUDICATIONS_FILENAME: &str = "requested-adjudications.jsonl";
 
-/// `{referee, halves, twin_bracket_id, asked_at}` for an adjudicate request,
+/// `{referee, halves, twin_bracket_id, selection_tier, asked_at}` for an
+/// adjudicate request (the tier it was asked at: a verdict that seals another
+/// is refused when delivered, `crate::referee::hold`),
 /// or `None` for any other evidence request.
 pub fn requested_adjudication(
     peer_id: &str,
@@ -394,11 +533,12 @@ pub fn requested_adjudication(
         "referee": peer_id,
         "halves": halves,
         "twin_bracket_id": request.get("twin_bracket_id").cloned().unwrap_or(serde_json::Value::Null),
+        "selection_tier": request.get("selection_tier").cloned().unwrap_or(serde_json::Value::Null),
         "asked_at": crate::producer::timestamp::utc_now_minute(),
     }))
 }
 
-fn record_requested_adjudication(
+pub(crate) fn record_requested_adjudication(
     ledger_dir: &std::path::Path,
     asked: &serde_json::Value,
 ) -> std::io::Result<()> {
@@ -440,6 +580,7 @@ mod tests {
         let request = serde_json::json!({
             "subject": {"kind": "adjudicate"},
             "twin_bracket_id": "bracket-1",
+            "selection_tier": 2,
             "halves": [{"capsule": {"capsule_id": "a"}}, {"capsule": {"capsule_id": "b"}}],
         });
         let asked =
@@ -451,6 +592,7 @@ mod tests {
         assert_eq!(recorded["referee"], serde_json::json!("referee-node"));
         assert_eq!(recorded["halves"], serde_json::json!(["a", "b"]));
         assert_eq!(recorded["twin_bracket_id"], serde_json::json!("bracket-1"));
+        assert_eq!(recorded["selection_tier"], serde_json::json!(2));
     }
 
     #[test]

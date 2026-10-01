@@ -138,6 +138,7 @@ import {
   WITNESS_OFF
 } from '@/features/capsules/lib/tooltip-copy'
 import type { PaymentsPresence } from '@/features/capsules/api/sidecarTypes'
+import { NOT_ADJUDICATED_LINES } from '@/features/capsules/lib/referee-row'
 import {
   settlementCloseCounts,
   settlementCloseLine,
@@ -560,6 +561,10 @@ function ExchangesSection({
   // bracket's disclosure sentence; `null` (never a hardcoded 50) until a
   // sidecar actually emits it.
   const twinSampleRateDenominator = query.data?.twin_sample_rate_denominator ?? null
+  // No twin bracket on any row: the host does not mark twins, so no pair is
+  // ever adjudicated (nothing is guessed from timing). Said once, here.
+  const twinsUnmarkedLine =
+    query.data?.referee && !query.data.referee.twins_marked ? NOT_ADJUDICATED_LINES.host_does_not_mark_twins : null
   const { start: pageStart, end: pageEnd } = useMemo(() => pageRowRange(pages, safePageIndex), [pages, safePageIndex])
   const continuity = useMemo(
     () => pageBoundaryContinuity(railSegments, pageStart, pageEnd),
@@ -809,6 +814,11 @@ function ExchangesSection({
          all-clear case would just repeat the headline's count. */}
       {exceptionsTally.needingAttention > 0 ? (
         <p className="text-sm text-fg-dim">{exceptionsFirstLine(exceptionsTally, allRowsRangeText)}</p>
+      ) : null}
+      {twinsUnmarkedLine ? (
+        <p className="type-caption text-fg-faint" data-testid="twins-unmarked">
+          Side-by-side check: {twinsUnmarkedLine}
+        </p>
       ) : null}
 
       {/* D4(c): no "N shown" counter

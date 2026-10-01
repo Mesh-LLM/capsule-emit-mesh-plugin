@@ -15,13 +15,30 @@
 //! is a direct 1:1 map, not a re-naming exercise. Adding this schema does
 //! not by itself flip any runtime behavior -- it only makes the four
 //! switches visible and editable in the console.
+//!
+//! The same schema also declares the opt-in stop-routing rule's two settings
+//! (`routing_rule`), under their own "Routing rule" category, on the same
+//! env-var convention: `CAPSULE_EMIT_MESH_STOP_ROUTING_AFTER_CONTRADICTIONS`
+//! (off unless set) and `CAPSULE_EMIT_MESH_STOP_ROUTING_WINDOW_DAYS`.
 
-use mesh_llm_plugin::{config_enum, config_schema, config_setting, config_url, ManifestEntry};
+use mesh_llm_plugin::{
+    config_enum, config_integer, config_schema, config_setting, config_url, ManifestEntry,
+};
 
 pub const RECORD_AT_COMPLETION_KEY: &str = "share_record_at_completion";
 pub const HISTORY_SEGMENTS_KEY: &str = "share_history_segments";
 pub const ADJUDICATIONS_KEY: &str = "share_adjudications";
 pub const WITNESS_KEY: &str = "witness";
+/// The opt-in stop-routing rule (`routing_rule`): N, and D in days. Same
+/// env-suffix convention (`CAPSULE_EMIT_MESH_STOP_ROUTING_*`).
+pub const STOP_ROUTING_AFTER_KEY: &str = "stop_routing_after_contradictions";
+pub const STOP_ROUTING_WINDOW_KEY: &str = "stop_routing_window_days";
+/// The referee (`crate::referee`): whether a differing twin pair asks one
+/// (on unless set to off), and the bar window after a contradiction, in days.
+/// Same env-suffix convention (`CAPSULE_EMIT_MESH_ADJUDICATE_DIFFERING_TWINS`,
+/// `CAPSULE_EMIT_MESH_REFEREE_BAR_DAYS`).
+pub const ADJUDICATE_DIFFERING_TWINS_KEY: &str = "adjudicate_differing_twins";
+pub const REFEREE_BAR_DAYS_KEY: &str = "referee_bar_days";
 
 /// This process's own runtime env var for `share_record_at_completion` --
 /// see the module doc's "declarative only" note: no live host->plugin
@@ -64,32 +81,50 @@ fn history_segments_for(raw: Option<&str>) -> &'static str {
     }
 }
 
+/// This process's own env var for `share_adjudications`.
+pub const ENV_ADJUDICATIONS: &str = "CAPSULE_EMIT_MESH_SHARE_ADJUDICATIONS";
+
+/// Deliver a verdict to the nodes it judges: unless `share_adjudications` is
+/// explicitly `off` (the default is `deliver_to_subjects`).
+pub fn adjudications_delivered() -> bool {
+    crate::settings::var(ENV_ADJUDICATIONS).ok().as_deref() != Some("off")
+}
+
 const CATEGORY_ID: &str = "share";
 const CATEGORY_LABEL: &str = "Sharing policy";
 const CATEGORY_SUMMARY: &str = "What this node shares, with whom, by default. Every default keys \
     on relationship (counterparty in the window), never proximity or latency.";
+
+const REFEREE_CATEGORY_ID: &str = "referee";
+const REFEREE_CATEGORY_LABEL: &str = "Referee";
+const REFEREE_CATEGORY_SUMMARY: &str =
+    "An independent check of two twins that answered the same request differently. \
+    Eligibility is yes or no, from this node's own records; no figure about a peer is computed, and nothing is sent.";
+
+const RULE_CATEGORY_ID: &str = "routing_rule";
+const RULE_CATEGORY_LABEL: &str = "Routing rule";
+const RULE_CATEGORY_SUMMARY: &str =
+    "An optional rule of yours for when this node stops routing to a \
+    peer. Off by default.";
 
 /// The `config_schema` manifest entry naming all four switches. Attach with
 /// `DeclarativePluginBuilder::config_item`.
 pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
     config_schema(plugin_id)
         .setting(
-            config_setting(
-                RECORD_AT_COMPLETION_KEY,
-                config_enum(["counterparty", "off"]),
-            )
-            .default_value(&"counterparty")
-            .description(
-                "Push this node's own sealed record of a completed exchange to the \
+            config_setting(RECORD_AT_COMPLETION_KEY, config_enum(["counterparty", "off"]))
+                .default_value(&"counterparty")
+                .description(
+                    "Push this node's own sealed record of a completed exchange to the \
                      counterparty (counterparty), or don't (off). With checkpointing on, the \
                      push also carries a signed checkpoint of this node's log and the record's \
                      inclusion proof -- the checkpoint reveals the log's total size (records \
                      across all peers) and its time, never any other record's content. \
                      Symmetric: a node with this off also does not receive the other side's \
                      push -- fetch-on-request still works either way.",
-            )
-            .label("Record at completion")
-            .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 0),
+                )
+                .label("Record at completion")
+                .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 0),
         )
         .setting(
             config_setting(
@@ -106,18 +141,15 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
             .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 1),
         )
         .setting(
-            config_setting(
-                ADJUDICATIONS_KEY,
-                config_enum(["deliver_to_subjects", "off"]),
-            )
-            .default_value(&"deliver_to_subjects")
-            .description(
-                "Deliver a sealed verdict to every node it judges (default), or don't. The \
+            config_setting(ADJUDICATIONS_KEY, config_enum(["deliver_to_subjects", "off"]))
+                .default_value(&"deliver_to_subjects")
+                .description(
+                    "Deliver a sealed verdict to every node it judges (default), or don't. The \
                      subject acks or disputes on its own chain -- this is delivery, never a \
                      computed standing.",
-            )
-            .label("Adjudications")
-            .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 2),
+                )
+                .label("Adjudications")
+                .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 2),
         )
         .setting(
             config_setting(WITNESS_KEY, config_url())
@@ -127,6 +159,50 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
                 )
                 .label("Witness")
                 .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 3),
+        )
+        .setting(
+            config_setting(ADJUDICATE_DIFFERING_TWINS_KEY, config_enum(["on", "off"]))
+                .default_value(&"on")
+                .description(
+                    "Ask a referee when two twins of a pair the host marked answered the same \
+                     request at temperature 0, on the same model and weights, and differ (on, the \
+                     default), or never (off). At most one call per pair, never retried. A pair \
+                     with no ruling reads \"Not adjudicated\" with the reason, and never counts \
+                     against either twin.",
+                )
+                .label("Ask a referee when twins differ")
+                .category(REFEREE_CATEGORY_ID, REFEREE_CATEGORY_LABEL, REFEREE_CATEGORY_SUMMARY, 0),
+        )
+        .setting(
+            config_setting(REFEREE_BAR_DAYS_KEY, config_integer())
+                .default_value(&30)
+                .description(
+                    "After a referee-signed contradiction for a model, a node is not asked to \
+                     referee that model for this many days (default 30), counted from when this \
+                     node recorded the verdict. A later corroboration does not end it early.",
+                )
+                .label("Bar window, days")
+                .category(REFEREE_CATEGORY_ID, REFEREE_CATEGORY_LABEL, REFEREE_CATEGORY_SUMMARY, 1),
+        )
+        .setting(
+            config_setting(STOP_ROUTING_AFTER_KEY, config_integer())
+                .description(
+                    "Stop routing to a peer after this many contradictions within the window below. \
+                     Off when empty or 0 (the default). Only verdicts this node asked a referee \
+                     for, and whose signature it checked, count, once per referee and pair of \
+                     answers; with N of 2 or more, no single referee can reach N alone. When it fires, the host blocks the peer until you undo \
+                     it, exactly like Stop routing, and the sealed record names this rule and \
+                     cites the verdicts. Undo it the same way. No figure about a peer is computed, and nothing is sent.",
+                )
+                .label("Stop routing after N contradictions")
+                .category(RULE_CATEGORY_ID, RULE_CATEGORY_LABEL, RULE_CATEGORY_SUMMARY, 0),
+        )
+        .setting(
+            config_setting(STOP_ROUTING_WINDOW_KEY, config_integer())
+                .default_value(&30)
+                .description("The window, in days, the contradictions must fall in (default 30).")
+                .label("Within D days")
+                .category(RULE_CATEGORY_ID, RULE_CATEGORY_LABEL, RULE_CATEGORY_SUMMARY, 1),
         )
         .into()
 }
@@ -154,8 +230,27 @@ mod tests {
                 RECORD_AT_COMPLETION_KEY,
                 HISTORY_SEGMENTS_KEY,
                 ADJUDICATIONS_KEY,
-                WITNESS_KEY
+                WITNESS_KEY,
+                ADJUDICATE_DIFFERING_TWINS_KEY,
+                REFEREE_BAR_DAYS_KEY,
+                STOP_ROUTING_AFTER_KEY,
+                STOP_ROUTING_WINDOW_KEY
             ]
+        );
+    }
+
+    #[test]
+    fn the_referee_settings_are_the_env_names_the_referee_reads() {
+        assert_eq!(
+            format!(
+                "CAPSULE_EMIT_MESH_{}",
+                ADJUDICATE_DIFFERING_TWINS_KEY.to_uppercase()
+            ),
+            crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS
+        );
+        assert_eq!(
+            format!("CAPSULE_EMIT_MESH_{}", REFEREE_BAR_DAYS_KEY.to_uppercase()),
+            crate::referee::bar::ENV_REFEREE_BAR_DAYS
         );
     }
 
@@ -178,6 +273,10 @@ mod tests {
             (HISTORY_SEGMENTS_KEY, "SHARE_HISTORY_SEGMENTS"),
             (ADJUDICATIONS_KEY, "SHARE_ADJUDICATIONS"),
             (WITNESS_KEY, "WITNESS"),
+            (ADJUDICATE_DIFFERING_TWINS_KEY, "ADJUDICATE_DIFFERING_TWINS"),
+            (REFEREE_BAR_DAYS_KEY, "REFEREE_BAR_DAYS"),
+            (STOP_ROUTING_AFTER_KEY, "STOP_ROUTING_AFTER_CONTRADICTIONS"),
+            (STOP_ROUTING_WINDOW_KEY, "STOP_ROUTING_WINDOW_DAYS"),
         ];
         for (key, suffix) in expected_env_suffix {
             assert_eq!(
@@ -203,6 +302,31 @@ mod tests {
         assert_eq!(
             by_key(ADJUDICATIONS_KEY).default_json.as_deref(),
             Some("\"deliver_to_subjects\"")
+        );
+    }
+
+    #[test]
+    fn the_stop_routing_rule_is_off_by_default() {
+        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
+        let after = schema
+            .settings
+            .iter()
+            .find(|s| s.key == STOP_ROUTING_AFTER_KEY)
+            .unwrap();
+        assert_eq!(after.default_json, None, "no N by default: the rule is off");
+        assert_eq!(
+            format!(
+                "CAPSULE_EMIT_MESH_{}",
+                STOP_ROUTING_AFTER_KEY.to_uppercase()
+            ),
+            crate::routing_rule::ENV_AFTER
+        );
+        assert_eq!(
+            format!(
+                "CAPSULE_EMIT_MESH_{}",
+                STOP_ROUTING_WINDOW_KEY.to_uppercase()
+            ),
+            crate::routing_rule::ENV_WINDOW_DAYS
         );
     }
 

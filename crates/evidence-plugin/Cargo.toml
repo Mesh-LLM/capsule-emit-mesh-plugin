@@ -28,6 +28,20 @@ mutant-record-push-skips-claims = []
 # run to FAIL on the not_authorized cases.
 mutant-evidence-skips-policy-gate = []
 
+# The referee's implementation mutants: each builds the referee with one
+# deliberate fault (vectors/parity/referee/mutants.json names the fault and
+# the cases that must catch it). CI builds each and requires the referee
+# parity run to FAIL on those cases.
+mutant-referee-select-skips-bar-window = []
+mutant-referee-select-mixes-tiers = []
+mutant-referee-select-ignores-blocked = []
+mutant-referee-verdict-tier-not-sealed = []
+mutant-referee-hold-ignores-the-asked-tier = []
+mutant-referee-request-asks-twice-per-pair = []
+mutant-referee-counts-skip-asked-gate = []
+mutant-referee-verdict-names-wrong-twin = []
+mutant-referee-hold-skips-asked-check = []
+
 [dependencies]
 mesh-llm-plugin = "0.77"
 tokio = { version = "1", features = ["full"] }
@@ -44,9 +58,12 @@ ed25519-dalek = "2"
 # COSE_Sign1 bytes for its JSON carrier.
 base64 = "0.22"
 tracing = "0.1"
-# Record and answer timestamps (`exchange_text`, `evidence_answer`).
+# Record times and the stop-routing rule's window (`routing_rule`).
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The stop-routing rule asks the host's local operator API to block a peer
+# (`routing_rule`); the interop tests also drive the plugin's routes with it.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # The capsule producer: every record this plugin seals, its ledger,
 # checkpoints and offline verification come from the capsule-emit crate; the
 # mesh record kinds are written against its extension points in `producer`.
@@ -61,8 +78,6 @@ cll = { package = "checkpointed-local-log", version = "0.2.0" }
 capsule-emit-evidence-request = "0.0.2"
 
 [dev-dependencies]
-# The interop tests drive the plugin's HTTP routes over real HTTP.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # The record-push parity run reads its own golden answers, which hold a record
 # nested at the strict parser's limit inside the answer's own nesting. Only
 # the test's fixture reader lifts the limit (`disable_recursion_limit`); a

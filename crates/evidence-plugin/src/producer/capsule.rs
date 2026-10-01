@@ -1066,6 +1066,24 @@ pub struct LocalRoutingChoice<'a> {
     /// When a block lapses (RFC 3339), or `None` for "until I undo" and for
     /// every unblock.
     pub until: Option<&'a str>,
+    /// Set when an operator rule, not a person at the console, asked for this
+    /// block: the rule and the verdicts that met it.
+    pub rule: Option<&'a RoutingRuleCitation<'a>>,
+}
+
+/// The operator rule behind a block, and the referee-signed verdicts that met
+/// it. The record cites each verdict by `sha256(salt || verdict capsule id)`
+/// under the same salt as the peer: the verdicts name the peer, so citing
+/// them in clear would tell any asker who was blocked.
+#[derive(Debug, Clone, Copy)]
+pub struct RoutingRuleCitation<'a> {
+    /// The rule's name, e.g. `stop_routing_after_contradictions`.
+    pub rule: &'a str,
+    /// N: contradictions that fire the rule.
+    pub after: u32,
+    /// D: the window, in days, they must fall in.
+    pub window_days: u32,
+    pub verdict_capsule_ids: &'a [String],
 }
 
 /// `sha256(salt || peer_id)`, lowercase hex, where `peer_id` is the endpoint id
@@ -1134,6 +1152,16 @@ pub fn seal_local_routing_choice(
                     "requested_via": "host_local_api",
                     "until": choice.until.map(committed_time),
                     "scope": "this_node_only",
+                    "rule": choice.rule.map(|rule| json!({
+                        "rule": rule.rule,
+                        "after": rule.after,
+                        "window_days": rule.window_days,
+                        "verdict_commitments": rule
+                            .verdict_capsule_ids
+                            .iter()
+                            .map(|id| json!({"alg": "SHA-256", "digest": peer_commitment(id, choice.salt)}))
+                            .collect::<Vec<_>>(),
+                    })),
                 },
                 STORE_NONCE_FIELD: fresh_store_nonce(),
             },
@@ -1331,6 +1359,9 @@ pub struct VerdictFacts<'a> {
     pub halves: [&'a str; 2],
     pub half_node_ids: [&'a str; 2],
     pub twin_bracket_id: Option<&'a str>,
+    /// The model the twins served, as the verdict seals it: counts and the
+    /// bar window are kept per model.
+    pub model_hash: Option<&'a str>,
 }
 
 fn verdict_block(facts: &VerdictFacts) -> Map<String, Value> {
@@ -1342,6 +1373,9 @@ fn verdict_block(facts: &VerdictFacts) -> Map<String, Value> {
     block.insert("half_node_ids".into(), json!(facts.half_node_ids));
     if let Some(bracket) = facts.twin_bracket_id {
         block.insert("twin_bracket_id".into(), json!(bracket));
+    }
+    if let Some(model) = facts.model_hash {
+        block.insert("model_hash".into(), json!(model));
     }
     block
 }
@@ -1419,6 +1453,89 @@ pub fn seal_adjudication_received_record(
         chain,
         signing_key,
     )
+}
+
+/// `chain.relation` of a referee's verdict record: it adjudicates the pair
+/// whose first half it chains to.
+pub const CHAIN_RELATION_ADJUDICATES: &str = "adjudicates";
+/// `compute_attestation.epistemic_type` of a verdict record: the referee's own
+/// judgment over the two halves.
+pub const EPISTEMIC_TYPE_ADJUDICATION: &str = "adjudication";
+/// The ruling block a referee's verdict record carries.
+pub const ADJUDICATION_BLOCK: &str = "adjudication";
+
+/// Seal a REFEREE's signed verdict: the ruling `block`, chained to the pair's
+/// first half (`adjudicates`), signed with the referee's own key. It is held
+/// beside the ledger and delivered as it is, never written into a chain;
+/// each chain cites it by its capsule id.
+pub fn seal_verdict_record(
+    block: Map<String, Value>,
+    half_a_capsule_id: &str,
+    signing_key: &ed25519_dalek::SigningKey,
+) -> Result<Value, SealError> {
+    let timestamp = crate::producer::timestamp::utc_now_minute();
+    let mut body = Map::new();
+    body.insert("spec_version".into(), json!(SPEC_VERSION));
+    body.insert("format_version".into(), json!(FORMAT_VERSION));
+    body.insert("canonicalization_id".into(), json!(CANONICALIZATION_ID));
+    body.insert(
+        "action_id".into(),
+        json!(format!("mesh-poc/adjudicate/{half_a_capsule_id}")),
+    );
+    body.insert("action_type".into(), json!("decide"));
+    body.insert("operator".into(), json!(LOCAL_RECORD_OPERATOR));
+    body.insert("developer".into(), json!(LOCAL_RECORD_DEVELOPER));
+    body.insert("timestamp".into(), json!(timestamp));
+    body.insert("domain".into(), json!("action"));
+    body.insert("provenance".into(), json!("referee"));
+
+    let mut compute_attestation = Map::new();
+    compute_attestation.insert("epistemic_type".into(), json!(EPISTEMIC_TYPE_ADJUDICATION));
+    compute_attestation.insert(ADJUDICATION_BLOCK.into(), Value::Object(block));
+    compute_attestation.insert(STORE_NONCE_FIELD.into(), json!(fresh_store_nonce()));
+    body.insert(
+        "model_attestation".into(),
+        json!({
+            "model_id": "n/a-adjudication",
+            "provider": LOCAL_RECORD_PROVIDER,
+            "compute_attestation": Value::Object(compute_attestation),
+        }),
+    );
+    body.insert(
+        "assurance".into(),
+        json!({
+            "attestation_mode": "self_attested",
+            "effect_mode": "not_applicable",
+            "ledger_mode": "chained",
+        }),
+    );
+    body.insert(
+        "disposition".into(),
+        json!({
+            "decision": "accept",
+            "approver": "policy",
+            "human_disposed": false,
+            "verdict_class": "assessed",
+        }),
+    );
+    body.insert(
+        "chain".into(),
+        ChainLink {
+            parent_capsule_id: half_a_capsule_id.to_string(),
+            relation: CHAIN_RELATION_ADJUDICATES.to_string(),
+        }
+        .to_value(),
+    );
+    let capsule_id = compute_capsule_id(&Value::Object(body.clone()))?;
+    let mut sealed = Map::new();
+    sealed.insert("capsule_id".into(), json!(capsule_id));
+    for (k, v) in body {
+        sealed.entry(k).or_insert(v);
+    }
+    let mut capsule = Value::Object(sealed);
+    attach_producer_envelope(&mut capsule, signing_key)
+        .expect("a verdict record always carries a hex capsule_id");
+    Ok(capsule)
 }
 
 /// A delivery of a verdict that its receiver refused, with a signed refusal.
@@ -2225,6 +2342,7 @@ mod tests {
             peer_id: &peer,
             salt: &salt,
             until: Some("2026-10-04T00:00:00Z"),
+            rule: None,
         };
         let head = "c".repeat(64);
         let capsule = seal_local_routing_choice(&choice, Some(&head), &key.signing_key).unwrap();
@@ -2250,6 +2368,55 @@ mod tests {
         assert!(capsule.get("signature").is_some());
     }
 
+    /// A block an operator rule asked for names the rule and cites its
+    /// verdicts, but only by commitment under the record's salt: the verdicts
+    /// name the peer, so no verdict id appears in the sealed bytes either.
+    #[test]
+    fn a_rule_block_cites_its_verdicts_only_by_commitment() {
+        let key = crate::producer::keys::KeyPair::generate();
+        let peer = "a70d3967bea3b22f".repeat(4);
+        let salt = [7u8; 32];
+        let verdicts = vec!["1".repeat(64), "2".repeat(64)];
+        let rule = RoutingRuleCitation {
+            rule: "stop_routing_after_contradictions",
+            after: 2,
+            window_days: 30,
+            verdict_capsule_ids: &verdicts,
+        };
+        let choice = LocalRoutingChoice {
+            change: RoutingChoiceChange::Block,
+            peer_id: &peer,
+            salt: &salt,
+            until: None,
+            rule: Some(&rule),
+        };
+        let capsule = seal_local_routing_choice(&choice, None, &key.signing_key).unwrap();
+        let fact = &capsule["model_attestation"]["compute_attestation"]["local_routing_choice"];
+        assert_eq!(
+            fact["rule"]["rule"],
+            json!("stop_routing_after_contradictions")
+        );
+        assert_eq!(fact["rule"]["after"], json!(2));
+        assert_eq!(fact["rule"]["window_days"], json!(30));
+        assert_eq!(
+            fact["rule"]["verdict_commitments"][1]["digest"],
+            json!(peer_commitment(&verdicts[1], &salt))
+        );
+        let sealed = serde_json::to_string(&capsule).unwrap();
+        assert!(verdicts.iter().all(|id| !sealed.contains(id.as_str())));
+        assert!(!sealed.contains(&peer));
+
+        let manual = LocalRoutingChoice {
+            rule: None,
+            ..choice
+        };
+        let capsule = seal_local_routing_choice(&manual, None, &key.signing_key).unwrap();
+        assert_eq!(
+            capsule["model_attestation"]["compute_attestation"]["local_routing_choice"]["rule"],
+            Value::Null
+        );
+    }
+
     /// A routing-choice record takes the same seal path as every other record
     /// (Evidence Layer -00 §12.1): a fresh 256-bit store nonce, and committed
     /// times (the record timestamp and the block's `until`) truncated to the
@@ -2264,6 +2431,7 @@ mod tests {
             peer_id: &peer,
             salt: &salt,
             until: Some("2026-10-04T00:00:37.250Z"),
+            rule: None,
         };
         let first = seal_local_routing_choice(&choice, None, &key.signing_key).unwrap();
         let second = seal_local_routing_choice(&choice, None, &key.signing_key).unwrap();
@@ -2336,6 +2504,7 @@ mod tests {
             peer_id: &peer,
             salt: &[3u8; 32],
             until: None,
+            rule: None,
         };
         let capsule = seal_local_routing_choice(&choice, None, &key.signing_key).unwrap();
         assert!(capsule.get("chain").is_none());
@@ -2697,7 +2866,6 @@ mod tests {
         assert_eq!(capsule["assurance"]["ledger_mode"], json!("standalone"));
     }
 
-    /// An amount the JCS cannot represent losslessly is refused, never sealed.
     /// A settlement record takes the same seal path as every other local
     /// record (Evidence Layer -00 §12.1): a fresh 256-bit store nonce beside
     /// the observation, and a minute-granular timestamp. Sealing the same
@@ -2737,6 +2905,7 @@ mod tests {
         );
     }
 
+    /// An amount the JCS cannot represent losslessly is refused, never sealed.
     #[test]
     fn seal_settlement_record_refuses_an_unsafe_amount() {
         let key = crate::producer::keys::KeyPair::generate();

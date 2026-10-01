@@ -131,6 +131,13 @@ fn python_repr_f64(f: f64) -> String {
     }
 }
 
+/// The JSON-DIGEST of a value, floats stringified first: the digest a signed
+/// record's `request_digest` / `response_digest` holds for a body, and the
+/// referee's digests over its own inputs (`crate::referee`).
+pub(crate) fn digest_json(value: &Value) -> Result<String, jcs::JcsError> {
+    jcs::json_digest(&stringify_floats(value.clone()))
+}
+
 /// The canonical JSON-DIGEST of a request/response body: parse as JSON,
 /// stringify floats, then `jcs::json_digest`. See the module docs for why
 /// this replaces a raw hash of the wire bytes.
@@ -1534,6 +1541,123 @@ impl CapsuleState {
         }))
     }
 
+    /// Seal the REFEREE's own record of a verdict it issued (see
+    /// `crate::producer::capsule::seal_adjudication_issued_record`), on the
+    /// same single-writer path as [`Self::emit_citing_record`]. A verdict
+    /// already recorded seals nothing (`Ok(None)`).
+    pub fn emit_adjudication_issued(
+        &self,
+        facts: &VerdictFacts,
+        referee_capsule_id: Option<&str>,
+        issued_at: &str,
+    ) -> anyhow::Result<Option<EmittedCapsule>> {
+        self.emit_adjudication_record(
+            crate::producer::capsule::ADJUDICATION_ISSUED_BLOCK,
+            facts,
+            |head, key| {
+                crate::producer::capsule::seal_adjudication_issued_record(
+                    facts,
+                    referee_capsule_id,
+                    issued_at,
+                    head,
+                    key,
+                )
+            },
+        )
+    }
+
+    /// Seal this node's own record of a verdict delivered to it (see
+    /// `crate::producer::capsule::seal_adjudication_received_record`). A
+    /// verdict already recorded seals nothing (`Ok(None)`).
+    pub fn emit_adjudication_received(
+        &self,
+        facts: &VerdictFacts,
+        held_half_capsule_id: &str,
+        received_from: &str,
+        received_at: &str,
+    ) -> anyhow::Result<Option<EmittedCapsule>> {
+        self.emit_adjudication_record(
+            crate::producer::capsule::ADJUDICATION_RECEIVED_BLOCK,
+            facts,
+            |head, key| {
+                crate::producer::capsule::seal_adjudication_received_record(
+                    facts,
+                    held_half_capsule_id,
+                    received_from,
+                    received_at,
+                    head,
+                    key,
+                )
+            },
+        )
+    }
+
+    /// Seal the courier's own record of a delivery its receiver refused (see
+    /// `crate::producer::capsule::seal_adjudication_ack_refused_record`). One
+    /// per verdict and refusing peer; a repeat seals nothing (`Ok(None)`).
+    pub fn emit_adjudication_ack_refused(
+        &self,
+        refused: &crate::producer::capsule::RefusedDelivery,
+    ) -> anyhow::Result<Option<EmittedCapsule>> {
+        self.emit_keyed_record(
+            crate::producer::capsule::ADJUDICATION_ACK_REFUSED_BLOCK,
+            &format!("{}/{}", refused.verdict_capsule_id, refused.refused_by),
+            |head, key| {
+                crate::producer::capsule::seal_adjudication_ack_refused_record(refused, head, key)
+            },
+        )
+    }
+
+    fn emit_adjudication_record(
+        &self,
+        block: &str,
+        facts: &VerdictFacts,
+        seal: impl FnOnce(
+            Option<&str>,
+            &ed25519_dalek::SigningKey,
+        ) -> Result<Value, crate::producer::capsule::SealError>,
+    ) -> anyhow::Result<Option<EmittedCapsule>> {
+        self.emit_keyed_record(block, facts.verdict_capsule_id, seal)
+    }
+
+    fn emit_keyed_record(
+        &self,
+        block: &str,
+        key: &str,
+        seal: impl FnOnce(
+            Option<&str>,
+            &ed25519_dalek::SigningKey,
+        ) -> Result<Value, crate::producer::capsule::SealError>,
+    ) -> anyhow::Result<Option<EmittedCapsule>> {
+        let mut ledger = self
+            .ledger
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if ledger.has_index_key(&crate::producer::index::adjudication_key(block, key)) {
+            return Ok(None);
+        }
+        let capsule = seal(ledger.chain_head(), &self.keys.signing_key)?;
+        let capsule_id = capsule["capsule_id"]
+            .as_str()
+            .expect("an adjudication record always sets capsule_id")
+            .to_string();
+        let payload = crate::producer::capsule::payload_bytes(&capsule);
+        let statement = build_signed_statement(
+            &SignedStatementInput {
+                payload: &payload,
+                issuer: &self.node_id,
+                subject: &capsule_id,
+                content_type: CAPSULE_CONTENT_TYPE,
+            },
+            &self.keys.signing_key,
+        );
+        ledger.append(&capsule, &statement)?;
+        Ok(Some(EmittedCapsule {
+            capsule_id,
+            capsule,
+        }))
+    }
+
     /// Seal a local routing choice (block or unblock) onto the same
     /// single-writer chain, committing to the peer with the caller's salt. The
     /// caller keeps that salt; it is the only way to say later which peer the
@@ -1544,12 +1668,14 @@ impl CapsuleState {
         peer_id: &str,
         until: Option<&str>,
         salt: &[u8; 32],
+        rule: Option<&crate::producer::capsule::RoutingRuleCitation<'_>>,
     ) -> anyhow::Result<EmittedRoutingChoice> {
         let choice = crate::producer::capsule::LocalRoutingChoice {
             change,
             peer_id,
             salt,
             until,
+            rule,
         };
         let mut ledger = self
             .ledger
@@ -1591,6 +1717,8 @@ pub struct EmittedRoutingChoice {
 
 /// See `crate::producer::capsule::InclusionCitation`.
 pub use crate::producer::capsule::InclusionCitation;
+/// See `crate::producer::capsule::VerdictFacts`.
+pub use crate::producer::capsule::VerdictFacts;
 
 impl CapsuleState {
     /// Seal, chain, and ledger one SETTLEMENT record -- this payer node's
@@ -1685,10 +1813,17 @@ mod tests {
                 &peer,
                 Some("2026-10-04T00:00:00Z"),
                 &block_salt,
+                None,
             )
             .expect("seal block");
         let unblock = state
-            .emit_local_routing_choice(RoutingChoiceChange::Unblock, &peer, None, &unblock_salt)
+            .emit_local_routing_choice(
+                RoutingChoiceChange::Unblock,
+                &peer,
+                None,
+                &unblock_salt,
+                None,
+            )
             .expect("seal unblock");
 
         let ledger =

@@ -1,5 +1,7 @@
 //! `mesh_local_routing_choice`: the host's block store asks this plugin to
-//! seal a record of a local routing choice (block or unblock a peer).
+//! seal a record of a local routing choice (block or unblock a peer). When the
+//! opt-in operator rule asked the host for the block (`routing_rule`), the
+//! record also names the rule and cites the verdicts that met it.
 //!
 //! The host owns the choice and enforces it in its router; this plugin only
 //! seals the record onto the node's one chain. The record names the peer by a
@@ -9,7 +11,7 @@
 
 use std::sync::Arc;
 
-use crate::producer::capsule::RoutingChoiceChange;
+use crate::producer::capsule::{RoutingChoiceChange, RoutingRuleCitation};
 use mesh_llm_plugin::{PluginError, PluginResult};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -64,8 +66,25 @@ pub fn handle_local_routing_choice(
         .ok()
         .and_then(|bytes| bytes.try_into().ok())
         .ok_or_else(|| PluginError::invalid_params("salt must be 32 bytes of hex"))?;
+    // A block the operator rule asked for (`routing_rule`) names the rule and
+    // cites the verdicts that met it; a manual block finds no citation.
+    let pending = matches!(args.change, ChangeArg::Block)
+        .then(|| crate::routing_rule::take_pending(peer_id))
+        .flatten();
+    let citation = pending.as_ref().map(|p| RoutingRuleCitation {
+        rule: crate::routing_rule::RULE_NAME,
+        after: p.rule.after,
+        window_days: p.rule.window_days,
+        verdict_capsule_ids: &p.verdict_capsule_ids,
+    });
     let emitted = capsules
-        .emit_local_routing_choice(args.change.into(), peer_id, args.until.as_deref(), &salt)
+        .emit_local_routing_choice(
+            args.change.into(),
+            peer_id,
+            args.until.as_deref(),
+            &salt,
+            citation.as_ref(),
+        )
         .map_err(|error| PluginError::internal(format!("could not seal the record: {error}")))?;
     Ok(json!({
         "capsule_id": emitted.capsule_id,

@@ -29,6 +29,7 @@ import { peerDisplayId, theirChainSummary } from '@/features/capsules/lib/peer-r
 import { dealingsLines } from '@/features/capsules/lib/peer-routing-view'
 import { PeerExchangeInspector } from '@/features/capsules/components/PeerExchangeInspector'
 import { PeerHistoryTab } from '@/features/capsules/components/PeerHistoryTab'
+import { RefereeVerdictCounts } from '@/features/capsules/components/RefereeVerdictCounts'
 import {
   PEER_INSPECTOR_HEADER,
   ROUTING_NOT_ON_THIS_PAGE,
@@ -63,6 +64,7 @@ function PeerOverviewTab({ row }: { row: PaneBRow }) {
           <p key={line}>{line}</p>
         ))}
       </section>
+      <RefereeVerdictCounts row={row} />
       <p className="text-fg-faint">{chain.text}</p>
       <section
         aria-label={ROUTING_NOT_ON_THIS_PAGE.sectionTitle}

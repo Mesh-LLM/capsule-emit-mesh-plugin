@@ -291,18 +291,27 @@ async fn bridge_inbound_record_push(
     let capsule_bytes = capsule_bytes.to_vec();
 
     // A pushed record is received here, in-process (`record_push_receive`).
-    // A referee's verdict delivered over the same stream is refused, signed:
-    // this node has no referee yet, so it neither checks nor holds verdicts.
-    // Never acknowledged, never cited.
+    // A referee's verdict delivered over the same stream goes through the
+    // same door (`crate::referee::hold`); when it is held, this node's
+    // `adjudication_received` record is sealed before the courier is told.
     if is_verdict_delivery(&capsule_bytes) {
-        let refusal = crate::record_push_receive::refuse(
-            capsules.signing_key(),
-            &capsule_bytes,
-            crate::record_push_receive::REASON_ADJUDICATION_UNAVAILABLE,
-            &crate::producer::timestamp::utc_now_iso8601(),
-        );
-        tracing::info!(received_from = %sender_peer_id, "refused a delivered verdict: this node has no referee yet");
-        write_half.write_all(&serde_json::to_vec(&refusal)?).await?;
+        let reply = receive_pushed_record(&capsules, &sender_peer_id, &capsule_bytes).await?;
+        let reply_bytes = match reply.get("adjudication") {
+            Some(held) if reply.get("status").and_then(|s| s.as_str()) == Some("received") => {
+                match seal_received_verdict(&capsules, held) {
+                    Ok(()) => {
+                        crate::routing_rule::spawn_evaluate(capsules.clone());
+                        serde_json::to_vec(&reply)?
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, received_from = %sender_peer_id, "a delivered verdict was held but its record did not seal -- refusing instead of acking");
+                        seal_failed_refusal()
+                    }
+                }
+            }
+            _ => serde_json::to_vec(&reply)?,
+        };
+        write_half.write_all(&reply_bytes).await?;
         write_half.shutdown().await?;
         return Ok(());
     }
@@ -336,6 +345,48 @@ async fn bridge_inbound_record_push(
     };
     write_half.write_all(&reply_bytes).await?;
     write_half.shutdown().await?;
+    Ok(())
+}
+
+/// Seal this node's `adjudication_received` record of a verdict its door
+/// held (`held`: the reply's `adjudication` facts). Keyed on the verdict id,
+/// so a repeat delivery seals nothing more.
+pub(crate) fn seal_received_verdict(
+    capsules: &CapsuleState,
+    held: &serde_json::Value,
+) -> anyhow::Result<()> {
+    let text = |key: &str| held.get(key).and_then(|v| v.as_str());
+    let pair = |key: &str| -> Option<[&str; 2]> {
+        match held.get(key)?.as_array()?.as_slice() {
+            [a, b] => Some([a.as_str()?, b.as_str()?]),
+            _ => None,
+        }
+    };
+    let (Some(verdict), Some(id), Some(referee), Some(halves), Some(nodes)) = (
+        text("verdict"),
+        text("verdict_capsule_id"),
+        text("referee_node_id"),
+        pair("halves"),
+        pair("half_node_ids"),
+    ) else {
+        anyhow::bail!("the held verdict's facts are incomplete");
+    };
+    let model_hash = crate::referee::hold::held_model_hash(capsules.ledger_dir(), id);
+    let facts = crate::capsule_emit::VerdictFacts {
+        verdict,
+        verdict_capsule_id: id,
+        referee_node_id: referee,
+        halves,
+        half_node_ids: nodes,
+        twin_bracket_id: text("twin_bracket_id"),
+        model_hash: model_hash.as_deref(),
+    };
+    capsules.emit_adjudication_received(
+        &facts,
+        text("held_half_capsule_id").unwrap_or(halves[0]),
+        text("received_from").unwrap_or_default(),
+        text("received_at").unwrap_or_default(),
+    )?;
     Ok(())
 }
 

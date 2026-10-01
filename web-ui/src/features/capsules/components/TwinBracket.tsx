@@ -20,6 +20,7 @@ import { saveTextFile } from '@/features/capsules/lib/exchange-export'
 import { InfoHover } from '@/features/capsules/components/InfoHover'
 import { VerdictRecordDialog } from '@/features/capsules/components/VerdictRecordDialog'
 import { HoverChip } from '@/features/capsules/components/HoverChip'
+import { notAdjudicatedLine, twinRefereeRow } from '@/features/capsules/lib/referee-row'
 import { TWIN_NO_VERDICT_TOOLTIP, TWIN_TOOLTIPS, TWIN_VERDICT_TOOLTIPS } from '@/features/capsules/lib/tooltip-copy'
 import {
   TWIN_ANSWER_LABEL,
@@ -86,6 +87,7 @@ export function TwinBracket({ bracketId, rows, twinSampleRateDenominator, childr
   const canCompare = textA !== null && textB !== null
   const answer = twinAnswerState(rows)
   const { verdict, capsuleId } = twinVerdict(rows)
+  const notAdjudicated = notAdjudicatedLine(twinRefereeRow(rows)) ?? 'Not adjudicated yet.'
 
   const handleSave = () => {
     saveTextFile(
@@ -153,9 +155,7 @@ export function TwinBracket({ bracketId, rows, twinSampleRateDenominator, childr
            any other computed verdict, only the honest state of adjudication
            itself. */}
         {verdict === null ? (
-          <p className="type-caption text-fg-faint">
-            Not adjudicated: this node has no referee yet.
-          </p>
+          <p className="type-caption text-fg-faint">{notAdjudicated}</p>
         ) : (
           <p className="type-caption flex flex-wrap items-center gap-x-2 text-fg-faint">
             {/* Not "signed": the signature is checked only when the record is

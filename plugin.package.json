@@ -96,6 +96,89 @@
           "category_summary": "What this node shares, with whom, by default. Every default keys on relationship (counterparty in the window), never proximity or latency.",
           "category_order": 3
         }
+      },
+      {
+        "key": "adjudicate_differing_twins",
+        "value_schema": {
+          "kind": "enum",
+          "enum_values": [
+            "on",
+            "off"
+          ],
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "default_json": "\"on\"",
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "Ask a referee when two twins of a pair the host marked answered the same request at temperature 0, on the same model and weights, and differ (on, the default), or never (off). At most one call per pair, never retried. A pair with no ruling reads \"Not adjudicated\" with the reason, and never counts against either twin.",
+        "presentation": {
+          "label": "Ask a referee when twins differ",
+          "category_id": "referee",
+          "category_label": "Referee",
+          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; no figure about a peer is computed, and nothing is sent.",
+          "category_order": 0
+        }
+      },
+      {
+        "key": "referee_bar_days",
+        "value_schema": {
+          "kind": "integer",
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "default_json": "30",
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "After a referee-signed contradiction for a model, a node is not asked to referee that model for this many days (default 30), counted from when this node recorded the verdict. A later corroboration does not end it early.",
+        "presentation": {
+          "label": "Bar window, days",
+          "category_id": "referee",
+          "category_label": "Referee",
+          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; no figure about a peer is computed, and nothing is sent.",
+          "category_order": 1
+        }
+      },
+      {
+        "key": "stop_routing_after_contradictions",
+        "value_schema": {
+          "kind": "integer",
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "Stop routing to a peer after this many contradictions within the window below. Off when empty or 0 (the default). Only verdicts this node asked a referee for, and whose signature it checked, count, once per referee and pair of answers; with N of 2 or more, no single referee can reach N alone. When it fires, the host blocks the peer until you undo it, exactly like Stop routing, and the sealed record names this rule and cites the verdicts. Undo it the same way. No figure about a peer is computed, and nothing is sent.",
+        "presentation": {
+          "label": "Stop routing after N contradictions",
+          "category_id": "routing_rule",
+          "category_label": "Routing rule",
+          "category_summary": "An optional rule of yours for when this node stops routing to a peer. Off by default.",
+          "category_order": 0
+        }
+      },
+      {
+        "key": "stop_routing_window_days",
+        "value_schema": {
+          "kind": "integer",
+          "allow_additional_properties": false
+        },
+        "required": false,
+        "default_json": "30",
+        "apply_mode": "static_on_load",
+        "restart_scope": "none",
+        "visibility": "user",
+        "description": "The window, in days, the contradictions must fall in (default 30).",
+        "presentation": {
+          "label": "Within D days",
+          "category_id": "routing_rule",
+          "category_label": "Routing rule",
+          "category_summary": "An optional rule of yours for when this node stops routing to a peer. Off by default.",
+          "category_order": 1
+        }
       }
     ]
   },

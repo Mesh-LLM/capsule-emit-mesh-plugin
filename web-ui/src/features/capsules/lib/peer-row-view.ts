@@ -140,6 +140,24 @@ export type AdjudicationSummary = {
  *  of this peer's capsule ids, not only the requested-by-you half, so a
  *  narrower denominator would overclaim scope. */
 export function adjudicationSummary(row: PaneBRow): AdjudicationSummary {
+  // The referee-signed verdicts about this peer, when the plugin sends them:
+  // the only verdicts the page counts. A not-comparable ruling isn't a
+  // judgment, so it isn't counted as checked.
+  const referee = row.referee_verdicts
+  if (referee) {
+    const corroborated = referee.corroborated?.verdict_capsule_ids.length ?? 0
+    const contradicted = referee.contradicted?.verdict_capsule_ids.length ?? 0
+    const inconclusive = referee.inconclusive?.verdict_capsule_ids.length ?? 0
+    const checked = corroborated + contradicted + inconclusive
+    return {
+      checked,
+      denominator: row.exchange_count ?? 0,
+      corroborated,
+      contradicted,
+      inconclusive,
+      notChecked: checked === 0
+    }
+  }
   const tally = row.verdicts?.tally
   const corroborated = tally?.corroborated ?? 0
   const contradicted = tally?.contradicted ?? 0
@@ -331,7 +349,10 @@ export type AlarmSignal = { present: boolean; text: string; tone: 'bad' | 'warn'
  *  when it isn't. */
 export function alarmSignal(row: PaneBRow, resolveTimestamp?: (capsuleId: string) => string | null): AlarmSignal {
   const verdicts = row.verdicts
-  if (verdicts?.state === STATE_CONTRADICTED) {
+  if (row.referee_verdicts && adjudicationSummary(row).contradicted > 0) {
+    return { present: true, text: 'A referee found their answer contradicted', tone: 'bad' }
+  }
+  if (!row.referee_verdicts && verdicts?.state === STATE_CONTRADICTED) {
     const capsuleId = verdicts.adjudication_capsule_id
     const when = capsuleId ? (resolveTimestamp?.(capsuleId) ?? null) : null
     return { present: true, text: when ? `Contradiction found ${when}` : 'Contradiction found', tone: 'bad' }
@@ -373,7 +394,11 @@ export function peerAttention(
       tone: 'bad'
     })
   }
-  const differing = row.verdicts?.state === STATE_CONTRADICTED ? (row.verdicts.tally?.contradicted ?? 0) : 0
+  const differing = row.referee_verdicts
+    ? adjudicationSummary(row).contradicted
+    : row.verdicts?.state === STATE_CONTRADICTED
+      ? (row.verdicts.tally?.contradicted ?? 0)
+      : 0
   if (differing > 0) {
     items.push({
       key: 'differingAnswers',

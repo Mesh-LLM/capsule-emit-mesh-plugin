@@ -32,7 +32,9 @@ mod record_push_bridge;
 #[cfg(test)]
 mod record_push_parity;
 mod record_push_receive;
+mod referee;
 mod routing_choice_bridge;
+mod routing_rule;
 mod self_peer;
 mod served_summary;
 mod settings;
@@ -42,6 +44,7 @@ mod split_stage;
 mod strict_json;
 #[cfg(test)]
 mod two_node_e2e;
+mod verdict_counts;
 mod web_ui_manifest;
 
 use crate::producer::capsule::TokenUsage;
@@ -846,9 +849,9 @@ fn with_evidence_operations(
     builder = builder.mcp_item(
         mcp::tool(adjudication_records::DELIVER_OPERATION)
             .description(
-                "Deliver a referee's signed twin verdict to a node it concerns. Not available yet: \
-                 this node has no referee, so it neither issues nor delivers verdicts, and every \
-                 call is refused.",
+                "Deliver a referee's signed twin verdict to a node it concerns, as its courier, \
+                 over the record-push stream. Returns the receiver's answer unchanged; a refusal \
+                 is also sealed on this node's own chain (adjudication_ack_refused).",
             )
             .input::<adjudication_records::DeliverAdjudicationArgs>()
             .handle({
@@ -857,7 +860,27 @@ fn with_evidence_operations(
                 move |args, context| {
                     let capsules = capsules.clone();
                     let self_id = self_peer.current();
-                    Box::pin(adjudication_records::deliver(args, context, capsules, self_id))
+                    Box::pin(adjudication_records::deliver(
+                        args, context, capsules, self_id,
+                    ))
+                }
+            }),
+    );
+    builder = builder.mcp_item(
+        mcp::tool(referee::live::ASK_AGAIN_OPERATION)
+            .description(
+                "Ask again for an independent check of a twin pair this node asked (by its twin \
+                 bracket id). A pair whose one referee call is used is not asked again; one that \
+                 found no eligible referee looks for one again. Returns the pair's row.",
+            )
+            .input::<referee::live::AskAgainArgs>()
+            .handle({
+                let capsules = capsules_for_delivery.clone();
+                let self_peer = self_peer.clone();
+                move |args, context| {
+                    let capsules = capsules.clone();
+                    let self_id = self_peer.current();
+                    Box::pin(referee::live::ask_again(args, context, capsules, self_id))
                 }
             }),
     );
@@ -993,6 +1016,9 @@ async fn main() -> anyhow::Result<()> {
         chain_head = ?capsules.chain_head(),
         "record sealing ready"
     );
+    // The opt-in stop-routing rule (off unless its N is set) also runs once
+    // at start, for verdicts recorded while it was off.
+    routing_rule::spawn_evaluate(capsules.clone());
     let lifecycle_events = Arc::new(ObservedLifecycleEvents::open(&data_dir)?);
     let self_peer = self_peer::SelfPeer::new(&data_dir);
     let self_peer_for_events = self_peer.clone();
@@ -1131,6 +1157,14 @@ async fn main() -> anyhow::Result<()> {
                             &[],
                         )
                         .await;
+                        // A twin of a pair the host marked: when both twins'
+                        // halves are held here, the referee rules apply
+                        // (`referee::request`). No bracket id, nothing runs.
+                        if let (Some(bracket), Some(self_id)) =
+                            (envelope.twin_bracket_id.as_deref(), self_peer.current())
+                        {
+                            referee::live::consider(context, &capsules, bracket, &self_id, false).await;
+                        }
                     }
                 } else if message.channel == settlement_channel::PAYMENT_LIFECYCLE_CHANNEL
                     && !settlement_channel::is_local_host_broadcast(

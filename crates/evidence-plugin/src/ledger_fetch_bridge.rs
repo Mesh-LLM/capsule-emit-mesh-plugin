@@ -486,6 +486,7 @@ mod tests {
                 ASKER,
                 None,
                 &[3u8; 32],
+                None,
             )
             .expect("seal block");
         for tier in ["counterparties", "prospective", "peers"] {

@@ -2264,12 +2264,12 @@ fn build_pane_c_list_with_settlements(
 }
 
 /// The referee's own record of a referee call: its sealed client nonce carries
-/// the referee prefix (`live_referee.REFEREE_NONCE_PREFIX`).
+/// the referee prefix (`crate::referee::live::REFEREE_NONCE_PREFIX`).
 fn is_referee_call(record: &Value) -> bool {
     poc_block(record)
         .and_then(|poc| poc.get("client_nonce"))
         .and_then(Value::as_str)
-        .is_some_and(|n| n.starts_with("referee-"))
+        .is_some_and(|n| n.starts_with(crate::referee::live::REFEREE_NONCE_PREFIX))
 }
 
 /// The host's digest of the answer text a record carries
@@ -2560,12 +2560,16 @@ pub(crate) fn build_pane_json(
         // halves AND our citing records (they ARE our chained log entries) --
         // never the foreign bodies (those are evidence we hold, not ours).
         "pane-a" => Some(build_pane_a(&our_records, read_checkpoint_card(ledger_dir))),
-        "pane-b" => Some(build_pane_b_with_refusals(
-            &pane_bc_records,
-            &received_provenance,
-            &read_claim_refusals(ledger_dir),
-            &settlements,
-        )),
+        "pane-b" => {
+            let mut pane = build_pane_b_with_refusals(
+                &pane_bc_records,
+                &received_provenance,
+                &read_claim_refusals(ledger_dir),
+                &settlements,
+            );
+            crate::verdict_counts::attach(&mut pane, &our_records, ledger_dir);
+            Some(pane)
+        }
         "pane-c" => {
             let mut pane = match exchange_id {
                 Some(id) if !id.is_empty() => {
@@ -2578,6 +2582,7 @@ pub(crate) fn build_pane_json(
                 ),
             };
             mark_claims_refused(&mut pane, &our_records, &read_claim_refusals(ledger_dir));
+            crate::referee::request::attach_rows(&mut pane, ledger_dir);
             Some(pane)
         }
         _ => None,
@@ -3900,6 +3905,7 @@ mod tests {
             halves,
             half_node_ids: nodes,
             twin_bracket_id: Some("twin-1"),
+            model_hash: None,
         }
     }
 
