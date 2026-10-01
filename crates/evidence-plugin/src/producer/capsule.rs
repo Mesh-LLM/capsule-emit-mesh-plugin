@@ -810,6 +810,11 @@ pub struct SettlementObservation<'a> {
     pub payment_hash: Option<&'a str>,
     /// The amount the event states, in millisatoshis -- a recorded value.
     pub amount_msat: u64,
+    /// Which side of the exchange emitted the event: `"payer"` or
+    /// `"provider"` (a host that names no role emitted the payer side only).
+    pub observed_by: &'a str,
+    /// The provider's delivered-token watermark, on a `delivered` event only.
+    pub tokens: Option<u64>,
 }
 
 /// Seal a SETTLEMENT record: this payer node's own signed, chained record that
@@ -845,7 +850,7 @@ pub fn seal_settlement_record(
 
     let mut observation = Map::new();
     observation.insert("v".into(), json!(1));
-    observation.insert("observed_by".into(), json!("payer"));
+    observation.insert("observed_by".into(), json!(ev.observed_by));
     observation.insert("channel".into(), json!(SETTLEMENT_CHANNEL));
     observation.insert("exchange_id".into(), json!(ev.exchange_id));
     observation.insert("event_ref".into(), json!(ev.event_ref));
@@ -862,6 +867,9 @@ pub fn seal_settlement_record(
         observation.insert("payment_hash".into(), json!(payment_hash));
     }
     observation.insert("amount_msat".into(), json!(ev.amount_msat));
+    if let Some(tokens) = ev.tokens {
+        observation.insert("tokens".into(), json!(tokens));
+    }
 
     // The same local-record path as every other record with no served
     // exchange: minute-granular committed time and a fresh store nonce
@@ -2581,7 +2589,37 @@ mod tests {
             segment: Some(1),
             payment_hash,
             amount_msat: 123457,
+            observed_by: "payer",
+            tokens: None,
         }
+    }
+
+    /// A provider's record names its side and carries the delivered-token
+    /// watermark; a payer's names the payer and carries no `tokens`.
+    #[test]
+    fn seal_settlement_record_names_the_observing_side_and_carries_tokens() {
+        let key = crate::producer::keys::KeyPair::generate();
+        let block = |ev: &SettlementObservation| {
+            seal_settlement_record(ev, None, &key.signing_key).unwrap()["model_attestation"]
+                ["compute_attestation"]["x-mesh-settlement-v1"]
+                .clone()
+        };
+        let delivered = SettlementObservation {
+            phase: "delivered",
+            source: "provider_asserted",
+            settlement: None,
+            segment: None,
+            amount_msat: 0,
+            observed_by: "provider",
+            tokens: Some(42),
+            ..sample_settlement(None)
+        };
+        let provider = block(&delivered);
+        assert_eq!(provider["observed_by"], json!("provider"));
+        assert_eq!(provider["tokens"], json!(42));
+        let payer = block(&sample_settlement(None));
+        assert_eq!(payer["observed_by"], json!("payer"));
+        assert!(payer.get("tokens").is_none());
     }
 
     /// Every observed value lands verbatim under
@@ -2649,7 +2687,7 @@ mod tests {
         let obs = capsule["model_attestation"]["compute_attestation"]["x-mesh-settlement-v1"]
             .as_object()
             .unwrap();
-        for absent in ["settlement", "segment", "payment_hash"] {
+        for absent in ["settlement", "segment", "payment_hash", "tokens"] {
             assert!(
                 !obs.contains_key(absent),
                 "{absent} must be omitted when null"
@@ -2704,6 +2742,8 @@ mod tests {
         let key = crate::producer::keys::KeyPair::generate();
         let ev = SettlementObservation {
             amount_msat: 1u64 << 53,
+            observed_by: "payer",
+            tokens: None,
             ..sample_settlement(None)
         };
         assert!(matches!(

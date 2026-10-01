@@ -59,11 +59,11 @@ host feature; none names this plugin.
 
 | Change | What it enables | Status |
 | --- | --- | --- |
-| Provider-side `payment.lifecycle.v1` events | the serving node's record of a paid exchange | mesh-llm#2108 |
-| The exchange event on the paid serving path | paid exchanges are visible to plugins | mesh-llm#2109 |
+| Provider-side `payment.lifecycle.v1` events | the serving node's record of a paid exchange | mesh-llm#2108, merged; not in a release yet |
+| The exchange event on the paid serving path | paid exchanges are visible to plugins | mesh-llm#2109, merged; not in a release yet |
 | `requested_by_node_id` on the served side; `served_by_node_id` with request/response digests on the routed side | matching the two sides' records | proposed |
 | An operator's "stop routing to this peer" as a core router feature a plugin can request, plus a routing-choice event | acting on evidence without the plugin touching the router | proposed |
-| A plugin page can ask to be a primary console tab; the operator decides | a stable place for the Evidence page | proposed |
+| A plugin page can ask to be a primary console tab; the operator decides | a stable place for the Evidence page | mesh-llm#2130, merged; not in a release yet |
 | A built-in or default plugin can serve its web UI bundle | shipping this plugin by default | proposed |
 | Per-request `skippy.stage.v1` events from split-inference stages | records for multi-stage requests | proposed |
 

@@ -213,6 +213,13 @@ export function settlementCloseLine(counts: SettlementCloseCounts, payments: Pay
 /** Settlement records the host could not join to any row -- by an exchange
  *  id no row carries, or with no exchange id at all -- are still records this
  *  node holds; they are counted, never dropped. */
+/** This node's own records as the provider of a paid exchange. They are its
+ *  book, not the payer's, so they are counted and never shown in a payer row. */
+export function providerSettlementText(count: number | undefined): string | null {
+  if (!count) return null
+  return `${count} payment record${count === 1 ? '' : 's'} kept as the provider.`
+}
+
 export function unjoinedSettlementText(ids: readonly string[] | undefined, missingExchangeId = 0): string | null {
   const count = (ids?.length ?? 0) + missingExchangeId
   if (count === 0) return null

@@ -17,7 +17,8 @@ import {
   settlementCloseLine,
   settlementEntryViews,
   settlementRowView,
-  unjoinedSettlementText
+  unjoinedSettlementText,
+  providerSettlementText
 } from '@/features/capsules/lib/settlement-view'
 import * as COPY from '@/features/capsules/lib/tooltip-copy'
 
@@ -128,6 +129,7 @@ describe('settlement wording gate', () => {
       rendered.push([`close-empty:${payments}`, settlementCloseLine(close, payments)])
     }
     rendered.push(['unjoined', unjoinedSettlementText(['x'], 2) ?? ''])
+    rendered.push(['provider', providerSettlementText(2) ?? ''])
     expect(rendered.flatMap(([label, text]) => offenders(label, text))).toEqual([])
   })
 

@@ -142,7 +142,8 @@ import {
   settlementCloseCounts,
   settlementCloseLine,
   type SettlementCloseCounts,
-  unjoinedSettlementText
+  unjoinedSettlementText,
+  providerSettlementText
 } from '@/features/capsules/lib/settlement-view'
 
 // ---------------------------------------------------------------------------
@@ -1278,10 +1279,16 @@ function IntegritySection() {
   const contradictedCount = paneCRows.filter((row) => deriveRightCellState(row).kind === 'contradicted').length
   // The Close card counts over the same rows with the same gate.
   const closeCounts = settlementCloseCounts(paneCRows, (row) => deriveRightCellState(row).kind === 'closed')
-  const unjoinedPayments = unjoinedSettlementText(
-    paneCQuery.data?.settlement_unjoined,
-    paneCQuery.data?.settlement_missing_exchange_id ?? 0
-  )
+  const unjoinedPayments =
+    [
+      unjoinedSettlementText(
+        paneCQuery.data?.settlement_unjoined,
+        paneCQuery.data?.settlement_missing_exchange_id ?? 0
+      ),
+      providerSettlementText(paneCQuery.data?.settlement_provider_records)
+    ]
+      .filter(Boolean)
+      .join(' ') || null
 
   const setupSteps = buildSetupSteps(card ?? null, owner, closedByOtherSideCount)
   const registrationCopy = buildRegistrationCopy(card ?? null)

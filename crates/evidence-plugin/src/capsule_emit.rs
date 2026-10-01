@@ -2585,6 +2585,29 @@ mod tests {
         assert_eq!(canonical_body_digest(body).expect("digest"), expected);
     }
 
+    /// Digest equality with the reference implementation for a request that
+    /// carries tool-call ids: an assistant turn's `tool_calls[].id` and the
+    /// `tool` message's `tool_call_id` answering it. The expected digests are
+    /// `agent_action_capsule.canonical.json_digest` over the same values
+    /// (floats written as decimal strings), for the body as sent and for the
+    /// same body with only the tool-call id changed: the id is committed, not
+    /// normalized away.
+    #[test]
+    fn canonical_body_digest_commits_to_tool_call_ids_like_the_reference() {
+        let body = br#"{"model": "hermes-2-pro-mistral-7b", "messages": [{"role": "user", "content": "What's the weather in Paris?"}, {"role": "assistant", "content": null, "tool_calls": [{"id": "call_7f3a9c", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"Paris\"}"}}]}, {"role": "tool", "tool_call_id": "call_7f3a9c", "content": "{\"temp_c\":18.5}"}], "temperature": 0.2, "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]}"#;
+        assert_eq!(
+            canonical_body_digest(body).expect("digest"),
+            "c3f3013671f173dbe338890ff2c725c0cf32ec94942fee5f552ec5987eb389bc"
+        );
+        let renamed = String::from_utf8(body.to_vec())
+            .unwrap()
+            .replace("call_7f3a9c", "call_000000");
+        assert_eq!(
+            canonical_body_digest(renamed.as_bytes()).expect("digest"),
+            "951164bcd7fe49eef92566623bd2cce86bc123e4adc65f93f0c6ad778a1a3dd3"
+        );
+    }
+
     /// `parse_usage` lifts REAL token counts from the response body's `usage`
     /// object — the only honest source of usage the plugin has.
     #[test]

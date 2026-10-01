@@ -10,9 +10,13 @@
 //!
 //! What one node's records can say, and what they cannot:
 //!
-//! - The channel is the payer's. Every record here is this node's view as the
-//!   paying side, so the provider's book is always reported as
-//!   `not_available` until the provider side emits its own observations.
+//! - A payer book is built from this node's records as the paying side only.
+//!   The provider of the same exchange keeps its book on its own node, so a
+//!   payer book always reports it as `not_available`.
+//! - Records this node sealed as a provider (`observed_by: "provider"`) are
+//!   its own book. They never enter a payer book; the host's provider-side
+//!   ids do not join this node's exchange records yet, so they are counted
+//!   (`settlement_provider_records`).
 //! - The provider's side of a payment is not something the payer's events
 //!   can see, so nothing about it is sent: per-peer counts carry only this
 //!   node's own facts, beside `provider_book: "not_available"`.
@@ -30,8 +34,8 @@ use std::collections::{BTreeSet, HashMap};
 /// Where the plugin records the observed event.
 const SETTLEMENT_BLOCK: &str = "/model_attestation/compute_attestation/x-mesh-settlement-v1";
 
-/// The provider side emits no lifecycle observations today, so its book is
-/// never available to this reader.
+/// The provider's book of a payer's exchange is kept on the provider's node,
+/// so it is never available to this reader.
 pub(super) const PROVIDER_BOOK_NOT_AVAILABLE: &str = "not_available";
 
 /// Every invoice this node saw issued has a settlement its own wallet
@@ -73,10 +77,18 @@ pub(super) struct SettlementIndex {
     /// Settlement records carrying no usable `exchange_id`: nothing can join
     /// them, so they are counted rather than dropped.
     missing_exchange_id: usize,
+    /// Records this node sealed as the provider of a paid exchange. They are
+    /// its own book, never part of a payer book, and the host's provider-side
+    /// ids do not join its exchange records, so they are counted.
+    provider_records: usize,
 }
 
 impl SettlementIndex {
     pub(super) fn push(&mut self, record: Value) {
+        if block_str(&record, "observed_by") == Some("provider") {
+            self.provider_records += 1;
+            return;
+        }
         let Some(exchange_id) = block_str(&record, "exchange_id").map(str::to_string) else {
             self.missing_exchange_id += 1;
             return;
@@ -91,7 +103,11 @@ impl SettlementIndex {
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.by_exchange.is_empty() && self.missing_exchange_id == 0
+        self.by_exchange.is_empty() && self.missing_exchange_id == 0 && self.provider_records == 0
+    }
+
+    pub(super) fn provider_records(&self) -> usize {
+        self.provider_records
     }
 
     pub(super) fn missing_exchange_id(&self) -> usize {
@@ -664,6 +680,18 @@ mod tests {
         // and in particular never "unpaid".
         let index = index(paid_and_settled("ex-paid"));
         assert!(index.summary_for(["ex-free"]).is_none());
+    }
+
+    #[test]
+    fn provider_records_are_counted_and_never_enter_a_payer_book() {
+        let mut provider = event("ex-a", "terms_accepted", "provider_asserted", None, None, 0);
+        provider["model_attestation"]["compute_attestation"]["x-mesh-settlement-v1"]
+            ["observed_by"] = json!("provider");
+        let index = index(vec![provider]);
+        assert_eq!(index.provider_records(), 1);
+        assert!(!index.is_empty());
+        assert!(index.summary_for(["ex-a"]).is_none());
+        assert!(index.unjoined([]).is_empty());
     }
 
     #[test]

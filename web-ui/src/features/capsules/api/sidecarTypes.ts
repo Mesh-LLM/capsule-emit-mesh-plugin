@@ -561,6 +561,8 @@ export type PaneCListJson = {
   settlement_unjoined?: string[]
   /** Settlement records with no exchange id at all. */
   settlement_missing_exchange_id?: number
+  /** Settlement records this node sealed as the provider of a paid exchange. */
+  settlement_provider_records?: number
 }
 
 export type PaneCDrilldownJson =
