@@ -11,7 +11,7 @@ cd "$root/crates/evidence-plugin"
 
 features=("$@")
 if [ ${#features[@]} -eq 0 ]; then
-  mapfile -t features < <(python3 -c 'import json,sys; [print(m["feature"]) for m in json.load(open(sys.argv[1]))["mutants"]]' "$mutants")
+  while IFS= read -r f; do features+=("$f"); done < <(python3 -c 'import json,sys; [print(m["feature"]) for m in json.load(open(sys.argv[1]))["mutants"]]' "$mutants")
 fi
 
 status=0
