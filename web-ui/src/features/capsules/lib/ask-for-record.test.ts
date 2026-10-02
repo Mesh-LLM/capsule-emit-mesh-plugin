@@ -294,6 +294,40 @@ describe('judgeAskReply', () => {
     expect(outcome).toMatchObject({ kind: 'no_reply', detail: 'their reply carried no record' })
   })
 
+  // Asked by the exchange's digests, a node can answer with more than one
+  // record carrying them: the half it served and, say, a half it requested.
+  function theirHalf(capsuleId: string, role: 'served' | 'requested'): Record<string, unknown> {
+    const body = fixtureHalfBody({ capsuleId })
+    ;(body.model_attestation as Record<string, Record<string, Record<string, unknown>>>).compute_attestation[
+      'x-mesh-poc-v1'
+    ].role = role
+    return { ...body, signature: 'aa', key_id: 'bb' }
+  }
+
+  it('prefers the half they served among records with our digests', async () => {
+    const served = theirHalf('theirs-served', 'served')
+    const requested = theirHalf('theirs-requested', 'requested')
+    const outcome = await judgeAskReply(
+      answer(artifact([requested, served])),
+      FIXTURE_REQUEST_DIGEST,
+      ASKED_AT,
+      trustingJudges
+    )
+    expect(outcome).toMatchObject({ kind: 'record', evidence: { peerRecord: { capsule_id: 'theirs-served' } } })
+  })
+
+  it('never picks one of several records that could be theirs by order: the reply is ambiguous', async () => {
+    const one = theirHalf('theirs-1', 'served')
+    const two = theirHalf('theirs-2', 'served')
+    const outcome = await judgeAskReply(answer(artifact([one, two])), FIXTURE_REQUEST_DIGEST, ASKED_AT, trustingJudges)
+    expect(outcome).toEqual({ kind: 'ambiguous', at: ASKED_AT, count: 2 })
+    expect(askReplyNote(outcome)).toEqual({
+      verified: false,
+      text: 'Their reply carried 2 records that could be theirs for this exchange; none is shown as theirs'
+    })
+    expect(stateAfterAsk(waitingRow(), outcome, null)).toEqual({ kind: 'open_asked', date: ASKED_AT })
+  })
+
   it('closes the row through the gate when their record verifies and cites our half', async () => {
     const theirs = { ...fixtureHalfBody({ capsuleId: 'theirs-1' }), signature: 'aa', key_id: 'bb' }
     const outcome = await judgeAskReply(

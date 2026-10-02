@@ -41,6 +41,9 @@ export type AskOutcome =
   | { kind: 'refused'; at: string; reason: string }
   | { kind: 'no_record'; at: string }
   | { kind: 'record'; at: string; evidence: PeerRecomputeState }
+  /** Their verified reply carried more than one record that could be their
+   *  half of this exchange, and nothing picks one: none is shown as theirs. */
+  | { kind: 'ambiguous'; at: string; count: number }
 
 /** Whom to ask and how to name the exchange, read from OUR record of it: the
  *  node that served our request (or that asked us, on a row we served), the
@@ -238,9 +241,10 @@ export async function judgeAskReply(
     }
     case 'artifact': {
       const receipts = answer ? artifactRecords(answer, verification.records) : []
-      const receipt =
-        receipts.find((candidate) => obj(candidate.effect)?.request_digest === requestDigest) ?? receipts[0] ?? null
-      if (!receipt) return { kind: 'no_reply', at: askedAt, detail: 'their reply carried no record' }
+      const candidates = theirHalfCandidates(receipts, requestDigest)
+      if (candidates.length === 0) return { kind: 'no_reply', at: askedAt, detail: 'their reply carried no record' }
+      if (candidates.length > 1) return { kind: 'ambiguous', at: askedAt, count: candidates.length }
+      const receipt = candidates[0]
       const idMatch = await judges.recomputeIdMatch(receipt, str(receipt.capsule_id))
       return {
         kind: 'record',
@@ -255,6 +259,20 @@ export async function judgeAskReply(
       }
     }
   }
+}
+
+/** The records in their reply that could be their half of this exchange:
+ *  those whose request digest is ours (all of them when none is), and among
+ *  those the half they SERVED when there is one. One candidate is judged by
+ *  the row gate; more than one is ambiguous, never resolved by order. */
+export function theirHalfCandidates(
+  receipts: readonly Record<string, unknown>[],
+  requestDigest: string | null
+): Record<string, unknown>[] {
+  const matching = receipts.filter((candidate) => obj(candidate.effect)?.request_digest === requestDigest)
+  const pool = matching.length > 0 ? matching : [...receipts]
+  const served = pool.filter((candidate) => pocBlock(candidate)?.role === 'served')
+  return served.length > 0 ? served : pool
 }
 
 const NO_KEY_DETAIL = 'this node has no announced key for them, so their reply cannot be checked'
@@ -290,6 +308,11 @@ export function askReplyNote(outcome: AskOutcome): { verified: boolean; text: st
         text: `Their record is in their log, but it is not verified: ${problems.join('; ')}`
       }
     }
+    case 'ambiguous':
+      return {
+        verified: false,
+        text: `Their reply carried ${outcome.count} records that could be theirs for this exchange; none is shown as theirs`
+      }
   }
 }
 
@@ -302,6 +325,7 @@ export function stateAfterAsk(
   switch (outcome.kind) {
     case 'asking':
     case 'no_reply':
+    case 'ambiguous':
       return { kind: 'open_asked', date: outcome.at }
     case 'refused':
       return { kind: 'open_refused', date: outcome.at }
