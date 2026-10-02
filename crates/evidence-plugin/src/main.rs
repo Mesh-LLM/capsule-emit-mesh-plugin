@@ -1006,9 +1006,19 @@ async fn main() -> anyhow::Result<()> {
     // Absolute, never the working directory's; see `data_dir`.
     let data_dir = data_dir::data_dir()?;
     tracing::info!(data_dir = %data_dir.display(), "plugin data directory");
-    // A new history the owner asked for last run starts HERE, before the
+    // The log id is node-unique by default (the node's signing key id), and a
+    // new history the owner asked for last run starts HERE, before the
     // ledger or the checkpoint cadence opens (see `owner_maintenance`).
-    let log_id = owner_maintenance::apply_pending_before_open(&data_dir, PLUGIN_ID)?;
+    let node_key_id = producer::keys::load_or_create(&data_dir.join("keys"))?.key_id();
+    let log_id = owner_maintenance::resolve_log_id(
+        &data_dir,
+        PLUGIN_ID,
+        &node_key_id,
+        settings::var(owner_maintenance::LOG_ID_SETTING)
+            .ok()
+            .as_deref(),
+    )?;
+    tracing::info!(log_id = %log_id, "checkpoint log id");
     let capsules = Arc::new(CapsuleState::open(&data_dir, PLUGIN_ID)?);
     let evidence_pub_key_pem = capsules.public_key_pem();
     owner_maintenance::finish_pending_after_open(&data_dir, &capsules, &log_id)?;
