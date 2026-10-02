@@ -10,7 +10,8 @@ import {
   lastCheckpointFact,
   nothingIsShared,
   recordsLocationFact,
-  sharingRows
+  sharingRows,
+  type HeroCounts
 } from '@/features/capsules/lib/your-records'
 import { SAMPLE_DATA_UNAVAILABLE } from '@/features/capsules/lib/tooltip-copy'
 
@@ -34,12 +35,26 @@ function status(overrides: Partial<RecordsStatus> = {}): RecordsStatus {
 
 describe('hero line 3', () => {
   it('says the whole tab in one sentence, with the witness posture', () => {
-    expect(heroStatusLine({ records: 8, confirmed: 3, disagreements: 0, witnessed: false })).toBe(
+    expect(heroStatusLine({ records: 8, confirmed: 3, disagreements: 0, witness: 'off' })).toBe(
       '8 records · 3 confirmed by the other side · 0 disagreements · no outside witness (witness off — your choice)'
     )
-    expect(heroStatusLine({ records: 1, confirmed: 0, disagreements: 1, witnessed: true })).toBe(
+    expect(heroStatusLine({ records: 1, confirmed: 0, disagreements: 1, witness: 'latest' })).toBe(
       '1 record · 0 confirmed by the other side · 1 disagreement · also held by a witness you don’t run'
     )
+  })
+
+  // The live run: a witness was set and held earlier checkpoints, the latest
+  // line was a cut not offered yet, and the line said "witness off — your
+  // choice". Only a witness that is not set reads as off.
+  it('says the witness is off only when none is set', () => {
+    const line = (witness: HeroCounts['witness']) =>
+      heroStatusLine({ records: 2, confirmed: 1, disagreements: 0, witness }).split(' · ')[3]
+    expect(line('earlier')).toBe('held by a witness you don’t run up to an earlier checkpoint')
+    expect(line('pending')).toBe('no checkpoint held by a witness yet (witness on)')
+    expect(line('unknown')).toBe('no outside witness')
+    for (const state of ['latest', 'earlier', 'pending', 'unknown'] as const) {
+      expect(line(state)).not.toMatch(/off|your choice/)
+    }
   })
 })
 

@@ -62,6 +62,12 @@ const ENV_WITNESS_URLS: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS";
 /// `DEFAULT_PAD_BUCKET` (32); `0` turns padding off.
 const ENV_PAD_BUCKET: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_PAD_BUCKET";
 
+/// Whether a witness URL is configured: checkpoints are offered to a witness.
+/// The same setting [`spawn`] registers checkpoints with.
+pub fn witness_configured() -> bool {
+    !config_from_env().witness_urls.is_empty()
+}
+
 pub fn is_enabled() -> bool {
     is_enabled_for(crate::settings::var(ENV_ENABLE).ok().as_deref())
 }

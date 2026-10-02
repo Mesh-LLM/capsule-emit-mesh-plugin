@@ -274,10 +274,25 @@ fn read_checkpoint_card(ledger_dir: &Path) -> Value {
             .collect(),
         Err(_) => Vec::new(),
     };
+    let held = |cp: &Value| {
+        cp.get("witnesses")
+            .and_then(Value::as_array)
+            .is_some_and(|w| !w.is_empty())
+    };
     let mut card = json!({
         "checkpoint_count": checkpoints.len(),
         "unparsable_line_count": unparsable_line_count(ledger_dir),
+        // Checkpoints a witness holds, among all of them: the latest line can
+        // be a cut no witness was offered yet while earlier ones are held.
+        "witnessed_checkpoint_count": checkpoints.iter().filter(|cp| held(cp)).count(),
     });
+    if let Some(witnessed) = checkpoints.iter().rev().find(|cp| held(cp)) {
+        card["latest_witnessed"] = json!({
+            "timestamp": witnessed.get("timestamp"),
+            "mmr_size": witnessed.get("mmr_size"),
+            "witnesses": witnessed.get("witnesses"),
+        });
+    }
     if let Some(latest) = checkpoints.last() {
         if let Some(ts) = latest.get("timestamp").and_then(Value::as_str) {
             card["registered_no_later_than"] = json!(ts);
@@ -2559,7 +2574,11 @@ pub(crate) fn build_pane_json(
         // Pane A ("This node") shows our own records: our served/requester
         // halves AND our citing records (they ARE our chained log entries) --
         // never the foreign bodies (those are evidence we hold, not ours).
-        "pane-a" => Some(build_pane_a(&our_records, read_checkpoint_card(ledger_dir))),
+        "pane-a" => Some(build_pane_a(&our_records, {
+            let mut card = read_checkpoint_card(ledger_dir);
+            card["witness_configured"] = json!(crate::checkpoint_cadence::witness_configured());
+            card
+        })),
         "pane-b" => {
             let mut pane = build_pane_b_with_refusals(
                 &pane_bc_records,
@@ -5708,10 +5727,45 @@ mod tests {
         // caption reads.
         assert_eq!(card["covered_leaf_count"], json!(4));
         assert_eq!(card["witnesses"].as_array().unwrap().len(), 1);
+        assert_eq!(card["witnessed_checkpoint_count"], json!(1));
+        assert_eq!(card["latest_witnessed"]["mmr_size"], json!(7));
         assert_eq!(
             build_pane_a(&[], card)["card"]["checkpoint_count"],
             json!(2)
         );
+    }
+
+    /// The live run: the latest line is a cut no witness holds yet, the one
+    /// before it carries a receipt. The card says a witness holds a
+    /// checkpoint, and which, not only that the latest has none.
+    #[test]
+    fn the_card_counts_checkpoints_a_witness_holds_not_only_the_latest() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("checkpoints.jsonl"),
+            "{\"kind\":\"mmr_checkpoint\",\"mmr_size\":63,\"root\":\"aa\",\"timestamp\":\"2026-10-02T02:40:00.000Z\"}\n\
+             {\"kind\":\"mmr_checkpoint\",\"mmr_size\":127,\"root\":\"bb\",\"timestamp\":\"2026-10-02T02:41:00.000Z\",\"witnesses\":[{\"ts_url\":\"https://witness.example\"}]}\n\
+             {\"kind\":\"mmr_checkpoint\",\"mmr_size\":190,\"root\":\"cc\",\"timestamp\":\"2026-10-02T02:41:00.000Z\"}\n",
+        )
+        .unwrap();
+        let card = read_checkpoint_card(dir.path());
+        assert_eq!(card["witnesses"], json!([]), "the latest is not held");
+        assert_eq!(card["witnessed_checkpoint_count"], json!(1));
+        assert_eq!(card["latest_witnessed"]["mmr_size"], json!(127));
+        assert_eq!(
+            card["latest_witnessed"]["witnesses"][0]["ts_url"],
+            json!("https://witness.example")
+        );
+
+        let none = tempfile::tempdir().unwrap();
+        std::fs::write(
+            none.path().join("checkpoints.jsonl"),
+            "{\"kind\":\"mmr_checkpoint\",\"mmr_size\":3,\"root\":\"aa\",\"witnesses\":[]}\n",
+        )
+        .unwrap();
+        let card = read_checkpoint_card(none.path());
+        assert_eq!(card["witnessed_checkpoint_count"], json!(0));
+        assert!(card.get("latest_witnessed").is_none());
     }
 
     /// `mmr_leaf_count` inverts an MMR total-node count back to its leaf count

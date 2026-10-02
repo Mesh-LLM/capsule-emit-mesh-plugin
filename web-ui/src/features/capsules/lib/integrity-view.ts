@@ -23,7 +23,8 @@ import {
   CHAIN_STRIP_TOOLTIP,
   INTEGRITY_TILE_TOOLTIPS,
   OWNER_LINKED_PHRASE,
-  OWNER_NOT_LINKED_PHRASE
+  OWNER_NOT_LINKED_PHRASE,
+  WITNESS_OFF
 } from '@/features/capsules/lib/tooltip-copy'
 
 /** `StatusPayload.owner` / `PeerInfo['owner']` verbatim (`lib/api/
@@ -52,6 +53,17 @@ const ownerBound = ownerLinked
 // registered" -- the exact §7 overclaim class).
 // ---------------------------------------------------------------------------
 
+/** Where this node's checkpoints stand with a witness, the one fact the hero
+ *  line, the witness tile, the registration copy and the setup step read:
+ *  - `latest`: a witness holds the latest checkpoint;
+ *  - `earlier`: a witness holds an earlier checkpoint, not the latest yet
+ *    (a checkpoint cut between two offers to the witness);
+ *  - `pending`: a witness is set, and none holds a checkpoint yet;
+ *  - `off`: no witness is set;
+ *  - `unknown`: none holds one, and the node did not say whether one is set.
+ *  Only `off` may say the witness is off. */
+export type WitnessState = 'latest' | 'earlier' | 'pending' | 'off' | 'unknown'
+
 export type CheckpointRegistration = {
   /** The host reported a checkpoint count at all (`null` card = not
    *  reported -- distinct from a real zero, see `buildSetupSteps`). */
@@ -63,18 +75,50 @@ export type CheckpointRegistration = {
   /** THE registration fact: a checkpoint held by at least one witness.
    *  Only this may ever render the word "registered". */
   registered: boolean
+  /** How many checkpoints a witness holds, the latest or not. */
+  witnessedCheckpointCount: number
+  witnessState: WitnessState
 }
 
 export function checkpointRegistration(card: JsonRecord | null | undefined): CheckpointRegistration {
   const checkpointCount = typeof card?.checkpoint_count === 'number' ? card.checkpoint_count : null
   const witnesses = Array.isArray(card?.witnesses) ? (card.witnesses as unknown[]) : []
   const checkpointedLocally = checkpointCount !== null && checkpointCount > 0
+  const registered = checkpointedLocally && witnesses.length > 0
+  const counted = typeof card?.witnessed_checkpoint_count === 'number' ? card.witnessed_checkpoint_count : 0
+  const witnessedCheckpointCount = checkpointedLocally ? Math.max(counted, registered ? 1 : 0) : 0
+  const configured = typeof card?.witness_configured === 'boolean' ? card.witness_configured : null
+  const witnessState: WitnessState = registered
+    ? 'latest'
+    : witnessedCheckpointCount > 0
+      ? 'earlier'
+      : configured === true
+        ? 'pending'
+        : configured === false
+          ? 'off'
+          : 'unknown'
   return {
     reported: checkpointCount !== null,
     checkpointCount,
     witnessCount: witnesses.length,
     checkpointedLocally,
-    registered: checkpointedLocally && witnesses.length > 0
+    registered,
+    witnessedCheckpointCount,
+    witnessState
+  }
+}
+
+/** The witness tile's line under its count, by the same fact. */
+export function witnessTileNote(state: WitnessState): string | undefined {
+  switch (state) {
+    case 'earlier':
+      return 'the latest checkpoint is not held yet'
+    case 'pending':
+      return 'witness on — none holds a checkpoint yet'
+    case 'off':
+      return WITNESS_OFF
+    default:
+      return undefined
   }
 }
 
@@ -134,15 +178,15 @@ export function buildSetupSteps(
     {
       key: 'checkpoints',
       title: 'Have a witness hold your checkpoints',
-      done: registration.registered,
-      status: registration.registered
+      done: registration.witnessedCheckpointCount > 0,
+      status: registration.witnessedCheckpointCount > 0
         ? 'witnessed'
         : registration.checkpointedLocally
           ? CHECKPOINTED_NOT_REGISTERED_STATUS
           : registration.reported
             ? 'not set up'
             : 'status not reported',
-      body: registration.registered
+      body: registration.witnessedCheckpointCount > 0
         ? null
         : registration.reported
           ? 'Right now your records are checkable only against themselves. A witness you don’t run holding a checkpoint is what makes a later rewrite detectable by someone else. It does not make your records true.'
@@ -200,6 +244,21 @@ function nonProducerWitnessCount(witnesses: readonly unknown[]): number {
   }).length
 }
 
+/** The registration copy for a latest checkpoint no witness holds: why, by
+ *  the same fact the hero line reads. */
+function unwitnessedSummary(state: WitnessState): string {
+  switch (state) {
+    case 'earlier':
+      return 'Latest checkpoint not held by a witness yet · an earlier one is'
+    case 'pending':
+      return 'Checkpointed locally · no witness holds it yet (witness: on)'
+    case 'off':
+      return 'Checkpointed locally · no witness (witness: off)'
+    default:
+      return 'Checkpointed locally · no witness'
+  }
+}
+
 export function buildRegistrationCopy(card: JsonRecord | null | undefined): RegistrationCopy | null {
   const registration = checkpointRegistration(card)
   if (!registration.checkpointedLocally) return null
@@ -215,7 +274,7 @@ export function buildRegistrationCopy(card: JsonRecord | null | undefined): Regi
   // fact rung 1 renders (D1).
   if (!registration.registered) {
     return {
-      witnessSummary: 'Checkpointed locally · no witness (witness: off)',
+      witnessSummary: unwitnessedSummary(registration.witnessState),
       registeredNoLaterThan: timestamp ? `checkpointed no later than ${timestamp}` : null
     }
   }

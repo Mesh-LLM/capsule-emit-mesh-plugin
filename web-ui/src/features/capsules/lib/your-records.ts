@@ -14,6 +14,7 @@ import {
   exchangeTextKeptNotice,
   exchangeTextStillHeldNotice
 } from '@/features/capsules/lib/tooltip-copy'
+import type { WitnessState } from '@/features/capsules/lib/integrity-view'
 
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`
@@ -23,8 +24,24 @@ export type HeroCounts = {
   records: number
   confirmed: number
   disagreements: number
-  /** A witness this node doesn't run holds a checkpoint. */
-  witnessed: boolean
+  /** Where this node's checkpoints stand with a witness it doesn't run
+   *  (`checkpointRegistration`). */
+  witness: WitnessState
+}
+
+function witnessPhrase(state: WitnessState): string {
+  switch (state) {
+    case 'latest':
+      return 'also held by a witness you don’t run'
+    case 'earlier':
+      return 'held by a witness you don’t run up to an earlier checkpoint'
+    case 'pending':
+      return 'no checkpoint held by a witness yet (witness on)'
+    case 'off':
+      return `no outside witness (${WITNESS_OFF})`
+    case 'unknown':
+      return 'no outside witness'
+  }
 }
 
 /** "8 records · 3 confirmed by the other side · 0 disagreements · checkable
@@ -35,7 +52,7 @@ export function heroStatusLine(counts: HeroCounts): string {
     plural(counts.records, 'record'),
     `${counts.confirmed} confirmed by the other side`,
     plural(counts.disagreements, 'disagreement'),
-    counts.witnessed ? 'also held by a witness you don’t run' : `no outside witness (${WITNESS_OFF})`
+    witnessPhrase(counts.witness)
   ].join(' · ')
 }
 

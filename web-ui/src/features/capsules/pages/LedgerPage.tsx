@@ -98,6 +98,7 @@ import {
   sealedBreakdownText,
   INTEGRITY_TILE_INFO,
   RETENTION_FACT,
+  witnessTileNote,
   type SetupStep
 } from '@/features/capsules/lib/integrity-view'
 import { HARNESS_PANE_A_PAYLOAD, HARNESS_PANE_C_PAYLOAD } from '@/features/capsules/lib/exchange-fixtures'
@@ -134,8 +135,7 @@ import {
   EXCHANGE_TEXT_DELETE_NOW,
   CLOSE_CARD_COUNTS_TOOLTIP,
   CLOSE_CARD_TOOLTIP,
-  SAMPLE_DATA_UNAVAILABLE,
-  WITNESS_OFF
+  SAMPLE_DATA_UNAVAILABLE
 } from '@/features/capsules/lib/tooltip-copy'
 import type { PaymentsPresence } from '@/features/capsules/api/sidecarTypes'
 import { NOT_ADJUDICATED_LINES } from '@/features/capsules/lib/referee-row'
@@ -1260,8 +1260,6 @@ function IntegritySection() {
   // "8 leaves", never "1 leaves".
   const coveredLeafCount = typeof card?.covered_leaf_count === 'number' ? card.covered_leaf_count : null
   const continuity = typeof card?.continuity === 'string' ? card.continuity : null
-  const witnesses: unknown[] = Array.isArray(card?.witnesses) ? (card.witnesses as unknown[]) : []
-  const witnessCount = witnesses.length
 
   // L4.2 — owner-added-later headline
   const ownerAddedAt = typeof card?.owner_added_at === 'string' ? card.owner_added_at : null
@@ -1348,8 +1346,8 @@ function IntegritySection() {
           <IntegrityStatCard
             info={INTEGRITY_TILE_INFO.sharedWithWitness}
             label="Shared with a witness"
-            sub={witnessCount === 0 ? WITNESS_OFF : undefined}
-            value={witnessCount}
+            sub={witnessTileNote(registration.witnessState)}
+            value={registration.witnessedCheckpointCount}
           />
           <IntegrityStatCard
             info={INTEGRITY_TILE_INFO.confirmedByOtherSide}
@@ -1469,7 +1467,7 @@ export function LedgerPageContent({ focusExchangeKey }: { focusExchangeKey?: str
           confirmed: paneCHeroQuery.data.rows.filter((row) => deriveRightCellState(row).kind === 'closed').length,
           disagreements: paneCHeroQuery.data.rows.filter((row) => deriveRightCellState(row).kind === 'contradicted')
             .length,
-          witnessed: checkpointRegistration(paneAStatusQuery.data.card ?? null).registered
+          witness: checkpointRegistration(paneAStatusQuery.data.card ?? null).witnessState
         })
       : null
   const recordsStatus = useRecordsStatus({ sample: source === 'sample' })
