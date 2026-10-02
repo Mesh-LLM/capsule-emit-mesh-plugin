@@ -949,6 +949,36 @@ pub(crate) fn seal_local_record(
     emit::seal_local_record(&header, action_id, blocks, references, chain, signing_key)
 }
 
+/// Seal one settlement-records leg (draft-mih-agent-settlement-records-00)
+/// under this node's mesh header: a local `fyi` record whose top-level
+/// `settlement` member is `member`, chained onto this node's own head. The
+/// member is checked by capsule-emit's `settlement` module first.
+pub fn seal_settlement_leg(
+    action_id: String,
+    member: Value,
+    references: Option<Value>,
+    chain: Option<ChainLink>,
+    signing_key: &ed25519_dalek::SigningKey,
+) -> Result<Value, capsule_emit_lib::settlement::SealLegError> {
+    let header = LocalRecordHeader {
+        operator: LOCAL_RECORD_OPERATOR,
+        developer: LOCAL_RECORD_DEVELOPER,
+        provider: LOCAL_RECORD_PROVIDER,
+        model_id: SETTLEMENT_LEG_MODEL_ID,
+    };
+    capsule_emit_lib::settlement::seal_leg(
+        &header,
+        action_id,
+        member,
+        references,
+        chain,
+        signing_key,
+    )
+}
+
+/// A settlement leg is about a payment, not a model run.
+const SETTLEMENT_LEG_MODEL_ID: &str = "n/a-settlement-leg";
+
 // ---------------------------------------------------------------------------
 // The LOCAL citing record for a received half's inclusion evidence
 // (`counterparty_inclusion`, AAC-05 `citation_purpose` registry).
@@ -2355,7 +2385,7 @@ mod tests {
         let fact = &capsule["model_attestation"]["compute_attestation"]["local_routing_choice"];
         assert_eq!(fact["change"], json!("block"));
         // `until` is committed at minute granularity, like every sealed time.
-        assert_eq!(fact["until"], json!("2026-10-04T00:00:00.000Z"));
+        assert_eq!(fact["until"], json!("2026-10-04T00:00:00Z"));
         assert_eq!(
             fact["peer_commitment"]["digest"],
             json!(peer_commitment(&peer, &salt))
@@ -2453,7 +2483,7 @@ mod tests {
 
         assert_eq!(
             compute["local_routing_choice"]["until"],
-            json!("2026-10-04T00:00:00.000Z")
+            json!("2026-10-04T00:00:00Z")
         );
         let timestamp = first["timestamp"].as_str().unwrap();
         assert_eq!(

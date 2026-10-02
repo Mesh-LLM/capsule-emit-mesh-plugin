@@ -389,6 +389,8 @@ pub struct CapsuleState {
     /// label used for the ledger issuer / sequence-counter key), which is
     /// NEVER used as a stand-in for the mesh node id domain.
     learned_self_node_id: Mutex<LearnedSelfNodeId>,
+    /// Settlement-records legs waiting on the other side (in memory only).
+    settlement_legs: crate::settlement_legs::Legs,
     /// See [`CapsuleState::observed_not_sealed`].
     observed_not_sealed: std::sync::atomic::AtomicU64,
 }
@@ -468,8 +470,14 @@ impl CapsuleState {
             node_id: node_id.into(),
             sequence_counters: Mutex::new(sequence_counters),
             learned_self_node_id: Mutex::new(learned_self_node_id),
+            settlement_legs: crate::settlement_legs::Legs::default(),
             observed_not_sealed: std::sync::atomic::AtomicU64::new(0),
         })
+    }
+
+    /// This node's settlement-records state ([`crate::settlement_legs`]).
+    pub fn settlement_legs(&self) -> &crate::settlement_legs::Legs {
+        &self.settlement_legs
     }
 
     /// Observed host-served exchanges this node failed to seal since start.
@@ -1752,6 +1760,59 @@ impl CapsuleState {
         let capsule_id = capsule["capsule_id"]
             .as_str()
             .expect("seal_settlement_record always sets capsule_id")
+            .to_string();
+        let payload = crate::producer::capsule::payload_bytes(&capsule);
+        let statement = build_signed_statement(
+            &SignedStatementInput {
+                payload: &payload,
+                issuer: &self.node_id,
+                subject: &capsule_id,
+                content_type: CAPSULE_CONTENT_TYPE,
+            },
+            &self.keys.signing_key,
+        );
+        ledger.append(&capsule, &statement)?;
+        Ok(Some(EmittedCapsule {
+            capsule_id,
+            capsule,
+        }))
+    }
+
+    /// Seal one settlement-records leg (draft-mih-agent-settlement-records-00),
+    /// chained onto this node's head, with its detached statement. A leg
+    /// already on the ledger (same leg kind and payment, or same delivery) is
+    /// not sealed again: `Ok(None)`.
+    pub fn emit_settlement_leg(
+        &self,
+        action_id: String,
+        member: Value,
+        references: Option<Value>,
+    ) -> anyhow::Result<Option<EmittedCapsule>> {
+        let (leg, subject) =
+            crate::producer::index::settlement_leg_subject(&member).ok_or_else(|| {
+                anyhow::anyhow!("settlement leg has no payment hash or delivery subject")
+            })?;
+        let mut ledger = self
+            .ledger
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if ledger.has_index_key(&crate::producer::index::settlement_leg_key(&leg, &subject)) {
+            return Ok(None);
+        }
+        let chain = ledger.chain_head().map(|parent| ChainLink {
+            parent_capsule_id: parent.to_string(),
+            relation: "follows".to_string(),
+        });
+        let capsule = crate::producer::capsule::seal_settlement_leg(
+            action_id,
+            member,
+            references,
+            chain,
+            &self.keys.signing_key,
+        )?;
+        let capsule_id = capsule["capsule_id"]
+            .as_str()
+            .expect("seal_settlement_leg always sets capsule_id")
             .to_string();
         let payload = crate::producer::capsule::payload_bytes(&capsule);
         let statement = build_signed_statement(
