@@ -488,7 +488,7 @@ function ExchangesSection({
     const settle = (outcome: AskOutcome) =>
       setAskOutcomes((previous) => new Map(previous).set(row.exchangeKey, outcome))
     settle({ kind: 'asking', at: askedAt })
-    void askForRecord(target.peerId, target.nonce)
+    void askForRecord(target.peerId, target)
       .then((reply) => judgeAskReply(reply, requestDigest, askedAt))
       .then(settle)
   }, [])

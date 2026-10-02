@@ -23,7 +23,7 @@
 import { ed25519 } from '@noble/curves/ed25519'
 import type { PaneCRow } from '@/features/capsules/api/sidecarTypes'
 import type { CapsuleRecord } from '@/features/capsules/api/types'
-import type { EvidenceAskReply } from '@/features/capsules/api/evidenceRequestClient'
+import type { AskSubject, EvidenceAskReply } from '@/features/capsules/api/evidenceRequestClient'
 import { verifyCoseSign1 } from '@/features/capsules/lib/cose'
 import {
   askForRecordIsDue,
@@ -43,9 +43,16 @@ export type AskOutcome =
   | { kind: 'record'; at: string; evidence: PeerRecomputeState }
 
 /** Whom to ask and how to name the exchange, read from OUR record of it: the
- *  node that served our request (or that asked us, on a row we served), and
- *  the client nonce both records carry. `null` when either is unknown. */
-export type AskTarget = { peerId: string; nonce: string }
+ *  node that served our request (or that asked us, on a row we served), the
+ *  client nonce our record carries, and the exchange's two `effect` digests.
+ *  `null` when the node is unknown, or when neither the nonce nor both
+ *  digests are. */
+export type AskTarget = AskSubject & { peerId: string }
+
+/** The nonce a host-served record carries when the host forwarded none
+ *  (`evidence_log::HOST_SERVED_NO_NONCE`). Every such record carries it, so
+ *  it names no exchange. */
+export const HOST_SERVED_NO_NONCE = 'host-served-no-nonce'
 
 const FULL_ID = /^[0-9a-f]{64}$/
 /** Their signed "I hold no such record" (the -00 registry token). */
@@ -69,10 +76,15 @@ function pocBlock(record: unknown): Record<string, unknown> | null {
 export function askTarget(record: CapsuleRecord | Record<string, unknown> | null | undefined): AskTarget | null {
   const poc = pocBlock(record)
   const provenance = obj(poc?.serving_provenance)
-  const nonce = str(poc?.client_nonce)
+  const recordedNonce = str(poc?.client_nonce)
+  const nonce = recordedNonce === HOST_SERVED_NO_NONCE ? null : recordedNonce
+  const effect = obj(obj(record)?.effect)
+  const request = str(effect?.request_digest)?.toLowerCase()
+  const response = str(effect?.response_digest)?.toLowerCase()
+  const digests = request && response && FULL_ID.test(request) && FULL_ID.test(response) ? { request, response } : null
   const other = poc?.role === 'served' ? str(provenance?.requested_by_node_id) : str(provenance?.served_by_node_id)
   const peerId = other?.toLowerCase() ?? null
-  return peerId && FULL_ID.test(peerId) && nonce ? { peerId, nonce } : null
+  return peerId && FULL_ID.test(peerId) && (nonce || digests) ? { peerId, nonce, digests } : null
 }
 
 /** The row states whose record hasn't arrived, where asking can help. */

@@ -4,6 +4,7 @@ import type { PaneCRow } from '@/features/capsules/api/sidecarTypes'
 import {
   FIXTURE_PROVIDER_NODE,
   FIXTURE_REQUEST_DIGEST,
+  FIXTURE_RESPONSE_DIGEST,
   fixtureHalfBody
 } from '@/features/capsules/lib/pushed-half-fixtures'
 import { ASK_FOR_RECORD_AFTER_MS } from '@/features/capsules/lib/exchange-row-state'
@@ -12,6 +13,7 @@ import {
   askIsOffered,
   askReplyNote,
   askTarget,
+  HOST_SERVED_NO_NONCE,
   judgeAskReply,
   producerSignatureVerifies,
   refusalSigningBody,
@@ -122,22 +124,34 @@ const trustingJudges: AskJudges = {
 }
 
 describe('askTarget', () => {
-  it('names the node that served our request and the nonce both records carry', () => {
-    expect(askTarget(ourRequestedRecord())).toEqual({ peerId: FIXTURE_PROVIDER_NODE, nonce: NONCE })
+  const DIGESTS = { request: FIXTURE_REQUEST_DIGEST, response: FIXTURE_RESPONSE_DIGEST }
+  const poc = (record: Record<string, unknown>) =>
+    (record.model_attestation as Record<string, Record<string, Record<string, unknown>>>).compute_attestation[
+      'x-mesh-poc-v1'
+    ]
+
+  it('names the node that served our request, our nonce and both digests', () => {
+    expect(askTarget(ourRequestedRecord())).toEqual({ peerId: FIXTURE_PROVIDER_NODE, nonce: NONCE, digests: DIGESTS })
   })
 
-  it('offers nothing without a full peer id or a nonce', () => {
+  it('never names the exchange by the placeholder nonce every host-served half shares', () => {
+    const placeholder = ourRequestedRecord()
+    poc(placeholder).client_nonce = HOST_SERVED_NO_NONCE
+    expect(askTarget(placeholder)).toEqual({ peerId: FIXTURE_PROVIDER_NODE, nonce: null, digests: DIGESTS })
+  })
+
+  it('offers nothing without a full peer id, or without a nonce or both digests', () => {
     const noNonce = ourRequestedRecord()
-    delete (noNonce.model_attestation as Record<string, Record<string, Record<string, unknown>>>).compute_attestation[
-      'x-mesh-poc-v1'
-    ].client_nonce
+    delete poc(noNonce).client_nonce
+    expect(askTarget(noNonce)).toEqual({ peerId: FIXTURE_PROVIDER_NODE, nonce: null, digests: DIGESTS })
+    delete (noNonce.effect as Record<string, unknown>).response_digest
     expect(askTarget(noNonce)).toBeNull()
     expect(askTarget(fixtureHalfBody({ servedBy: 'unknown' }))).toBeNull()
   })
 })
 
 describe('askIsOffered', () => {
-  const target = { peerId: FIXTURE_PROVIDER_NODE, nonce: NONCE }
+  const target = { peerId: FIXTURE_PROVIDER_NODE, nonce: NONCE, digests: null }
   const at = '2026-09-28T20:00:00Z'
   const now = Date.parse(at)
 

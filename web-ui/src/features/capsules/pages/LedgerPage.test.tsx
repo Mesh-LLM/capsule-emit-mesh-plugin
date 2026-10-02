@@ -939,7 +939,10 @@ describe('LedgerPageContent — Part 3: Exchanges two-sided stream + row inspect
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     // The ask went to the node that served us, naming the exchange by nonce,
     // and with no answer the row says so.
-    expect(askForRecord).toHaveBeenCalledWith('c'.repeat(64), 'nonce-known')
+    expect(askForRecord).toHaveBeenCalledWith(
+      'c'.repeat(64),
+      expect.objectContaining({ nonce: 'nonce-known', digests: null })
+    )
     expect(await screen.findByText(/^Asked .*No reply yet\.$/)).toBeInTheDocument()
 
     // Nothing on this row ever opens a dialog -- not the ask action, not

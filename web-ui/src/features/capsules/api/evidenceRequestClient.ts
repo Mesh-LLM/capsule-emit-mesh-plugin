@@ -47,6 +47,24 @@ export function askByNonceRequest(nonce: string): Record<string, unknown> {
   return { coverage: { min_freshness: 1 }, subject: { correlation: nonce } }
 }
 
+/** The correlation identifier that names an exchange by both of its digests
+ *  (`evidence_log::exchange_binding`): a record matches only when its
+ *  `effect` carries exactly these two. */
+export function exchangeBinding(requestDigest: string, responseDigest: string): string {
+  return `exchange-digests:${requestDigest}:${responseDigest}`
+}
+
+/** The -00 request for the records of the exchange with these two digests. */
+export function askByDigestsRequest(digests: ExchangeDigests): Record<string, unknown> {
+  return { coverage: { min_freshness: 1 }, subject: { correlation: exchangeBinding(digests.request, digests.response) } }
+}
+
+export type ExchangeDigests = { request: string; response: string }
+
+/** How to name the exchange to the other side: the client nonce our record
+ *  carries, and the exchange's two digests. Either may be unknown. */
+export type AskSubject = { nonce: string | null; digests: ExchangeDigests | null }
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
 }
@@ -80,8 +98,26 @@ async function announcedKeyFor(peerId: string): Promise<string | null> {
   }
 }
 
-export async function askForRecord(peerId: string, nonce: string): Promise<EvidenceAskReply> {
-  const request = askByNonceRequest(nonce)
+/** Ask by the client nonce first; when the other side answers, signed, that
+ *  it holds no record of that nonce, ask again by the exchange's two
+ *  digests. A node serving an exchange it was not handed a nonce for seals
+ *  its half with a placeholder nonce, so only the digests find that half.
+ *  With no nonce, ask by the digests alone. The reply returned is the last
+ *  one, judged on its own like any other. */
+export async function askForRecord(peerId: string, subject: AskSubject): Promise<EvidenceAskReply> {
+  const { nonce, digests } = subject
+  if (nonce === null) {
+    return digests ? ask(peerId, askByDigestsRequest(digests)) : { kind: 'no_answer', message: 'nothing names the exchange' }
+  }
+  const byNonce = await ask(peerId, askByNonceRequest(nonce))
+  const noRecord =
+    byNonce.kind === 'answer' &&
+    byNonce.verification.state === 'refusal' &&
+    byNonce.verification.reason === 'no_such_subject'
+  return noRecord && digests ? ask(peerId, askByDigestsRequest(digests)) : byNonce
+}
+
+async function ask(peerId: string, request: Record<string, unknown>): Promise<EvidenceAskReply> {
   let response: Response
   try {
     // No `verify` member: the tool verifies unless told not to.
