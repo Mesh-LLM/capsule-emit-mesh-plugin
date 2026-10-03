@@ -146,6 +146,14 @@ pub struct PaymentLifecycleEvent {
     /// `null` or absent on every other.
     #[serde(default)]
     pub tokens: Option<u64>,
+    /// A settlement as the provider's receiving wallet reported it: what it
+    /// credited. Absent from hosts that do not pass the wallet's numbers.
+    #[serde(default)]
+    pub credited_msat: Option<u64>,
+    /// A settlement's fee as the wallet reported it (payer: paid on top;
+    /// provider: deducted on receipt). Absent from hosts that do not pass it.
+    #[serde(default)]
+    pub fee_msat: Option<u64>,
 }
 
 impl PaymentLifecycleEvent {
@@ -270,6 +278,16 @@ fn check_combination(event: &PaymentLifecycleEvent) -> Result<(), SettlementEven
     }
     if (event.phase == Delivered) != event.tokens.is_some() {
         return impossible("tokens is carried by a delivered event, and only by one");
+    }
+    let settlement_phase = matches!(
+        event.phase,
+        InputSettlementObserved | OutputSettlementObserved
+    );
+    if !settlement_phase && (event.credited_msat.is_some() || event.fee_msat.is_some()) {
+        return impossible("wallet amounts are carried by settlement events only");
+    }
+    if role == Role::Payer && event.credited_msat.is_some() {
+        return impossible("credited_msat is the receiving (provider) wallet's");
     }
     match event.phase {
         TermsAccepted | FinalAccounted | Delivered => {

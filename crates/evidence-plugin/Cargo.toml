@@ -70,8 +70,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # A pushed record's checks, `capsule_id` and producer signature are checked
 # with it too, and a bundle's inclusion proof with `cll`. Renamed because
 # this crate already has a `capsule_emit` module.
-capsule-emit-lib = { package = "capsule-emit", version = "0.0.2" }
-cll = { package = "checkpointed-local-log", version = "0.2.0" }
+# 0.0.4 carries `settlement` (draft-mih-agent-settlement-records-00 legs).
+capsule-emit-lib = { package = "capsule-emit", version = "0.0.4" }
+cll = { package = "checkpointed-local-log", version = "0.2.1" }
 # Evidence requests are answered in-process (`evidence_answer`): parsing,
 # resolution, signed refusals and the artifact answer come from the protocol
 # crate (draft-mih-agent-evidence-request-00). 0.0.2 carries the answer path.

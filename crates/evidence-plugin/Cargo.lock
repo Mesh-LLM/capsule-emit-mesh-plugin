@@ -157,9 +157,9 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "capsule-emit"
-version = "0.0.2"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "addec1c0e1e10616796516a888005f6d538cfb234c4df44010d4d255ec33833c"
+checksum = "5e84f1470177a6f8e4265f825ca173e34fd9dc3f5f4cddc6857658889d6e50b7"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -229,9 +229,9 @@ dependencies = [
 
 [[package]]
 name = "checkpointed-local-log"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b46aa9265e83360d64307ed29322021a857a921be23d608dfc87ec29552128cb"
+checksum = "e287b976d8caf55d31762c705e865f74ed313a06890694df3a5019ab2f32068b"
 dependencies = [
  "coset",
  "ed25519-dalek",

@@ -25,9 +25,35 @@ pub fn adjudication_key(block: &str, subject: &str) -> String {
     format!("{block}:{subject}")
 }
 
+/// The index key of a settlement-records leg: one per leg kind and payment
+/// (`terms`, `payer_observed`, `payee_observed` by payment hash), and one per
+/// delivered leg by the terms leg it cites and its direction.
+pub fn settlement_leg_key(leg: &str, subject: &str) -> String {
+    format!("settlement-leg:{leg}:{subject}")
+}
+
+/// The subject of a leg's index key: its payment hash, or for a delivered leg
+/// `<terms_ref>/<direction>`.
+pub fn settlement_leg_subject(member: &Value) -> Option<(String, String)> {
+    let leg = member.get("leg")?.as_str()?.to_string();
+    let subject = if leg == "delivered" {
+        format!(
+            "{}/{}",
+            member.get("terms_ref")?.as_str()?,
+            member.pointer("/delivery/direction")?.as_str()?
+        )
+    } else {
+        member.pointer("/payment_ref/value")?.as_str()?.to_string()
+    };
+    Some((leg, subject))
+}
+
 /// Every index key `capsule` contributes.
 pub fn record_index_keys(capsule: &Value) -> Vec<String> {
     let mut keys = counterparty_citation_keys(capsule);
+    if let Some((leg, subject)) = capsule.get("settlement").and_then(settlement_leg_subject) {
+        keys.push(settlement_leg_key(&leg, &subject));
+    }
     let Some(attestation) = capsule.pointer("/model_attestation/compute_attestation") else {
         return keys;
     };

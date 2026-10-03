@@ -39,6 +39,7 @@ mod self_peer;
 mod served_summary;
 mod settings;
 mod settlement_channel;
+mod settlement_legs;
 mod share_policy;
 mod split_stage;
 mod strict_json;
@@ -393,6 +394,115 @@ fn skipped_for_missing_self_id<'a>(
         return None;
     }
     push_counterparty(envelope)
+}
+
+/// Settlement-records legs ([`settlement_legs`]) from a checked lifecycle
+/// event: seal what is due, push a payer's terms leg to the serving peer, and
+/// retry terms legs whose earlier push failed. Best-effort, like the trail.
+async fn settlement_legs_on_lifecycle(
+    context: &mut mesh_llm_plugin::PluginContext<'_>,
+    event: &settlement_channel::PaymentLifecycleEvent,
+    capsules: &Arc<CapsuleState>,
+    self_peer: &self_peer::SelfPeer,
+) {
+    let (capsules, event) = (capsules.clone(), event.clone());
+    let pushes = tokio::task::spawn_blocking(move || {
+        let legs = capsules.settlement_legs();
+        let mut pushes = legs.retry();
+        pushes.extend(legs.on_lifecycle(&capsules, &event));
+        (capsules, pushes)
+    })
+    .await;
+    if let Ok((capsules, pushes)) = pushes {
+        push_settlement_legs(context, &capsules, pushes, self_peer).await;
+    }
+}
+
+/// Settlement-records legs from an exchange event: a remote exchange names
+/// the serving peer (where this node's terms legs go) and, when terminal,
+/// the response digest (this node's delivered leg).
+async fn settlement_legs_on_exchange(
+    context: &mut mesh_llm_plugin::PluginContext<'_>,
+    body: &[u8],
+    capsules: &Arc<CapsuleState>,
+    self_peer: &self_peer::SelfPeer,
+) {
+    let Ok(envelope) = serde_json::from_slice::<OpenAiExchangeEnvelope>(body) else {
+        return;
+    };
+    if envelope.dispatch_path != lifecycle_channel::DispatchPath::RemoteMesh {
+        return;
+    }
+    let Some(exchange_id) = envelope.exchange_id.clone() else {
+        return;
+    };
+    let peer = push_counterparty(&envelope).map(str::to_string);
+    let digest = envelope.response_digest.clone();
+    let capsules = capsules.clone();
+    let pushes = tokio::task::spawn_blocking(move || {
+        let pushes = capsules.settlement_legs().on_exchange(
+            &capsules,
+            &exchange_id,
+            peer.as_deref(),
+            digest.as_deref(),
+        );
+        (capsules, pushes)
+    })
+    .await;
+    if let Ok((capsules, pushes)) = pushes {
+        push_settlement_legs(context, &capsules, pushes, self_peer).await;
+    }
+}
+
+/// Push payer terms legs; one not sent (pushing off, own peer id unknown, or
+/// a failed push) is queued again for the next settlement event.
+async fn push_settlement_legs(
+    context: &mut mesh_llm_plugin::PluginContext<'_>,
+    capsules: &CapsuleState,
+    pushes: Vec<settlement_legs::Push>,
+    self_peer: &self_peer::SelfPeer,
+) {
+    if pushes.is_empty() {
+        return;
+    }
+    let self_id = self_peer.current();
+    let skip = if share_policy::record_at_completion_is_off() {
+        Some("record_at_completion is off")
+    } else if self_id.is_none() {
+        Some("this node's own peer id is unknown")
+    } else {
+        None
+    };
+    if let Some(why) = skip {
+        tracing::info!(
+            count = pushes.len(),
+            reason = why,
+            "settlement terms legs not pushed; held for retry"
+        );
+        for push in &pushes {
+            capsules.settlement_legs().requeue(push);
+        }
+        return;
+    }
+    let self_id = self_id.unwrap_or_default();
+    for push in pushes {
+        match record_push_bridge::push_capsule_to_peer(
+            context,
+            &push.peer,
+            &self_id,
+            &push.capsule,
+            None,
+            &[],
+        )
+        .await
+        {
+            Ok(()) => tracing::debug!(peer = %push.peer, "pushed settlement terms leg"),
+            Err(error) => {
+                tracing::warn!(%error, peer = %push.peer, "settlement terms leg push failed; held for retry");
+                capsules.settlement_legs().requeue(&push);
+            }
+        }
+    }
 }
 
 /// Seam A1 -- push `capsule_json` (this
@@ -1134,6 +1244,7 @@ async fn main() -> anyhow::Result<()> {
                     return Ok(());
                 }
                 if message.channel == OPENAI_EXCHANGE_CHANNEL {
+                    settlement_legs_on_exchange(context, &message.body, &capsules, &self_peer).await;
                     if let Some((envelope, capsule_json)) = observe_exchange_event(
                         &message.body,
                         exchange_text::enabled(),
@@ -1185,6 +1296,7 @@ async fn main() -> anyhow::Result<()> {
                     // evidence, not a failed exchange.
                     match settlement_channel::parse_and_check(&message.body) {
                         Ok(event) => {
+                            let legs_event = event.clone();
                             let capsules_for_seal = capsules.clone();
                             match tokio::task::spawn_blocking(move || {
                                 capsules_for_seal.emit_settlement_record(&event.observation())
@@ -1204,6 +1316,7 @@ async fn main() -> anyhow::Result<()> {
                                     tracing::warn!(%join_error, "settlement seal task did not complete");
                                 }
                             }
+                            settlement_legs_on_lifecycle(context, &legs_event, &capsules, &self_peer).await;
                         }
                         Err(error) => {
                             tracing::warn!(%error, "refused payment.lifecycle.v1 event; not sealed");
