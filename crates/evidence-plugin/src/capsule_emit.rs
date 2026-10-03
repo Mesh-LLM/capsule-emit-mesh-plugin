@@ -24,7 +24,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 /// Derive `(role, observation_point)` for an exchange this plugin only
 /// OBSERVED on the `openai.exchange.v1` channel (2026-09-06 role ruling).
@@ -287,8 +287,14 @@ fn sealed_hostname(host: &HostProvenance, opted_in: bool) -> Option<String> {
     }
 }
 
-const CAPSULE_CONTENT_TYPE: &str =
-    "application/vnd.agent-action-capsule+json; profile=draft-mih-scitt-agent-action-capsule-02";
+/// The signed statement's content type. Its `profile` is the spec version the
+/// sealed record itself declares, so the two cannot drift apart.
+static CAPSULE_CONTENT_TYPE: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "application/vnd.agent-action-capsule+json; profile={}",
+        crate::producer::capsule::SPEC_VERSION
+    )
+});
 
 /// Persisted cache of this node's own mesh identity (2026-09-06 self-id
 /// domain fix), beside the ledger at `<data_dir>/learned_self_node_id.json`
@@ -760,7 +766,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -999,7 +1005,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1338,7 +1344,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1381,7 +1387,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1488,7 +1494,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1530,7 +1536,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1647,7 +1653,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1696,7 +1702,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1759,7 +1765,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1774,6 +1780,15 @@ impl CapsuleState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_content_type_profile_is_the_sealed_spec_version() {
+        let profile = CAPSULE_CONTENT_TYPE
+            .split_once("; profile=")
+            .map(|(_, profile)| profile);
+        assert_eq!(profile, Some(crate::producer::capsule::SPEC_VERSION));
+        assert_eq!(profile, Some("draft-mih-scitt-agent-action-capsule-05"));
+    }
 
     /// PARITY PIN: `output_sub_digests` over the REAL SETI@Home / web_search
     /// response computes a `tool_calls_digest` byte-for-byte identical to the
