@@ -1826,7 +1826,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
