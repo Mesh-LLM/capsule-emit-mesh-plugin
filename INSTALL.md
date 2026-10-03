@@ -121,6 +121,29 @@ else `~/.local/share/capsule-emit-mesh`. The sealed log is
 `<data dir>/ledger/checkpoints.jsonl`. The node's signing key is under
 `<data dir>/keys/`; it never leaves the node.
 
+## The log's id
+
+Every checkpoint names the log it covers, and a witness keeps one history per
+log id, so no two nodes may share one. A node's log id is
+`capsule-emit-mesh/<key id>`, where the key id is the first 16 hex characters
+of the SHA-256 of its public key. It is chosen at the first start and kept in
+`<data dir>/log_id`; a later change of key does not change it. To name it
+yourself, set `CAPSULE_EMIT_MESH_LOG_ID` before the node's first checkpoint.
+
+A log keeps the id its checkpoints were cut under: changing it would break the
+log's checkpoint chain. So the plugin never changes the id of a log that has a
+checkpoint, and refuses to start when `CAPSULE_EMIT_MESH_LOG_ID` names a
+different one.
+
+**A node from an earlier release** whose log was checkpointed under the old
+default, `capsule-emit-mesh` (the same on every node), keeps that id and logs
+a warning at start. A witness accepts that id from one node only and refuses
+the others' checkpoints as a fork. To take a log id of the node's own, start a
+new log (Evidence › Clean up records › Start a new log) and restart the
+node: the old log is kept whole under `<data dir>/archive/<n>/` with its old
+id, and the new history runs under `capsule-emit-mesh/<key id>/h<n+1>` (or
+`<CAPSULE_EMIT_MESH_LOG_ID>/h<n+1>` when that is set).
+
 ## Settings were renamed
 
 Every setting in the node's environment is named `CAPSULE_EMIT_MESH_*`. Until

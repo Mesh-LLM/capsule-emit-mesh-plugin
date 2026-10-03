@@ -43,9 +43,10 @@ pub const DELETE_STORED_TEXT_OPERATION: &str = "evidence_delete_stored_text";
 pub const REBUILD_INDEX_OPERATION: &str = "evidence_rebuild_index";
 pub const START_NEW_HISTORY_OPERATION: &str = "evidence_start_new_history";
 
-/// The log id a node has before its first new history: the plugin id, which
-/// is what every checkpoint carried before this module existed.
+/// Where this node's log id is kept once chosen (see [`resolve_log_id`]).
 const LOG_ID_FILE: &str = "log_id";
+/// The setting that names a node's log id instead of the default.
+pub const LOG_ID_SETTING: &str = "CAPSULE_EMIT_MESH_LOG_ID";
 const PENDING_FILE: &str = "new-history.pending.json";
 const ARCHIVE_DIR: &str = "archive";
 
@@ -93,14 +94,104 @@ fn internal(error: impl std::fmt::Display) -> PluginError {
 // Log id + the staged new history
 // ---------------------------------------------------------------------------
 
-/// This node's current log id: `<data_dir>/log_id` if a new history has ever
-/// been started, else `default` (the plugin id).
-pub fn current_log_id(data_dir: &Path, default: &str) -> String {
+/// The log id recorded in `<data_dir>/log_id`, if any.
+fn recorded_log_id(data_dir: &Path) -> Option<String> {
     fs::read_to_string(data_dir.join(LOG_ID_FILE))
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| default.to_string())
+}
+
+/// This node's current log id: `<data_dir>/log_id` if one is recorded, else
+/// `default`.
+pub fn current_log_id(data_dir: &Path, default: &str) -> String {
+    recorded_log_id(data_dir).unwrap_or_else(|| default.to_string())
+}
+
+/// The default log id of a node: the plugin id and the node's signing key id
+/// (`<plugin_id>/<key_id>`). A witness keys continuity by log id, so two
+/// nodes must never share one: with one shared id the first node's
+/// checkpoints are accepted and every other node's are refused as a fork.
+pub fn default_log_id(plugin_id: &str, node_key_id: &str) -> String {
+    format!("{plugin_id}/{node_key_id}")
+}
+
+/// Whether `log_id` is `base` or one of its later histories (`<base>/h<n>`).
+fn is_history_of(log_id: &str, base: &str) -> bool {
+    log_id == base
+        || log_id
+            .strip_prefix(base)
+            .and_then(|rest| rest.strip_prefix("/h"))
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Whether this node's ledger already holds a checkpoint. Every checkpoint
+/// carries the log id it was cut under, and the next one must carry the same
+/// one, so a log with a checkpoint keeps its log id.
+fn has_checkpoints(ledger_dir: &Path) -> bool {
+    fs::read_to_string(ledger_dir.join("checkpoints.jsonl"))
+        .is_ok_and(|text| text.lines().any(|line| !line.trim().is_empty()))
+}
+
+/// The log id this node runs under, chosen once and then kept in
+/// `<data_dir>/log_id`. Runs BEFORE `CapsuleState::open` and the checkpoint
+/// cadence, and applies a staged new history first.
+///
+/// - `log_id_setting` (the `CAPSULE_EMIT_MESH_LOG_ID` setting) names the log
+///   id instead of the default [`default_log_id`].
+/// - A recorded log id is kept as it is.
+/// - A ledger that already holds checkpoints but has no recorded log id was
+///   checkpointed under the plugin id, the default before log ids were
+///   node-unique. It keeps that id: re-keying a log with checkpoints would
+///   break its checkpoint chain. The id is recorded and a warning names the
+///   way to a node-unique id: start a new history.
+/// - A setting that differs from the log id of a log that already holds
+///   checkpoints is refused, with the same advice, rather than re-keying the
+///   log.
+pub fn resolve_log_id(
+    data_dir: &Path,
+    plugin_id: &str,
+    node_key_id: &str,
+    log_id_setting: Option<&str>,
+) -> anyhow::Result<String> {
+    let setting = log_id_setting.map(str::trim).filter(|s| !s.is_empty());
+    let base = setting
+        .map(str::to_string)
+        .unwrap_or_else(|| default_log_id(plugin_id, node_key_id));
+    apply_pending_before_open(data_dir, &base)?;
+    let checkpointed = has_checkpoints(&data_dir.join("ledger"));
+    let current = match recorded_log_id(data_dir) {
+        Some(recorded) => recorded,
+        None if checkpointed => plugin_id.to_string(),
+        None => base.clone(),
+    };
+    let log_id = match setting {
+        Some(wanted) if !is_history_of(&current, wanted) => {
+            if checkpointed {
+                anyhow::bail!(
+                    "{LOG_ID_SETTING} is {wanted:?} but this node's log already holds checkpoints \
+                     under the log id {current:?}; a log keeps its log id. Unset the setting, or \
+                     start a new log (the current records are kept whole in an archive) and \
+                     the new log takes the setting's log id"
+                );
+            }
+            wanted.to_string()
+        }
+        _ => current,
+    };
+    if setting.is_none() && checkpointed && log_id == plugin_id {
+        tracing::warn!(
+            log_id = %log_id,
+            node_unique_log_id = %base,
+            "this log was checkpointed under the plugin id, a log id every node had by default; \
+             an outside witness accepts that log id from one node only. Start a new log to \
+             take a log id of this node's own"
+        );
+    }
+    if recorded_log_id(data_dir).as_deref() != Some(log_id.as_str()) {
+        write_atomically(&data_dir.join(LOG_ID_FILE), log_id.as_bytes())?;
+    }
+    Ok(log_id)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -625,6 +716,135 @@ mod tests {
         assert!(is_archived(&dir, &"a".repeat(64)));
         assert!(!is_archived(&dir, &"b".repeat(64)));
         assert!(!is_archived(&temp_dir("no-archive"), &"a".repeat(64)));
+    }
+
+    fn key_id_of_node(dir: &Path) -> String {
+        crate::producer::keys::load_or_create(&dir.join("keys"))
+            .unwrap()
+            .key_id()
+    }
+
+    fn put_checkpoint(dir: &Path, log_id: &str) {
+        fs::create_dir_all(dir.join("ledger")).unwrap();
+        fs::write(
+            dir.join("ledger/checkpoints.jsonl"),
+            format!("{}\n", json!({ "log_id": log_id, "mmr_size": 1 })),
+        )
+        .unwrap();
+    }
+
+    /// Two nodes never share a log id by default: each takes its own key id,
+    /// records it, and keeps it across restarts.
+    #[test]
+    fn the_default_log_id_is_node_unique_and_kept() {
+        let a = temp_dir("log-id-a");
+        let b = temp_dir("log-id-b");
+        let id_a = resolve_log_id(&a, "plugin", &key_id_of_node(&a), None).unwrap();
+        let id_b = resolve_log_id(&b, "plugin", &key_id_of_node(&b), None).unwrap();
+        assert_ne!(id_a, id_b);
+        assert_eq!(id_a, format!("plugin/{}", key_id_of_node(&a)));
+        assert_eq!(recorded_log_id(&a).as_deref(), Some(id_a.as_str()));
+        assert_eq!(
+            resolve_log_id(&a, "plugin", &key_id_of_node(&a), None).unwrap(),
+            id_a
+        );
+        // A recorded id outlives a change of key.
+        assert_eq!(
+            resolve_log_id(&a, "plugin", "other-key", None).unwrap(),
+            id_a
+        );
+        let _ = fs::remove_dir_all(&a);
+        let _ = fs::remove_dir_all(&b);
+    }
+
+    /// A log checkpointed under the old shared default keeps it: re-keying
+    /// would break its checkpoint chain. The id is recorded, never changed.
+    #[test]
+    fn a_log_checkpointed_under_the_old_default_keeps_it() {
+        let dir = temp_dir("log-id-legacy");
+        put_checkpoint(&dir, "plugin");
+        assert_eq!(
+            resolve_log_id(&dir, "plugin", "k1", None).unwrap(),
+            "plugin"
+        );
+        assert_eq!(recorded_log_id(&dir).as_deref(), Some("plugin"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_setting_names_the_log_id_and_never_re_keys_a_checkpointed_log() {
+        let fresh = temp_dir("log-id-setting");
+        assert_eq!(
+            resolve_log_id(&fresh, "plugin", "k1", Some("my-node")).unwrap(),
+            "my-node"
+        );
+        // Not checkpointed yet: a changed setting is taken.
+        assert_eq!(
+            resolve_log_id(&fresh, "plugin", "k1", Some("my-node-2")).unwrap(),
+            "my-node-2"
+        );
+        put_checkpoint(&fresh, "my-node-2");
+        assert_eq!(
+            resolve_log_id(&fresh, "plugin", "k1", Some("my-node-2")).unwrap(),
+            "my-node-2"
+        );
+        let refused = resolve_log_id(&fresh, "plugin", "k1", Some("my-node-3")).unwrap_err();
+        assert!(refused.to_string().contains("start a new log"));
+        assert_eq!(recorded_log_id(&fresh).as_deref(), Some("my-node-2"));
+        // Unset: the recorded id stays.
+        assert_eq!(
+            resolve_log_id(&fresh, "plugin", "k1", None).unwrap(),
+            "my-node-2"
+        );
+
+        let legacy = temp_dir("log-id-setting-legacy");
+        put_checkpoint(&legacy, "plugin");
+        assert!(resolve_log_id(&legacy, "plugin", "k1", Some("my-node")).is_err());
+        assert!(recorded_log_id(&legacy).is_none());
+        let _ = fs::remove_dir_all(&fresh);
+        let _ = fs::remove_dir_all(&legacy);
+    }
+
+    #[test]
+    fn a_later_history_of_the_set_log_id_is_kept() {
+        assert!(is_history_of("x/h2", "x"));
+        assert!(is_history_of("x", "x"));
+        assert!(!is_history_of("x/h", "x"));
+        assert!(!is_history_of("x/h2a", "x"));
+        assert!(!is_history_of("xy", "x"));
+    }
+
+    /// The way off the old shared default: a new history takes the node's own
+    /// log id, and the old log is kept whole under its old id.
+    #[test]
+    fn a_new_history_moves_a_legacy_log_to_a_node_unique_id() {
+        let dir = temp_dir("log-id-migrate");
+        let (m, _ids) = maintenance(&dir, 1);
+        drop(m);
+        put_checkpoint(&dir, "node-under-test");
+        let key_id = key_id_of_node(&dir);
+        let log_id = resolve_log_id(&dir, "node-under-test", &key_id, None).unwrap();
+        assert_eq!(log_id, "node-under-test");
+        let state = Arc::new(CapsuleState::open(&dir, "node-under-test").unwrap());
+        Maintenance::new(dir.clone(), state, log_id)
+            .start_new_history(StartNewHistoryArgs { confirm: true })
+            .unwrap();
+
+        // --- restart ---
+        let log_id = resolve_log_id(&dir, "node-under-test", &key_id, None).unwrap();
+        assert_eq!(log_id, format!("node-under-test/{key_id}/h2"));
+        let state = CapsuleState::open(&dir, "node-under-test").unwrap();
+        finish_pending_after_open(&dir, &state, &log_id).unwrap();
+        assert!(dir.join("archive/1/checkpoints.jsonl").exists());
+        let first = reopen_clean(&dir);
+        let first = first
+            .lookup(first.chain_head().unwrap())
+            .unwrap()
+            .unwrap()
+            .capsule;
+        assert_eq!(block(&first)["prior_log_id"], json!("node-under-test"));
+        assert_eq!(block(&first)["log_id"], json!(log_id));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn temp_dir(tag: &str) -> PathBuf {

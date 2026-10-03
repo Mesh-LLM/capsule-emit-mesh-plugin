@@ -4,6 +4,7 @@ import type { PaneCRow } from '@/features/capsules/api/sidecarTypes'
 import {
   FIXTURE_PROVIDER_NODE,
   FIXTURE_REQUEST_DIGEST,
+  FIXTURE_RESPONSE_DIGEST,
   fixtureHalfBody
 } from '@/features/capsules/lib/pushed-half-fixtures'
 import { ASK_FOR_RECORD_AFTER_MS } from '@/features/capsules/lib/exchange-row-state'
@@ -12,6 +13,7 @@ import {
   askIsOffered,
   askReplyNote,
   askTarget,
+  HOST_SERVED_NO_NONCE,
   judgeAskReply,
   producerSignatureVerifies,
   refusalSigningBody,
@@ -122,22 +124,34 @@ const trustingJudges: AskJudges = {
 }
 
 describe('askTarget', () => {
-  it('names the node that served our request and the nonce both records carry', () => {
-    expect(askTarget(ourRequestedRecord())).toEqual({ peerId: FIXTURE_PROVIDER_NODE, nonce: NONCE })
+  const DIGESTS = { request: FIXTURE_REQUEST_DIGEST, response: FIXTURE_RESPONSE_DIGEST }
+  const poc = (record: Record<string, unknown>) =>
+    (record.model_attestation as Record<string, Record<string, Record<string, unknown>>>).compute_attestation[
+      'x-mesh-poc-v1'
+    ]
+
+  it('names the node that served our request, our nonce and both digests', () => {
+    expect(askTarget(ourRequestedRecord())).toEqual({ peerId: FIXTURE_PROVIDER_NODE, nonce: NONCE, digests: DIGESTS })
   })
 
-  it('offers nothing without a full peer id or a nonce', () => {
+  it('never names the exchange by the placeholder nonce every host-served half shares', () => {
+    const placeholder = ourRequestedRecord()
+    poc(placeholder).client_nonce = HOST_SERVED_NO_NONCE
+    expect(askTarget(placeholder)).toEqual({ peerId: FIXTURE_PROVIDER_NODE, nonce: null, digests: DIGESTS })
+  })
+
+  it('offers nothing without a full peer id, or without a nonce or both digests', () => {
     const noNonce = ourRequestedRecord()
-    delete (noNonce.model_attestation as Record<string, Record<string, Record<string, unknown>>>).compute_attestation[
-      'x-mesh-poc-v1'
-    ].client_nonce
+    delete poc(noNonce).client_nonce
+    expect(askTarget(noNonce)).toEqual({ peerId: FIXTURE_PROVIDER_NODE, nonce: null, digests: DIGESTS })
+    delete (noNonce.effect as Record<string, unknown>).response_digest
     expect(askTarget(noNonce)).toBeNull()
     expect(askTarget(fixtureHalfBody({ servedBy: 'unknown' }))).toBeNull()
   })
 })
 
 describe('askIsOffered', () => {
-  const target = { peerId: FIXTURE_PROVIDER_NODE, nonce: NONCE }
+  const target = { peerId: FIXTURE_PROVIDER_NODE, nonce: NONCE, digests: null }
   const at = '2026-09-28T20:00:00Z'
   const now = Date.parse(at)
 
@@ -278,6 +292,40 @@ describe('judgeAskReply', () => {
       trustingJudges
     )
     expect(outcome).toMatchObject({ kind: 'no_reply', detail: 'their reply carried no record' })
+  })
+
+  // Asked by the exchange's digests, a node can answer with more than one
+  // record carrying them: the half it served and, say, a half it requested.
+  function theirHalf(capsuleId: string, role: 'served' | 'requested'): Record<string, unknown> {
+    const body = fixtureHalfBody({ capsuleId })
+    ;(body.model_attestation as Record<string, Record<string, Record<string, unknown>>>).compute_attestation[
+      'x-mesh-poc-v1'
+    ].role = role
+    return { ...body, signature: 'aa', key_id: 'bb' }
+  }
+
+  it('prefers the half they served among records with our digests', async () => {
+    const served = theirHalf('theirs-served', 'served')
+    const requested = theirHalf('theirs-requested', 'requested')
+    const outcome = await judgeAskReply(
+      answer(artifact([requested, served])),
+      FIXTURE_REQUEST_DIGEST,
+      ASKED_AT,
+      trustingJudges
+    )
+    expect(outcome).toMatchObject({ kind: 'record', evidence: { peerRecord: { capsule_id: 'theirs-served' } } })
+  })
+
+  it('never picks one of several records that could be theirs by order: the reply is ambiguous', async () => {
+    const one = theirHalf('theirs-1', 'served')
+    const two = theirHalf('theirs-2', 'served')
+    const outcome = await judgeAskReply(answer(artifact([one, two])), FIXTURE_REQUEST_DIGEST, ASKED_AT, trustingJudges)
+    expect(outcome).toEqual({ kind: 'ambiguous', at: ASKED_AT, count: 2 })
+    expect(askReplyNote(outcome)).toEqual({
+      verified: false,
+      text: 'Their reply carried 2 records that could be theirs for this exchange; none is shown as theirs'
+    })
+    expect(stateAfterAsk(waitingRow(), outcome, null)).toEqual({ kind: 'open_asked', date: ASKED_AT })
   })
 
   it('closes the row through the gate when their record verifies and cites our half', async () => {

@@ -61,6 +61,39 @@ const MAX_CORRELATION_ID_LEN: usize = 256;
 /// counterparty's id is an identity, not a correlation, and is not one.
 const CORRELATION_KEYS: [&str; 3] = ["nonce", "client_nonce", "exchange_id"];
 
+/// The `client_nonce` a host-served record carries when the host forwarded
+/// none. Every such record carries it, so it names no exchange and is never
+/// indexed: asking by it would answer with unrelated records.
+pub const HOST_SERVED_NO_NONCE: &str = "host-served-no-nonce";
+
+/// The prefix of an exchange's digest binding (see [`exchange_binding`]).
+const EXCHANGE_BINDING_PREFIX: &str = "exchange-digests:";
+
+/// The correlation identifier that names an exchange by both of its digests:
+/// `exchange-digests:<request digest>:<response digest>`, the two `effect`
+/// digests both sides' records carry. A record is found by it only when both
+/// digests are exactly its own. It is how a requester finds the other side's
+/// record when that record carries no nonce of its own (a host-served half,
+/// [`HOST_SERVED_NO_NONCE`]): the requester knows both digests from its own
+/// half.
+pub fn exchange_binding(request_digest: &str, response_digest: &str) -> String {
+    format!("{EXCHANGE_BINDING_PREFIX}{request_digest}:{response_digest}")
+}
+
+/// A record's digest binding, when its `effect` carries both digests.
+fn record_exchange_binding(record: &Value) -> Option<String> {
+    let effect = record.get("effect")?;
+    let request = effect
+        .get("request_digest")?
+        .as_str()
+        .filter(|d| is_digest(d))?;
+    let response = effect
+        .get("response_digest")?
+        .as_str()
+        .filter(|d| is_digest(d))?;
+    Some(exchange_binding(request, response))
+}
+
 /// One line of the ledger.
 #[derive(Clone, Debug)]
 pub struct Leaf {
@@ -225,6 +258,7 @@ impl LedgerIndex {
             self.by_id.entry(capsule_id.clone()).or_insert(index);
             let mut ids = Vec::new();
             collect_correlations(&record, &mut ids);
+            ids.extend(record_exchange_binding(&record));
             ids.sort();
             ids.dedup();
             for id in ids {
@@ -486,10 +520,11 @@ fn collect_correlations(value: &Value, out: &mut Vec<String>) {
         Value::Object(map) => {
             for (k, v) in map {
                 if CORRELATION_KEYS.contains(&k.as_str()) {
-                    if let Some(id) = v
-                        .as_str()
-                        .filter(|s| !s.is_empty() && s.len() <= MAX_CORRELATION_ID_LEN)
-                    {
+                    if let Some(id) = v.as_str().filter(|s| {
+                        !s.is_empty()
+                            && s.len() <= MAX_CORRELATION_ID_LEN
+                            && *s != HOST_SERVED_NO_NONCE
+                    }) {
                         out.push(id.to_string());
                     }
                 }
@@ -524,6 +559,7 @@ mod tests {
         corpus_checkpoints, corpus_ledger, write_jsonl, NODE_KEY_SEED,
     };
     use ed25519_dalek::SigningKey;
+    use serde_json::json;
 
     fn key_id() -> String {
         hex::encode(
@@ -638,6 +674,38 @@ mod tests {
         write_jsonl(&dir.path().join(CAPSULES_FILE), &ledger);
         index.refresh().unwrap();
         assert_eq!(index.chain.len(), 2);
+    }
+
+    /// A host-served half carries the placeholder nonce, never the one the
+    /// requester forwarded: it is found by its two digests, only both
+    /// exactly, and never by the placeholder every such half shares.
+    #[test]
+    fn a_host_served_half_is_found_by_its_digests_not_its_placeholder_nonce() {
+        let (req, resp) = ("a".repeat(64), "b".repeat(64));
+        let half = |req: &str, resp: &str| {
+            crate::evidence_request_parity::sealed(json!({
+                "effect": {"status": "confirmed", "request_digest": req, "response_digest": resp},
+                "model_attestation": {"compute_attestation": {"x-mesh-poc-v1": {
+                    "role": "served",
+                    "client_nonce": HOST_SERVED_NO_NONCE,
+                    "client_nonce_source": "host_served_observed",
+                }}},
+            }))
+        };
+        let ours = half(&req, &resp);
+        let other = half(&"c".repeat(64), &resp);
+        let dir = tempfile::tempdir().unwrap();
+        write_jsonl(&dir.path().join(CAPSULES_FILE), &[other, ours.clone()]);
+        let mut index = LedgerIndex::new(dir.path(), &key_id());
+        index.refresh().unwrap();
+        assert_eq!(index.correlated(&exchange_binding(&req, &resp)), &[1]);
+        assert!(index.correlated(HOST_SERVED_NO_NONCE).is_empty());
+        assert!(index.correlated(&exchange_binding(&req, &req)).is_empty());
+        assert!(index.correlated(&exchange_binding(&resp, &req)).is_empty());
+        assert!(
+            index.correlated(&req).is_empty(),
+            "one digest alone is no binding"
+        );
     }
 
     #[test]

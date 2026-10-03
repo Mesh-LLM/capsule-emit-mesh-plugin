@@ -23,7 +23,7 @@
 import { ed25519 } from '@noble/curves/ed25519'
 import type { PaneCRow } from '@/features/capsules/api/sidecarTypes'
 import type { CapsuleRecord } from '@/features/capsules/api/types'
-import type { EvidenceAskReply } from '@/features/capsules/api/evidenceRequestClient'
+import type { AskSubject, EvidenceAskReply } from '@/features/capsules/api/evidenceRequestClient'
 import { verifyCoseSign1 } from '@/features/capsules/lib/cose'
 import {
   askForRecordIsDue,
@@ -41,11 +41,21 @@ export type AskOutcome =
   | { kind: 'refused'; at: string; reason: string }
   | { kind: 'no_record'; at: string }
   | { kind: 'record'; at: string; evidence: PeerRecomputeState }
+  /** Their verified reply carried more than one record that could be their
+   *  half of this exchange, and nothing picks one: none is shown as theirs. */
+  | { kind: 'ambiguous'; at: string; count: number }
 
 /** Whom to ask and how to name the exchange, read from OUR record of it: the
- *  node that served our request (or that asked us, on a row we served), and
- *  the client nonce both records carry. `null` when either is unknown. */
-export type AskTarget = { peerId: string; nonce: string }
+ *  node that served our request (or that asked us, on a row we served), the
+ *  client nonce our record carries, and the exchange's two `effect` digests.
+ *  `null` when the node is unknown, or when neither the nonce nor both
+ *  digests are. */
+export type AskTarget = AskSubject & { peerId: string }
+
+/** The nonce a host-served record carries when the host forwarded none
+ *  (`evidence_log::HOST_SERVED_NO_NONCE`). Every such record carries it, so
+ *  it names no exchange. */
+export const HOST_SERVED_NO_NONCE = 'host-served-no-nonce'
 
 const FULL_ID = /^[0-9a-f]{64}$/
 /** Their signed "I hold no such record" (the -00 registry token). */
@@ -69,10 +79,15 @@ function pocBlock(record: unknown): Record<string, unknown> | null {
 export function askTarget(record: CapsuleRecord | Record<string, unknown> | null | undefined): AskTarget | null {
   const poc = pocBlock(record)
   const provenance = obj(poc?.serving_provenance)
-  const nonce = str(poc?.client_nonce)
+  const recordedNonce = str(poc?.client_nonce)
+  const nonce = recordedNonce === HOST_SERVED_NO_NONCE ? null : recordedNonce
+  const effect = obj(obj(record)?.effect)
+  const request = str(effect?.request_digest)?.toLowerCase()
+  const response = str(effect?.response_digest)?.toLowerCase()
+  const digests = request && response && FULL_ID.test(request) && FULL_ID.test(response) ? { request, response } : null
   const other = poc?.role === 'served' ? str(provenance?.requested_by_node_id) : str(provenance?.served_by_node_id)
   const peerId = other?.toLowerCase() ?? null
-  return peerId && FULL_ID.test(peerId) && nonce ? { peerId, nonce } : null
+  return peerId && FULL_ID.test(peerId) && (nonce || digests) ? { peerId, nonce, digests } : null
 }
 
 /** The row states whose record hasn't arrived, where asking can help. */
@@ -226,9 +241,10 @@ export async function judgeAskReply(
     }
     case 'artifact': {
       const receipts = answer ? artifactRecords(answer, verification.records) : []
-      const receipt =
-        receipts.find((candidate) => obj(candidate.effect)?.request_digest === requestDigest) ?? receipts[0] ?? null
-      if (!receipt) return { kind: 'no_reply', at: askedAt, detail: 'their reply carried no record' }
+      const candidates = theirHalfCandidates(receipts, requestDigest)
+      if (candidates.length === 0) return { kind: 'no_reply', at: askedAt, detail: 'their reply carried no record' }
+      if (candidates.length > 1) return { kind: 'ambiguous', at: askedAt, count: candidates.length }
+      const receipt = candidates[0]
       const idMatch = await judges.recomputeIdMatch(receipt, str(receipt.capsule_id))
       return {
         kind: 'record',
@@ -243,6 +259,20 @@ export async function judgeAskReply(
       }
     }
   }
+}
+
+/** The records in their reply that could be their half of this exchange:
+ *  those whose request digest is ours (all of them when none is), and among
+ *  those the half they SERVED when there is one. One candidate is judged by
+ *  the row gate; more than one is ambiguous, never resolved by order. */
+export function theirHalfCandidates(
+  receipts: readonly Record<string, unknown>[],
+  requestDigest: string | null
+): Record<string, unknown>[] {
+  const matching = receipts.filter((candidate) => obj(candidate.effect)?.request_digest === requestDigest)
+  const pool = matching.length > 0 ? matching : [...receipts]
+  const served = pool.filter((candidate) => pocBlock(candidate)?.role === 'served')
+  return served.length > 0 ? served : pool
 }
 
 const NO_KEY_DETAIL = 'this node has no announced key for them, so their reply cannot be checked'
@@ -278,6 +308,11 @@ export function askReplyNote(outcome: AskOutcome): { verified: boolean; text: st
         text: `Their record is in their log, but it is not verified: ${problems.join('; ')}`
       }
     }
+    case 'ambiguous':
+      return {
+        verified: false,
+        text: `Their reply carried ${outcome.count} records that could be theirs for this exchange; none is shown as theirs`
+      }
   }
 }
 
@@ -290,6 +325,7 @@ export function stateAfterAsk(
   switch (outcome.kind) {
     case 'asking':
     case 'no_reply':
+    case 'ambiguous':
       return { kind: 'open_asked', date: outcome.at }
     case 'refused':
       return { kind: 'open_refused', date: outcome.at }

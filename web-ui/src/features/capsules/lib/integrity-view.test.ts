@@ -13,8 +13,10 @@ import {
   sealedBreakdownText,
   identityFact,
   INTEGRITY_TILE_INFO,
-  RETENTION_FACT
+  RETENTION_FACT,
+  witnessTileNote
 } from '@/features/capsules/lib/integrity-view'
+import { WITNESS_OFF } from '@/features/capsules/lib/tooltip-copy'
 import { ownerLinked } from '@/features/capsules/lib/integrity-view'
 import { formatExchangeTimestamp } from '@/features/capsules/lib/local-time'
 import type { RecomputedIdentity } from '@/features/capsules/lib/recompute-identity'
@@ -167,6 +169,40 @@ describe('buildSetupSteps — ledger-ux-from-the-user §6, three steps in value 
   })
 })
 
+describe('checkpointRegistration — the witness state', () => {
+  // The live run's card: a witness set, the latest line a cut no witness
+  // holds yet, an earlier one held.
+  it('a witness holding an earlier checkpoint is witnessed, never "off"', () => {
+    const live = checkpointRegistration({
+      checkpoint_count: 3,
+      witnesses: [],
+      witnessed_checkpoint_count: 1,
+      witness_configured: true
+    })
+    expect(live.registered).toBe(false)
+    expect(live.witnessState).toBe('earlier')
+    expect(live.witnessedCheckpointCount).toBe(1)
+    expect(witnessTileNote(live.witnessState)).toBe('the latest checkpoint is not held yet')
+    expect(buildSetupSteps({ checkpoint_count: 3, witnesses: [], witnessed_checkpoint_count: 1 }, null)[0]).toMatchObject({
+      done: true,
+      status: 'witnessed'
+    })
+  })
+
+  it('reads off, set-but-not-yet and unknown apart', () => {
+    const state = (card: Record<string, unknown>) =>
+      checkpointRegistration({ checkpoint_count: 1, witnesses: [], ...card }).witnessState
+    expect(state({ witness_configured: false })).toBe('off')
+    expect(state({ witness_configured: true })).toBe('pending')
+    expect(state({})).toBe('unknown')
+    expect(state({ witnesses: [{}], witness_configured: false })).toBe('latest')
+    expect(witnessTileNote('off')).toBe(WITNESS_OFF)
+    expect(witnessTileNote('pending')).not.toMatch(/off/)
+    expect(witnessTileNote('latest')).toBeUndefined()
+    expect(witnessTileNote('unknown')).toBeUndefined()
+  })
+})
+
 describe('buildRegistrationCopy — only renders once a checkpoint exists', () => {
   it('is null when no checkpoint exists', () => {
     expect(buildRegistrationCopy(null)).toBeNull()
@@ -189,9 +225,21 @@ describe('buildRegistrationCopy — only renders once a checkpoint exists', () =
   })
 
   it('D1: an unwitnessed checkpoint reads "checkpointed locally", NEVER "Held by 0 witnesses"', () => {
-    const copy = buildRegistrationCopy({ checkpoint_count: 2, witnesses: [] })
+    const copy = buildRegistrationCopy({ checkpoint_count: 2, witnesses: [], witness_configured: false })
     expect(copy?.witnessSummary).toBe('Checkpointed locally · no witness (witness: off)')
     expect(copy?.witnessSummary).not.toMatch(/Held by 0/)
+  })
+
+  it('says "witness: off" only when no witness is set', () => {
+    const summary = (card: Record<string, unknown>) =>
+      buildRegistrationCopy({ checkpoint_count: 3, witnesses: [], ...card })?.witnessSummary
+    expect(summary({ witnessed_checkpoint_count: 1, witness_configured: true })).toBe(
+      'Latest checkpoint not held by a witness yet · an earlier one is'
+    )
+    expect(summary({ witnessed_checkpoint_count: 0, witness_configured: true })).toBe(
+      'Checkpointed locally · no witness holds it yet (witness: on)'
+    )
+    expect(summary({})).toBe('Checkpointed locally · no witness')
   })
 
   it('adds "witnessed no later than T" (local time) only when a witness holds the checkpoint; unwitnessed says "checkpointed no later than"', () => {

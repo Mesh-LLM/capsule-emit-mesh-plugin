@@ -1230,7 +1230,7 @@ impl CapsuleState {
                 // the pre-existing honest default -- never a fabricated nonce.
                 client_nonce: nonce
                     .map(str::to_string)
-                    .unwrap_or_else(|| "host-served-no-nonce".to_string()),
+                    .unwrap_or_else(|| crate::evidence_log::HOST_SERVED_NO_NONCE.to_string()),
                 client_nonce_source: if nonce.is_some() {
                     "host_forwarded_nonce"
                 } else {

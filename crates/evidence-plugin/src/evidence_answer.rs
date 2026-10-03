@@ -792,6 +792,54 @@ mod tests {
         );
     }
 
+    /// The live paid run: the provider's served half carries the host's
+    /// placeholder nonce, not the one the payer forwarded, so the payer's ask
+    /// by its nonce is a signed "no such record". Asked by the exchange's two
+    /// digests, the provider answers with that half, proven in its log; and
+    /// nobody is answered by the placeholder.
+    #[test]
+    fn a_host_served_half_is_answered_by_its_digests_when_its_nonce_is_the_placeholder() {
+        let (req, resp) = ("4b".repeat(32), "33".repeat(32));
+        let mut ledger = corpus_ledger();
+        ledger[3] = sealed(json!({
+            "action_type": "fyi",
+            "effect": {"status": "confirmed", "request_digest": req, "response_digest": resp},
+            "model_attestation": {"compute_attestation": {"x-mesh-poc-v1": {
+                "role": "served",
+                "client_nonce": crate::evidence_log::HOST_SERVED_NO_NONCE,
+                "client_nonce_source": "host_served_observed",
+            }}},
+        }));
+        let dir = node(&ledger);
+        let by = |id: &str| {
+            json!({"subject": {"correlation": id}, "coverage": {"min_freshness": 1}}).to_string()
+        };
+
+        let by_nonce = by("payer-forwarded-nonce");
+        assert_eq!(
+            refused(&ask(dir.path(), by_nonce.as_bytes(), "peers")),
+            Some(Reason::NoSuchSubject)
+        );
+        let by_placeholder = by(crate::evidence_log::HOST_SERVED_NO_NONCE);
+        assert_eq!(
+            refused(&ask(dir.path(), by_placeholder.as_bytes(), "peers")),
+            Some(Reason::NoSuchSubject)
+        );
+        let by_one_wrong_digest = by(&crate::evidence_log::exchange_binding(&req, &req));
+        assert_eq!(
+            refused(&ask(dir.path(), by_one_wrong_digest.as_bytes(), "peers")),
+            Some(Reason::NoSuchSubject)
+        );
+
+        let by_digests = by(&crate::evidence_log::exchange_binding(&req, &resp));
+        let Outcome::Answered { wire, .. } = ask(dir.path(), by_digests.as_bytes(), "peers") else {
+            panic!("answered");
+        };
+        let verification = verify_response(by_digests.as_bytes(), &wire, &key().verifying_key());
+        assert_eq!(verification["state"], json!("artifact"), "{verification}");
+        assert_eq!(verification["records"], json!([3]));
+    }
+
     /// A requester that is too busy gets a signed refusal, never a wait.
     #[test]
     fn a_busy_node_declines_with_a_signed_refusal() {

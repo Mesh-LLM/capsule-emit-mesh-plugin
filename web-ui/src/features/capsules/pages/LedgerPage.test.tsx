@@ -144,8 +144,10 @@ describe('LedgerPageContent', () => {
 
   it('the hero says in one line how many records, how many the other side confirmed, and disagreements', async () => {
     render(<LedgerPageContent />, { wrapper: makeWrapper() })
+    // The default pane A mock carries no card: the node did not say whether a
+    // witness is set, so the line does not say it is off.
     expect(await screen.findByTestId('hero-status-line')).toHaveTextContent(
-      '0 records · 0 confirmed by the other side · 0 disagreements · no outside witness (witness off — your choice)'
+      /^0 records · 0 confirmed by the other side · 0 disagreements · no outside witness$/
     )
   })
 
@@ -939,7 +941,10 @@ describe('LedgerPageContent — Part 3: Exchanges two-sided stream + row inspect
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     // The ask went to the node that served us, naming the exchange by nonce,
     // and with no answer the row says so.
-    expect(askForRecord).toHaveBeenCalledWith('c'.repeat(64), 'nonce-known')
+    expect(askForRecord).toHaveBeenCalledWith(
+      'c'.repeat(64),
+      expect.objectContaining({ nonce: 'nonce-known', digests: null })
+    )
     expect(await screen.findByText(/^Asked .*No reply yet\.$/)).toBeInTheDocument()
 
     // Nothing on this row ever opens a dialog -- not the ask action, not
@@ -1256,6 +1261,13 @@ describe('LedgerPageContent — Part T6: Integrity section completion', () => {
   })
 
   it('Shared with a witness 0 renders at the same weight as any other value, with "off — your choice" under it', async () => {
+    const { fetchPaneA } = await import('@/features/capsules/api/sidecarClient')
+    vi.mocked(fetchPaneA).mockResolvedValue({
+      rows: [],
+      operator: null,
+      witness_checkpoint_supplied: false,
+      card: { checkpoint_count: 0, witness_configured: false }
+    })
     const user = userEvent.setup()
     render(<LedgerPageContent />, { wrapper: makeWrapper() })
     await user.click(screen.getByRole('tab', { name: /integrity/i }))
