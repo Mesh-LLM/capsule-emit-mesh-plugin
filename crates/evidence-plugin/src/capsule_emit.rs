@@ -24,7 +24,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 /// Derive `(role, observation_point)` for an exchange this plugin only
 /// OBSERVED on the `openai.exchange.v1` channel (2026-09-06 role ruling).
@@ -287,8 +287,14 @@ fn sealed_hostname(host: &HostProvenance, opted_in: bool) -> Option<String> {
     }
 }
 
-const CAPSULE_CONTENT_TYPE: &str =
-    "application/vnd.agent-action-capsule+json; profile=draft-mih-scitt-agent-action-capsule-02";
+/// The signed statement's content type. Its `profile` is the spec version the
+/// sealed record itself declares, so the two cannot drift apart.
+static CAPSULE_CONTENT_TYPE: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "application/vnd.agent-action-capsule+json; profile={}",
+        crate::producer::capsule::SPEC_VERSION
+    )
+});
 
 /// Persisted cache of this node's own mesh identity (2026-09-06 self-id
 /// domain fix), beside the ledger at `<data_dir>/learned_self_node_id.json`
@@ -389,6 +395,8 @@ pub struct CapsuleState {
     /// label used for the ledger issuer / sequence-counter key), which is
     /// NEVER used as a stand-in for the mesh node id domain.
     learned_self_node_id: Mutex<LearnedSelfNodeId>,
+    /// Settlement-records legs waiting on the other side (in memory only).
+    settlement_legs: crate::settlement_legs::Legs,
     /// See [`CapsuleState::observed_not_sealed`].
     observed_not_sealed: std::sync::atomic::AtomicU64,
 }
@@ -468,8 +476,14 @@ impl CapsuleState {
             node_id: node_id.into(),
             sequence_counters: Mutex::new(sequence_counters),
             learned_self_node_id: Mutex::new(learned_self_node_id),
+            settlement_legs: crate::settlement_legs::Legs::default(),
             observed_not_sealed: std::sync::atomic::AtomicU64::new(0),
         })
+    }
+
+    /// This node's settlement-records state ([`crate::settlement_legs`]).
+    pub fn settlement_legs(&self) -> &crate::settlement_legs::Legs {
+        &self.settlement_legs
     }
 
     /// Observed host-served exchanges this node failed to seal since start.
@@ -760,7 +774,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -999,7 +1013,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1338,7 +1352,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1381,7 +1395,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1488,7 +1502,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1530,7 +1544,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1647,7 +1661,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1696,7 +1710,7 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
-                content_type: CAPSULE_CONTENT_TYPE,
+                content_type: &CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
         );
@@ -1759,6 +1773,59 @@ impl CapsuleState {
                 payload: &payload,
                 issuer: &self.node_id,
                 subject: &capsule_id,
+                content_type: &CAPSULE_CONTENT_TYPE,
+            },
+            &self.keys.signing_key,
+        );
+        ledger.append(&capsule, &statement)?;
+        Ok(Some(EmittedCapsule {
+            capsule_id,
+            capsule,
+        }))
+    }
+
+    /// Seal one settlement-records leg (draft-mih-agent-settlement-records-00),
+    /// chained onto this node's head, with its detached statement. A leg
+    /// already on the ledger (same leg kind and payment, or same delivery) is
+    /// not sealed again: `Ok(None)`.
+    pub fn emit_settlement_leg(
+        &self,
+        action_id: String,
+        member: Value,
+        references: Option<Value>,
+    ) -> anyhow::Result<Option<EmittedCapsule>> {
+        let (leg, subject) =
+            crate::producer::index::settlement_leg_subject(&member).ok_or_else(|| {
+                anyhow::anyhow!("settlement leg has no payment hash or delivery subject")
+            })?;
+        let mut ledger = self
+            .ledger
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if ledger.has_index_key(&crate::producer::index::settlement_leg_key(&leg, &subject)) {
+            return Ok(None);
+        }
+        let chain = ledger.chain_head().map(|parent| ChainLink {
+            parent_capsule_id: parent.to_string(),
+            relation: "follows".to_string(),
+        });
+        let capsule = crate::producer::capsule::seal_settlement_leg(
+            action_id,
+            member,
+            references,
+            chain,
+            &self.keys.signing_key,
+        )?;
+        let capsule_id = capsule["capsule_id"]
+            .as_str()
+            .expect("seal_settlement_leg always sets capsule_id")
+            .to_string();
+        let payload = crate::producer::capsule::payload_bytes(&capsule);
+        let statement = build_signed_statement(
+            &SignedStatementInput {
+                payload: &payload,
+                issuer: &self.node_id,
+                subject: &capsule_id,
                 content_type: CAPSULE_CONTENT_TYPE,
             },
             &self.keys.signing_key,
@@ -1774,6 +1841,15 @@ impl CapsuleState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_content_type_profile_is_the_sealed_spec_version() {
+        let profile = CAPSULE_CONTENT_TYPE
+            .split_once("; profile=")
+            .map(|(_, profile)| profile);
+        assert_eq!(profile, Some(crate::producer::capsule::SPEC_VERSION));
+        assert_eq!(profile, Some("draft-mih-scitt-agent-action-capsule-05"));
+    }
 
     /// PARITY PIN: `output_sub_digests` over the REAL SETI@Home / web_search
     /// response computes a `tool_calls_digest` byte-for-byte identical to the

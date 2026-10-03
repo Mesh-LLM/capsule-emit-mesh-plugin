@@ -655,10 +655,7 @@ mod tests {
         let b = &fold(&records, &asked(&[("ref", ["ha", "hb"])]))["b"];
         assert_eq!(b.len(), 1);
         assert_eq!(b[0].bucket, CONTRADICTED);
-        assert_eq!(
-            b[0].recorded_at.as_deref(),
-            Some("2026-09-28T15:01:00.000Z")
-        );
+        assert_eq!(b[0].recorded_at.as_deref(), Some("2026-09-28T15:01:00Z"));
         // Not asked: only this node's own issued verdict counts.
         let b = &fold(&records, &HashSet::new())["b"];
         assert_eq!(b.len(), 1);

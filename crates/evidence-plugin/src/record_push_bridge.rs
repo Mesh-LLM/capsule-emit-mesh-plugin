@@ -249,6 +249,25 @@ fn seal_failed_refusal() -> Vec<u8> {
         .expect("static refusal shape is always serializable")
 }
 
+/// A verified push that is a payer's settlement terms leg: hand it to the
+/// settlement-records state ([`crate::settlement_legs`]), which holds it only
+/// for one of this node's own invoices and may seal a waiting payee leg.
+/// Best-effort; the ack does not depend on it.
+async fn hold_settlement_terms(capsules: &Arc<CapsuleState>, body_bytes: &[u8]) {
+    let Ok(body) = serde_json::from_slice::<serde_json::Value>(body_bytes) else {
+        return;
+    };
+    let capsule = pushed_half(&body).clone();
+    if capsule.get("settlement").is_none() {
+        return;
+    }
+    let capsules = capsules.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        capsules.settlement_legs().on_received(&capsules, &capsule)
+    })
+    .await;
+}
+
 fn is_verdict_delivery(body_bytes: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(body_bytes)
         .map(|body| crate::adjudication_records::is_delivery_body(&body))
@@ -332,6 +351,7 @@ async fn bridge_inbound_record_push(
         {
             Ok(()) => {
                 collect_stage_record(&splits, &sender_peer_id, &capsule_bytes);
+                hold_settlement_terms(&capsules, &capsule_bytes).await;
                 response_bytes
             }
             Err(error) => {
