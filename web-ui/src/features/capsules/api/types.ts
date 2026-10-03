@@ -1,5 +1,5 @@
 // Loose types over the mesh capsule JSON shape (draft-mih-scitt-agent-action-
-// capsule-02 + the x-mesh-poc-v1 extension). Deliberately permissive --
+// capsule-05 + the x-mesh-poc-v1 extension). Deliberately permissive --
 // mirrors capsule_mesh_viewer.py's tolerance of both real capture shapes --
 // so an unrecognised/absent field degrades to `undefined`, never a parse
 // failure. The full record always travels alongside (`record` on
