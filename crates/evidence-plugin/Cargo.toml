@@ -89,3 +89,10 @@ tempfile = "3"
 # `tests/mesh_evidence_bridge_interop.rs` -- same version mesh-llm-plugin
 # itself pins, so the wire shape matches exactly.
 rmcp = "1.8"
+
+[profile.release]
+# Ship the release binary without its symbol table: about a quarter smaller
+# (Linux x86_64: 15.8 MB -> 11.6 MB measured), nothing else changes. A panic
+# still prints its message and location; a backtrace shows addresses instead
+# of function names.
+strip = true
