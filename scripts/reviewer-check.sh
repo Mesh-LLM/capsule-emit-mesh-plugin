@@ -102,8 +102,10 @@ lines() { [ -f "$1" ] && wc -l < "$1" | tr -d ' ' || echo 0; }
 
 port() { echo $(( 20000 + RANDOM % 20000 )); }
 API=$(port); CONSOLE=$(port)
-# On Linux with strace, the node runs under `strace -ff`: every connect/sendto/sendmsg of every process it
-# starts (the plugin included) is written to $WORK/trace.<pid>, so a short-lived connection is never missed.
+# On Linux with strace, the node runs under `strace -ff`: every connect/sendto/sendmsg of every process and
+# THREAD it starts is written to $WORK/trace.<thread id>, one file per thread, and every clone/fork too, so the
+# plugin's threads (its async workers included) are found from its main thread. A short-lived connection is
+# never missed.
 TRACE=no
 if [ "$(uname -s)" = Linux ] && command -v strace >/dev/null; then TRACE=yes; fi
 TRACER=''
@@ -111,9 +113,10 @@ start() { # start LOG [trace]
   # Started through env (which execs), never a shell function, so $! is the node (or its tracer).
   if [ "${2:-}" = trace ] && [ "$TRACE" = yes ]; then
     env -u XDG_DATA_HOME HOME="$H" MESH_LLM_NO_DEFAULT_PLUGINS=1 \
-      strace -ff -qq -tt -e trace=connect,sendto,sendmsg -o "$WORK/trace" \
+      strace -ff -qq -tt -e trace=connect,sendto,sendmsg,clone,clone3,fork,vfork -o "$WORK/trace" \
       "$MESH" serve --port "$API" --console "$CONSOLE" --headless --log-format json --gguf "$MODEL" > "$1" 2>&1 &
     TRACER=$!
+    T_START=$(date +%H:%M:%S.%6N)
     NODE=''
     for _ in $(seq 50); do NODE=$(cat "/proc/$TRACER/task/$TRACER/children" 2>/dev/null | awk '{print $1}'); [ -n "$NODE" ] && break; sleep 0.1; done
     [ -n "$NODE" ] || return 1
@@ -189,17 +192,34 @@ else
   PID=$(pgrep -f "^$BIN( |$)" | head -1)
 fi
 [ -n "$PID" ] || fail "cannot find the plugin process ($BIN)"
-# Every connect/sendto/sendmsg the plugin made (from its own trace file) whose address is not loopback, or
-# that goes to a name server (a lookup is outbound intent even through a local resolver on 127.0.0.53).
+# The plugin's threads: its main thread ($PID) and, transitively, every thread or process one of them cloned
+# (each clone/fork line in a thread's trace file ends "= <new thread id>").
+plugin_threads() {
+  local queue="$PID" seen=" " tid child
+  while [ -n "$queue" ]; do
+    tid=${queue%% *}; queue=${queue#"$tid"}; queue=${queue# }
+    case "$seen" in *" $tid "*) continue ;; esac
+    seen="$seen$tid "
+    [ -f "$WORK/trace.$tid" ] || continue
+    for child in $(grep -E '(clone3?|v?fork)\(' "$WORK/trace.$tid" | sed -n -E 's/.*= ([0-9]+)$/\1/p'); do
+      queue="$queue $child"
+    done
+  done
+  echo "$seen"
+}
+# Every connect/sendto/sendmsg any plugin thread made whose address is not loopback, or that goes to a name
+# server on either family (a lookup is outbound intent even through a local resolver on 127.0.0.53).
 outbound() { # outbound FROM_TIME TO_TIME (HH:MM:SS.ffffff, the trace's -tt clock)
-  local f="$WORK/trace.$PID"
-  [ -f "$f" ] || return 2
-  awk -v from="$1" -v to="$2" '$1 >= from && $1 <= to' "$f" \
+  [ -f "$WORK/trace.$PID" ] || return 2
+  local files=() tid
+  for tid in $(plugin_threads); do [ -f "$WORK/trace.$tid" ] && files+=("$WORK/trace.$tid"); done
+  echo "THREADS ${#files[@]}" >&2
+  awk -v from="$1" -v to="$2" '$1 >= from && $1 <= to' "${files[@]}" \
     | grep -E 'connect\(|sendto\(|sendmsg\(' \
     | grep -E 'sin6?_addr|inet_(addr|pton)' \
     | grep -v -E 'inet_addr\("127\.|inet_pton\(AF_INET6, "::1"' \
     | sed -E 's/^([0-9:.]+) .*(inet_addr\("[^"]+"\)|inet_pton\([^)]*\)).*(sin6?_port=htons\([0-9]+\)).*/\1 \2 \3/' | sort -u
-  awk -v from="$1" -v to="$2" '$1 >= from && $1 <= to' "$f" | grep -E 'sin_port=htons\(53\)' | grep -q . && echo "a name lookup (port 53)"
+  awk -v from="$1" -v to="$2" '$1 >= from && $1 <= to' "${files[@]}" | grep -E 'sin6?_port=htons\(53\)' | grep -q . && echo "a name lookup (port 53)"
   return 0
 }
 r0=$(lines "$RECORDS"); c0=$(lines "$DATA/ledger/checkpoints.jsonl"); t0=$(date +%H:%M:%S.%6N)
@@ -208,10 +228,10 @@ r1=$(lines "$RECORDS"); c1=$(lines "$DATA/ledger/checkpoints.jsonl"); t1=$(date 
 if [ -z "$PID" ]; then notchecked "3. idle network (no plugin process)"
 elif [ "$TRACE" != yes ]; then notchecked "3. idle network (needs Linux with strace: every connect/sendto is traced)"
 else
-  out=$(outbound "$t0" "$t1"); rc=$?
-  info "measured: every connect/sendto/sendmsg of the plugin process (pid $PID) for ${IDLE_SECONDS} s, traced with strace"
+  out=$(outbound "${T_START:-$t0}" "$t1" 2>"$WORK/outbound.err"); rc=$?
+  info "measured: every connect/sendto/sendmsg of every plugin thread ($(sed -n 's/^THREADS //p' "$WORK/outbound.err") threads, pid $PID) from node start through ${IDLE_SECONDS} s idle, traced with strace"
   if [ "$rc" = 2 ]; then notchecked "3. idle network (no trace for the plugin process)"
-  elif [ -z "$out" ]; then pass "idle ${IDLE_SECONDS} s: no connection or datagram from the plugin to anything but loopback, and no name lookup"
+  elif [ -z "$out" ]; then pass "start + idle ${IDLE_SECONDS} s: no connection or datagram from the plugin to anything but loopback, and no name lookup"
   else fail "idle: the plugin reached out: $(echo "$out" | head -5 | tr '\n' ';')"; fi
 fi
 if [ "$RUNNING" = no ]; then notchecked "3. idle writes (the plugin never ran)"
@@ -233,12 +253,16 @@ else fail "one request: HTTP $code, records $r1 -> $r2 (expected exactly one mor
 ANSWER=$(jq -r '.choices[0].message.content // ""' "$WORK/response.json" 2>/dev/null)
 if [ "$RUNNING" = no ]; then notchecked "4. stored text (the plugin never ran)"
 elif [ "$code" != 200 ]; then notchecked "4. stored prompt (the request failed: HTTP $code)"
+elif [ ! -s "$RECORDS" ]; then notchecked "4. stored prompt (no record under $DATA to look in)"
 elif grep -r -q -F "$TOKEN" "$DATA"; then fail "the prompt text is stored under $DATA"
 else pass "the prompt text is not stored anywhere under the plugin's data directory"; fi
 if [ "$RUNNING" = no ]; then :
 elif [ "$code" != 200 ] || [ -z "$ANSWER" ] || [ "${#ANSWER}" -lt 8 ]; then
   notchecked "4. stored answer (no answer of 8 or more characters to look for)"
-elif grep -r -q -F "$ANSWER" "$DATA"; then fail "the answer text is stored under $DATA"
+elif [ ! -s "$RECORDS" ]; then notchecked "4. stored answer (no record under $DATA to look in)"
+# The answer as written, and as it would sit inside a JSON string (quotes and backslashes escaped).
+elif grep -r -q -F "$ANSWER" "$DATA" || grep -r -q -F "$(jq -cn --arg a "$ANSWER" '$a' | sed 's/^"//; s/"$//')" "$DATA"; then
+  fail "the answer text is stored under $DATA"
 else pass "the answer text is not stored (digests only)"; fi
 stop
 
