@@ -360,13 +360,14 @@ pub fn spawn(
             tokio::select! {
                 _ = ticker.tick() => {
                     run("tick", |s, k, a| s.tick(k, a));
-                    // Each named witness's key, for checking its receipts;
-                    // fetched from that witness only, and only when one is named.
+                    // Each named witness: its key fetched when none is given,
+                    // and one that lags asked again so its row can say why.
+                    // Only the named witnesses, and only when one is named.
                     if !witness_urls.is_empty() {
                         let (dir, urls) = (keys_dir.clone(), witness_urls.clone());
                         let configured = witness_keys();
                         let _ = tokio::task::spawn_blocking(move || {
-                            crate::witness_status::fetch_missing_keys(&dir, &urls, &configured)
+                            crate::witness_status::refresh_witnesses(&dir, &urls, &configured)
                         })
                         .await;
                     }

@@ -501,7 +501,7 @@ export function witnessRows(card: JsonRecord | null | undefined): WitnessRow[] {
             url,
             key,
             status: 'holds an earlier checkpoint',
-            detail: when ? `${checkedText} · latest held ${when}` : checkedText,
+            detail: [checkedText, when ? `latest held ${when}` : null, problem].filter(Boolean).join(' · '),
             tone: 'good' as const
           }
         case 'unchecked':

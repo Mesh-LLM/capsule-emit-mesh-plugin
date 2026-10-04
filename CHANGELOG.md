@@ -23,7 +23,8 @@
   offline: the entry recomputed from the checkpoint's signed fields, and the receipt's inclusion
   proof and signature under the witness's key: the one configured, else one fetched once from that
   witness and kept, which the page labels "pinned on first contact, not configured". An
-  unchecked or failing receipt is shown, with the reason, and never counted.
+  unchecked or failing receipt is shown, with the reason, and never counted. A witness that does
+  not hold the latest checkpoint says why: timed out, refused, an HTTP error, or a different key.
 
 ### Fixed
 

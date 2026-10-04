@@ -121,6 +121,12 @@ you got it from the witness's operator, not from the witness's own answer.
 "Witnessed" on the page means at least one checked receipt, from a witness it
 names.
 
+A named witness that does not hold the latest checkpoint is asked for its key
+again, at most once a minute and only that witness, so its row can say why:
+it did not answer in time, refused the connection, answered with an HTTP
+error, or presents a different key than the one configured or pinned. A
+witness that holds the latest checkpoint is not contacted for this.
+
 A witness holding a checkpoint means one thing: a later rewrite of this log is
 detectable by someone other than this node. It does not make the records true.
 
