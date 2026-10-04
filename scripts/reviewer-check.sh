@@ -4,8 +4,9 @@
 # (checked against the release's SHA256SUMS), a mesh-llm binary you built from stock main (or any build you
 # want to check), and a fresh HOME. No account, no credentials. Prints PASS/FAIL per check.
 #
-#   scripts/reviewer-check.sh --version 0.1.2 --mesh-llm /path/to/mesh-llm [--model model.gguf] [--keep]
+#   scripts/reviewer-check.sh --version 0.1.3 --mesh-llm /path/to/mesh-llm [--model model.gguf] [--keep]
 #   scripts/reviewer-check.sh --archive local.tar.gz --mesh-llm ...   # a LOCAL archive, labelled as such
+#   add --name capsule-emit-mesh for a release from before the plugin was renamed (0.1.2 and earlier)
 #
 # Needs: bash, curl, jq, sha256sum (or shasum), and strace (Linux) for the network check, which is NOT CHECKED
 # without it (macOS has no strace: run it on Linux). With no --model it downloads
@@ -27,7 +28,7 @@ MODEL_URL=https://huggingface.co/unsloth/SmolLM2-135M-Instruct-GGUF/resolve/9e68
 MODEL_SHA256=c4a3dd037301b6ecea31d6da37f5cd793ead920dd5ddfe6d589294628d6ce66a
 IDLE_SECONDS=${IDLE_SECONDS:-60}
 
-usage() { sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '3,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 VERSION='' ARCHIVE='' MESH='' MODEL='' KEEP=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -36,6 +37,7 @@ while [ $# -gt 0 ]; do
     --mesh-llm) MESH=$2; shift 2 ;;
     --model) MODEL=$2; shift 2 ;;
     --keep) KEEP=1; shift ;;
+    --name) PLUGIN=$2; shift 2 ;;
     -h|--help) usage ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
