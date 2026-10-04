@@ -179,7 +179,7 @@ impl CheckpointHandle {
         Self {
             state: Arc::new(Mutex::new(state)),
             signer,
-            anchor: Arc::new(AnchorClient::default()),
+            anchor: Arc::new(anchor_for(&config_from_env().witness_urls)),
             latest_head: LatestHead::default(),
             last_push_cut: Arc::new(Mutex::new(None)),
         }
@@ -330,6 +330,33 @@ pub fn spawn(
     });
 
     Ok(handle)
+}
+
+/// The base URL the witness client posts to, for the configured witness
+/// URLs. capsule-emit 0.0.4's registration sends a checkpoint for any
+/// witness URL other than its own default to the client it is handed, so
+/// that client must point at the witness the operator chose: handed the
+/// default one, a chosen witness was never contacted, the checkpoint went to
+/// the default anchor, and its receipt was filed under the chosen URL. With
+/// several URLs only the first can be reached until capsule-emit dispatches
+/// each URL itself; the log says so.
+fn anchor_base_for(urls: &[String]) -> String {
+    use crate::producer::anchor::{dispatch_base_for, DEFAULT_ANCHOR_BASE};
+    match urls {
+        [] => DEFAULT_ANCHOR_BASE.to_string(),
+        [one] => dispatch_base_for(one).to_string(),
+        [first, ..] => {
+            tracing::warn!(
+                witnesses = urls.len(),
+                "several witness URLs: checkpoints reach only the first until the capsule-emit crate dispatches each one"
+            );
+            dispatch_base_for(first).to_string()
+        }
+    }
+}
+
+fn anchor_for(urls: &[String]) -> AnchorClient {
+    AnchorClient::new(anchor_base_for(urls))
 }
 
 fn report_checkpoint(
@@ -491,5 +518,26 @@ mod tests {
         head.set(cp(7));
         head.set(cp(3));
         assert_eq!(head.get().unwrap().mmr_size, 7);
+    }
+
+    #[test]
+    fn the_witness_client_points_at_the_chosen_witness() {
+        use crate::producer::anchor::{DEFAULT_ANCHOR_BASE, DEFAULT_WITNESS_URL};
+        assert_eq!(anchor_base_for(&[]), DEFAULT_ANCHOR_BASE);
+        assert_eq!(
+            anchor_base_for(&[DEFAULT_WITNESS_URL.to_string()]),
+            DEFAULT_ANCHOR_BASE
+        );
+        assert_eq!(
+            anchor_base_for(&["http://127.0.0.1:8088".to_string()]),
+            "http://127.0.0.1:8088"
+        );
+        assert_eq!(
+            anchor_base_for(&[
+                "https://witness.example".to_string(),
+                "https://other.example".to_string()
+            ]),
+            "https://witness.example"
+        );
     }
 }
