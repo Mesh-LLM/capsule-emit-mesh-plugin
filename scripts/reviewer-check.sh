@@ -7,14 +7,16 @@
 #   scripts/reviewer-check.sh --version 0.1.2 --mesh-llm /path/to/mesh-llm [--model model.gguf] [--keep]
 #   scripts/reviewer-check.sh --archive local.tar.gz --mesh-llm ...   # a LOCAL archive, labelled as such
 #
-# Needs: bash, curl, jq, sha256sum (or shasum), and ss (Linux) or lsof (macOS). With no --model it downloads
+# Needs: bash, curl, jq, sha256sum (or shasum), and strace (Linux) for the network check, which is NOT CHECKED
+# without it (macOS has no strace: run it on Linux). With no --model it downloads
 # SmolLM2-135M-Instruct Q8_0 (145 MB, pinned revision and SHA-256) into the work directory.
 #
 # Checks:
 #   1. /v1/models is identical with the plugin disabled and running (same node, same HOME).
 #   2. The plugin is absent from GET /api/plugins/providers and GET /api/plugins/endpoints.
-#   3. Idle for 60 s (no requests): the plugin process holds no network connection to anything but loopback,
-#      and writes no records or checkpoints.
+#   3. Idle for 60 s (no requests): the plugin process opens no connection and sends no datagram to anything but
+#      loopback (every connect/sendto, traced with strace, including name lookups), and writes no records or
+#      checkpoints.
 #   4. One chat request: exactly one record is sealed, and it holds digests, not the prompt or the answer.
 #   5. Prints how to run mesh-llm's four Linux smokes against a node with this plugin installed.
 set -uo pipefail
@@ -48,7 +50,7 @@ H=$WORK/home; mkdir -p "$H"
 FAILS=0
 pass() { echo "PASS  $*"; }
 fail() { echo "FAIL  $*"; FAILS=$((FAILS + 1)); }
-# A check that needs the plugin running is never a PASS when it isn't.
+# A check that cannot be made is never a PASS: it is NOT CHECKED, and counts as a failure.
 notchecked() { echo "NOT CHECKED  $*"; FAILS=$((FAILS + 1)); }
 info() { echo "      $*"; }
 NODE=''
@@ -98,11 +100,26 @@ lines() { [ -f "$1" ] && wc -l < "$1" | tr -d ' ' || echo 0; }
 
 port() { echo $(( 20000 + RANDOM % 20000 )); }
 API=$(port); CONSOLE=$(port)
-start() { # start LOG
-  # Started through env (which execs mesh-llm), never a shell function, so $! is the node itself.
-  env -u XDG_DATA_HOME HOME="$H" MESH_LLM_NO_DEFAULT_PLUGINS=1 \
-    "$MESH" serve --port "$API" --console "$CONSOLE" --headless --log-format json --gguf "$MODEL" > "$1" 2>&1 &
-  NODE=$!
+# On Linux with strace, the node runs under `strace -ff`: every connect/sendto/sendmsg of every process it
+# starts (the plugin included) is written to $WORK/trace.<pid>, so a short-lived connection is never missed.
+TRACE=no
+if [ "$(uname -s)" = Linux ] && command -v strace >/dev/null; then TRACE=yes; fi
+TRACER=''
+start() { # start LOG [trace]
+  # Started through env (which execs), never a shell function, so $! is the node (or its tracer).
+  if [ "${2:-}" = trace ] && [ "$TRACE" = yes ]; then
+    env -u XDG_DATA_HOME HOME="$H" MESH_LLM_NO_DEFAULT_PLUGINS=1 \
+      strace -ff -qq -tt -e trace=connect,sendto,sendmsg -o "$WORK/trace" \
+      "$MESH" serve --port "$API" --console "$CONSOLE" --headless --log-format json --gguf "$MODEL" > "$1" 2>&1 &
+    TRACER=$!
+    NODE=''
+    for _ in $(seq 50); do NODE=$(cat "/proc/$TRACER/task/$TRACER/children" 2>/dev/null | awk '{print $1}'); [ -n "$NODE" ] && break; sleep 0.1; done
+    [ -n "$NODE" ] || return 1
+  else
+    env -u XDG_DATA_HOME HOME="$H" MESH_LLM_NO_DEFAULT_PLUGINS=1 \
+      "$MESH" serve --port "$API" --console "$CONSOLE" --headless --log-format json --gguf "$MODEL" > "$1" 2>&1 &
+    NODE=$!
+  fi
   for _ in $(seq 180); do
     curl -fsS "http://127.0.0.1:$CONSOLE/api/status" 2>/dev/null | jq -e '.llama_ready == true' >/dev/null 2>&1 && return 0
     kill -0 "$NODE" 2>/dev/null || return 1
@@ -114,35 +131,48 @@ stop() {
   kill -TERM "$NODE" 2>/dev/null
   for _ in $(seq 40); do kill -0 "$NODE" 2>/dev/null || break; sleep 0.5; done
   kill -KILL "$NODE" 2>/dev/null; NODE=''
+  if [ -n "$TRACER" ]; then for _ in $(seq 20); do kill -0 "$TRACER" 2>/dev/null || break; sleep 0.5; done; kill -KILL "$TRACER" 2>/dev/null; TRACER=''; fi
   # The next start must not find this node still answering on the same ports.
   for _ in $(seq 30); do curl -fsS "http://127.0.0.1:$CONSOLE/api/status" >/dev/null 2>&1 || return 0; sleep 1; done
   echo "the previous node is still answering on :$CONSOLE" >&2; exit 1
 }
 get() { curl -fsS "http://127.0.0.1:$1$2"; }
 
+# A model list is valid only as JSON with a .data array; a failed request never compares equal to another.
+models_ok() { jq -e '.data | type == "array"' "$1" >/dev/null 2>&1; }
+
 # ---- 1. /v1/models, plugin disabled vs running ------------------------------------------------------------
-mesh plugins disable "$PLUGIN" >/dev/null 2>&1
+mesh plugins disable "$PLUGIN" > "$WORK/disable.log" 2>&1 || info "plugins disable failed: $(tr '\n' ' ' < "$WORK/disable.log")"
 start "$WORK/node-off.log" || { fail "node did not start with the plugin disabled (see $WORK/node-off.log)"; exit 1; }
-sleep 5; get "$API" /v1/models > "$WORK/models-off.json"; stop
-mesh plugins enable "$PLUGIN" >/dev/null 2>&1
-start "$WORK/node-on.log" || { fail "node did not start with the plugin enabled (see $WORK/node-on.log)"; exit 1; }
-sleep 5; get "$API" /v1/models > "$WORK/models-on.json"
+sleep 5; get "$API" /v1/models > "$WORK/models-off.json" 2>/dev/null
+off_status=$(get "$CONSOLE" /api/plugins 2>/dev/null | jq -r --arg n "$PLUGIN" '[.[] | select(.name == $n) | .status][0] // "absent"' 2>/dev/null)
+info "plugin on the node in the off run: ${off_status:-unknown}"
+stop
+mesh plugins enable "$PLUGIN" > "$WORK/enable.log" 2>&1 || info "plugins enable failed: $(tr '\n' ' ' < "$WORK/enable.log")"
+start "$WORK/node-on.log" trace || { fail "node did not start with the plugin enabled (see $WORK/node-on.log)"; exit 1; }
+sleep 5; get "$API" /v1/models > "$WORK/models-on.json" 2>/dev/null
 status=$(get "$CONSOLE" /api/plugins | jq -r --arg n "$PLUGIN" '.[] | select(.name == $n) | "\(.status) \(.version)"')
 info "plugin on the node: ${status:-absent}"
 RUNNING=no
 if [ "${status%% *}" = running ]; then RUNNING=yes; pass "the plugin is running ($status)"
 else fail "the plugin is not running (status: ${status:-absent}); checks 1-4 below are NOT CHECKED"; fi
 if [ "$RUNNING" = no ]; then notchecked "1. /v1/models off vs on (the plugin never ran)"
+elif [ "$off_status" != disabled ] && [ "$off_status" != absent ]; then notchecked "1. /v1/models off vs on (the off run's plugin was '$off_status', not disabled)"
+elif ! models_ok "$WORK/models-off.json" || ! models_ok "$WORK/models-on.json"; then notchecked "1. /v1/models off vs on (a /v1/models answer was not a model list)"
 elif cmp -s "$WORK/models-off.json" "$WORK/models-on.json"; then pass "/v1/models byte-identical, plugin disabled vs running"
 elif diff <(jq -S 'del(.data[].created)' "$WORK/models-off.json") <(jq -S 'del(.data[].created)' "$WORK/models-on.json") >/dev/null; then
   pass "/v1/models identical, plugin disabled vs running (ignoring 'created')"
 else fail "/v1/models differs: $(diff "$WORK/models-off.json" "$WORK/models-on.json" | grep '^[<>]' | head -3 | tr '\n' ' ')"; fi
 
 # ---- 2. not a provider, not an endpoint -------------------------------------------------------------------
-get "$CONSOLE" /api/plugins/providers > "$WORK/providers.json" 2>&1
-get "$CONSOLE" /api/plugins/endpoints > "$WORK/endpoints.json" 2>&1
+get "$CONSOLE" /api/plugins/providers > "$WORK/providers.json" 2>/dev/null; p_ok=$?
+get "$CONSOLE" /api/plugins/endpoints > "$WORK/endpoints.json" 2>/dev/null; e_ok=$?
+# Any string anywhere in either answer that names the plugin (alone or as "<plugin>:...").
+names_plugin() { jq -e --arg n "$PLUGIN" '[.. | strings | select(. == $n or startswith($n + ":") or startswith("plugin:" + $n))] | length > 0' "$1" >/dev/null 2>&1; }
 if [ "$RUNNING" = no ]; then notchecked "2. providers/endpoints (the plugin never ran)"
-elif grep -q "$PLUGIN" "$WORK/providers.json" "$WORK/endpoints.json"; then fail "the plugin appears in /api/plugins/providers or /api/plugins/endpoints"
+elif [ "$p_ok" != 0 ] || [ "$e_ok" != 0 ] || ! jq -e . "$WORK/providers.json" >/dev/null 2>&1 || ! jq -e . "$WORK/endpoints.json" >/dev/null 2>&1; then
+  notchecked "2. providers/endpoints (a request failed or did not answer JSON)"
+elif names_plugin "$WORK/providers.json" || names_plugin "$WORK/endpoints.json"; then fail "the plugin appears in /api/plugins/providers or /api/plugins/endpoints"
 else pass "the plugin is absent from /api/plugins/providers and /api/plugins/endpoints"; fi
 caps=$(get "$CONSOLE" /api/plugins | jq -c --arg n "$PLUGIN" '.[] | select(.name == $n) | .capabilities')
 info "capabilities the host reports for it: $caps"
@@ -157,20 +187,31 @@ else
   PID=$(pgrep -f "^$BIN( |$)" | head -1)
 fi
 [ -n "$PID" ] || fail "cannot find the plugin process ($BIN)"
-remote_peers() { # TCP and UDP sockets of $PID whose remote address is not loopback or unspecified
-  if command -v ss >/dev/null; then
-    ss -tunpH 2>/dev/null | grep "pid=$PID," | awk '{print $6}'
-  else
-    lsof -nP -a -p "$PID" -i 2>/dev/null | awk 'NR > 1 && $9 ~ /->/ {split($9, a, "->"); print a[2]}'
-  fi | grep -v -E '^(127\.|\[?::1\]?|\*|0\.0\.0\.0|\[?::\]?)' | sort -u
+# Every connect/sendto/sendmsg the plugin made (from its own trace file) whose address is not loopback, or
+# that goes to a name server (a lookup is outbound intent even through a local resolver on 127.0.0.53).
+outbound() { # outbound FROM_TIME TO_TIME (HH:MM:SS.ffffff, the trace's -tt clock)
+  local f="$WORK/trace.$PID"
+  [ -f "$f" ] || return 2
+  awk -v from="$1" -v to="$2" '$1 >= from && $1 <= to' "$f" \
+    | grep -E 'connect\(|sendto\(|sendmsg\(' \
+    | grep -E 'sin6?_addr|inet_(addr|pton)' \
+    | grep -v -E 'inet_addr\("127\.|inet_pton\(AF_INET6, "::1"' \
+    | sed -E 's/^([0-9:.]+) .*(inet_addr\("[^"]+"\)|inet_pton\([^)]*\)).*(sin6?_port=htons\([0-9]+\)).*/\1 \2 \3/' | sort -u
+  awk -v from="$1" -v to="$2" '$1 >= from && $1 <= to' "$f" | grep -E 'sin_port=htons\(53\)' | grep -q . && echo "a name lookup (port 53)"
+  return 0
 }
-r0=$(lines "$RECORDS"); c0=$(lines "$DATA/ledger/checkpoints.jsonl"); peers=
-for _ in $(seq $((IDLE_SECONDS / 5))); do peers="$peers $(remote_peers | tr '\n' ' ')"; sleep 5; done
-r1=$(lines "$RECORDS"); c1=$(lines "$DATA/ledger/checkpoints.jsonl")
-peers=$(echo "$peers" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
-info "measured: the plugin process's TCP/UDP sockets every 5 s for ${IDLE_SECONDS} s ($(command -v ss >/dev/null && echo 'ss -tunp' || echo 'lsof -i')), remote address not loopback"
-if [ -z "$PID" ]; then notchecked "3. idle connections (no plugin process)"
-elif [ -z "$peers" ]; then pass "idle ${IDLE_SECONDS} s: no connection from the plugin to anything but loopback"; else fail "idle: the plugin connected to $peers"; fi
+r0=$(lines "$RECORDS"); c0=$(lines "$DATA/ledger/checkpoints.jsonl"); t0=$(date +%H:%M:%S.%6N)
+sleep "$IDLE_SECONDS"
+r1=$(lines "$RECORDS"); c1=$(lines "$DATA/ledger/checkpoints.jsonl"); t1=$(date +%H:%M:%S.%6N)
+if [ -z "$PID" ]; then notchecked "3. idle network (no plugin process)"
+elif [ "$TRACE" != yes ]; then notchecked "3. idle network (needs Linux with strace: every connect/sendto is traced)"
+else
+  out=$(outbound "$t0" "$t1"); rc=$?
+  info "measured: every connect/sendto/sendmsg of the plugin process (pid $PID) for ${IDLE_SECONDS} s, traced with strace"
+  if [ "$rc" = 2 ]; then notchecked "3. idle network (no trace for the plugin process)"
+  elif [ -z "$out" ]; then pass "idle ${IDLE_SECONDS} s: no connection or datagram from the plugin to anything but loopback, and no name lookup"
+  else fail "idle: the plugin reached out: $(echo "$out" | head -5 | tr '\n' ';')"; fi
+fi
 if [ "$RUNNING" = no ]; then notchecked "3. idle writes (the plugin never ran)"
 elif [ "$r0" = "$r1" ] && [ "$c0" = "$c1" ]; then pass "idle ${IDLE_SECONDS} s: no record and no checkpoint written ($r1 records, $c1 checkpoint lines)"
 else fail "idle: records $r0 -> $r1, checkpoint lines $c0 -> $c1"; fi
@@ -187,12 +228,15 @@ sleep 2; r2=$(lines "$RECORDS")
 info "request to $MODEL_ID: HTTP $code"
 if [ "$code" = 200 ] && [ $((r2 - r1)) = 1 ]; then pass "one request sealed exactly one record ($r1 -> $r2)"
 else fail "one request: HTTP $code, records $r1 -> $r2 (expected exactly one more)"; fi
-ANSWER=$(jq -r '.choices[0].message.content // ""' "$WORK/response.json")
+ANSWER=$(jq -r '.choices[0].message.content // ""' "$WORK/response.json" 2>/dev/null)
 if [ "$RUNNING" = no ]; then notchecked "4. stored text (the plugin never ran)"
+elif [ "$code" != 200 ]; then notchecked "4. stored prompt (the request failed: HTTP $code)"
 elif grep -r -q -F "$TOKEN" "$DATA"; then fail "the prompt text is stored under $DATA"
 else pass "the prompt text is not stored anywhere under the plugin's data directory"; fi
 if [ "$RUNNING" = no ]; then :
-elif [ -n "$ANSWER" ] && [ "${#ANSWER}" -ge 8 ] && grep -r -q -F "$ANSWER" "$DATA"; then fail "the answer text is stored under $DATA"
+elif [ "$code" != 200 ] || [ -z "$ANSWER" ] || [ "${#ANSWER}" -lt 8 ]; then
+  notchecked "4. stored answer (no answer of 8 or more characters to look for)"
+elif grep -r -q -F "$ANSWER" "$DATA"; then fail "the answer text is stored under $DATA"
 else pass "the answer text is not stored (digests only)"; fi
 stop
 
