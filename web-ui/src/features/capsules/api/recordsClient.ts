@@ -22,6 +22,9 @@ export type RecordsStatus = {
   stored_text_count: number
   new_history_pending: { requested_at: string; closing_record_id: string } | null
   sharing: Record<SharingSwitchKey, SharingSwitchState>
+  /** Why mesh's config file is not being read as written: the sharing
+   *  switches are then its last values that parsed, or all off. */
+  config_problem?: string | null
   /** Whether this plugin keeps the exchange text it is handed, and for how
    *  long. Absent from a plugin that predates it. */
   exchange_text?: { kept: boolean; retention_days: number }

@@ -464,6 +464,9 @@ impl Maintenance {
                 "closing_record_id": p.closing_record_id,
             })),
             "sharing": sharing_status(),
+            // Why mesh's config file is not being read as written, when it
+            // is not: the switches are then its last good values, or all off.
+            "config_problem": crate::settings::config_problem(),
             // Whether this plugin keeps exchange text it is handed
             // (`exchange_text`), and for how long: the page says so.
             "exchange_text": {

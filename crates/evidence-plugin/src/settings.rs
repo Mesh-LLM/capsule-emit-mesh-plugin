@@ -145,26 +145,84 @@ fn console_settings() -> std::collections::BTreeMap<String, String> {
             return values.clone();
         }
     }
-    let values = std::fs::read_to_string(&path)
-        .ok()
-        .map(|raw| settings_from_config(&raw))
-        .unwrap_or_default();
+    let parsed = match std::fs::read_to_string(&path) {
+        Ok(raw) => settings_from_config(&raw),
+        // No config file: no console settings, nothing wrong.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    };
+    let previous = cache
+        .as_ref()
+        .filter(|(p, ..)| *p == path)
+        .map(|(.., values)| values.clone());
+    let (values, problem) = next_values(previous.as_ref(), parsed);
+    if let Some(problem) = &problem {
+        tracing::warn!(%problem, "mesh's config file did not parse; keeping the last plugin settings that did");
+    }
+    *CONFIG_PROBLEM
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = problem;
     *cache = Some((path, stamp.0, stamp.1, values.clone()));
     values
 }
 
+/// Why mesh's config file is not being read as written, when it is not.
+static CONFIG_PROBLEM: Mutex<Option<String>> = Mutex::new(None);
+
+/// The last problem reading mesh's config file, for the page.
+pub fn config_problem() -> Option<String> {
+    CONFIG_PROBLEM
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
+/// The console settings in force when mesh's config file did not parse and
+/// none ever did: every switch that reaches a peer is off, and no witness is
+/// named. A typo never shares more than the operator chose.
+fn narrowest() -> std::collections::BTreeMap<String, String> {
+    [
+        "share_record_at_completion",
+        "share_history_segments",
+        "share_adjudications",
+        "adjudicate_differing_twins",
+    ]
+    .into_iter()
+    .map(|key| (key.to_string(), "off".to_string()))
+    .collect()
+}
+
+/// The settings to use after a read of mesh's config file, and the problem to
+/// show: a file that parsed is used as it is; one that did not keeps the last
+/// values that parsed, or the narrowest settings when none ever did.
+fn next_values(
+    previous: Option<&std::collections::BTreeMap<String, String>>,
+    parsed: Result<std::collections::BTreeMap<String, String>, String>,
+) -> (std::collections::BTreeMap<String, String>, Option<String>) {
+    match parsed {
+        Ok(values) => (values, None),
+        Err(error) => match previous {
+            Some(last_good) => (
+                last_good.clone(),
+                Some(format!("{error}; using the last plugin settings that parsed")),
+            ),
+            None => (
+                narrowest(),
+                Some(format!("{error}; every sharing switch is off until it parses")),
+            ),
+        },
+    }
+}
+
 /// This plugin's `[plugin.settings]` from a mesh config file, as strings. A
 /// file that does not parse yields nothing (the defaults stand).
-fn settings_from_config(raw: &str) -> std::collections::BTreeMap<String, String> {
+fn settings_from_config(raw: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
     let mut out = std::collections::BTreeMap::new();
-    let Ok(doc) = raw.parse::<toml::Table>() else {
-        tracing::warn!(
-            "mesh's config file did not parse; the console's plugin settings are not read"
-        );
-        return out;
-    };
+    let doc = raw
+        .parse::<toml::Table>()
+        .map_err(|e| format!("mesh's config file did not parse: {}", e.message()))?;
     let Some(plugins) = doc.get("plugin").and_then(|p| p.as_array()) else {
-        return out;
+        return Ok(out);
     };
     // The old name's entry first, so the current one's values win.
     let named = |name: &'static str| {
@@ -207,7 +265,7 @@ fn settings_from_config(raw: &str) -> std::collections::BTreeMap<String, String>
             out.insert(key.clone(), text);
         }
     }
-    out
+    Ok(out)
 }
 
 /// The console's witness rows: their endpoints in order, and the public key of
@@ -435,7 +493,7 @@ share_history_segments = "peers"
 referee_bar_days = 7
 adjudicate_differing_twins = "off"
 "#;
-        let s = settings_from_config(raw);
+        let s = settings_from_config(raw).unwrap();
         assert_eq!(
             s.get("witness").map(String::as_str),
             Some("https://witness.example")
@@ -449,8 +507,8 @@ adjudicate_differing_twins = "off"
             s.get("adjudicate_differing_twins").map(String::as_str),
             Some("off")
         );
-        assert!(settings_from_config("not [valid").is_empty());
-        assert!(settings_from_config("").is_empty());
+        assert!(settings_from_config("not [valid").is_err());
+        assert!(settings_from_config("").unwrap().is_empty());
     }
 
     #[test]
@@ -467,7 +525,7 @@ name = "capsules"
 [plugin.settings]
 witness = "https://new.example"
 "#;
-        let s = settings_from_config(raw);
+        let s = settings_from_config(raw).unwrap();
         assert_eq!(
             s.get("witness").map(String::as_str),
             Some("https://new.example")
@@ -475,7 +533,8 @@ witness = "https://new.example"
         assert_eq!(s.get("referee_bar_days").map(String::as_str), Some("7"));
         let only_old = settings_from_config(
             "[[plugin]]\nname = \"capsule-emit-mesh\"\n[plugin.settings]\nwitness = \"https://old.example\"\n",
-        );
+        )
+        .unwrap();
         assert_eq!(
             only_old.get("witness").map(String::as_str),
             Some("https://old.example")
@@ -491,7 +550,7 @@ name = "capsules"
 witness = ["https://a.example", " https://b.example ", ""]
 "#;
         assert_eq!(
-            settings_from_config(raw).get("witness").map(String::as_str),
+            settings_from_config(raw).unwrap().get("witness").map(String::as_str),
             Some("https://a.example,https://b.example")
         );
     }
@@ -509,7 +568,7 @@ witness = [
   { public_key = "no endpoint" },
 ]
 "#;
-        let s = settings_from_config(raw);
+        let s = settings_from_config(raw).unwrap();
         assert_eq!(
             s.get("witness").map(String::as_str),
             Some("https://a.example,https://b.example,https://c.example")
@@ -522,5 +581,32 @@ witness = [
             console_key("CAPSULES_CHECKPOINT_WITNESS_KEYS").as_deref(),
             Some("witness_keys")
         );
+    }
+
+    /// A config file that stops parsing never widens sharing: the last values
+    /// that parsed stay; with none, every sharing switch is off.
+    #[test]
+    fn a_config_that_does_not_parse_keeps_the_last_good_values_or_the_narrowest() {
+        let good = settings_from_config(
+            "[[plugin]]\nname = \"capsules\"\n[plugin.settings]\nshare_history_segments = \"counterparties\"\n",
+        )
+        .unwrap();
+        let broken = settings_from_config("[[plugin]\nname = ");
+        assert!(broken.is_err());
+
+        let (kept, problem) = next_values(Some(&good), broken.clone());
+        assert_eq!(kept.get("share_history_segments").map(String::as_str), Some("counterparties"));
+        assert!(problem.unwrap().contains("last plugin settings that parsed"));
+
+        let (first, problem) = next_values(None, broken);
+        for key in ["share_record_at_completion", "share_history_segments", "share_adjudications", "adjudicate_differing_twins"] {
+            assert_eq!(first.get(key).map(String::as_str), Some("off"), "{key}");
+        }
+        assert!(!first.contains_key("witness"), "no witness named");
+        assert!(problem.unwrap().contains("off until it parses"));
+
+        let (fine, problem) = next_values(Some(&first), Ok(good.clone()));
+        assert_eq!(fine, good);
+        assert!(problem.is_none());
     }
 }

@@ -97,6 +97,11 @@ export function YourRecordsDialog({
             <h3 className="type-label text-fg-faint" id="what-you-share-title">
               What you share
             </h3>
+            {status?.config_problem ? (
+              <p className="text-[var(--color-bad-text)]" data-testid="config-problem" role="status">
+                {status.config_problem}
+              </p>
+            ) : null}
             <ul className="flex flex-col divide-y divide-border-soft" data-testid="what-you-share">
               {sharingRows(status).map((row) => (
                 <li className="flex flex-col gap-1 py-2" data-sharing-switch={row.key} key={row.key}>
