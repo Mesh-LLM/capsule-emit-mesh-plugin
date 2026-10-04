@@ -188,7 +188,9 @@ fn classify(err: &crate::producer::anchor::AnchorError) -> (&'static str, String
 }
 
 /// One GET to a witness: no redirects (a witness never sends this plugin
-/// elsewhere), 10 s, and at most 64 KiB of answer read.
+/// elsewhere), 10 s, and at most 64 KiB of answer read. These reads only:
+/// registering a checkpoint goes through capsule-emit's client, which
+/// follows redirects until capsule-emit makes it not to.
 fn get_json(url: &str) -> Result<Value, crate::producer::anchor::AnchorError> {
     use crate::producer::anchor::AnchorError;
     use std::io::Read;

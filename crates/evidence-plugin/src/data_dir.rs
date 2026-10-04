@@ -136,11 +136,26 @@ fn existing_old_default(dir: &Path, chosen: bool) -> anyhow::Result<Option<PathB
     Ok(Some(old))
 }
 
-/// The other processes that hold `path` open (Linux). Empty elsewhere, or
-/// when it cannot be told.
+/// The other processes that hold `path` open: from `/proc` on Linux, from
+/// `lsof -t` elsewhere (macOS). Empty when it cannot be told. A writer that
+/// opens the ledger only after this check is not seen; the lock keeps out
+/// every capsules process, so that can only be a plugin from before 0.1.3.
 fn other_holders(path: &Path) -> Vec<u32> {
     if !cfg!(target_os = "linux") {
-        return Vec::new();
+        let me = std::process::id();
+        return std::process::Command::new("lsof")
+            .arg("-t")
+            .arg(path)
+            .output()
+            .ok()
+            .map(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .filter_map(|l| l.trim().parse::<u32>().ok())
+                    .filter(|pid| *pid != me)
+                    .collect()
+            })
+            .unwrap_or_default();
     }
     let Ok(target) = std::fs::canonicalize(path) else {
         return Vec::new();

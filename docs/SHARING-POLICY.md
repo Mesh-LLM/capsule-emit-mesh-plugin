@@ -144,6 +144,11 @@ it did not answer in time, refused the connection, answered with an HTTP
 error, or presents a different key than the one configured or pinned. A
 witness that holds the latest checkpoint is not contacted for this.
 
+The plugin's own reads of a witness (its key, and what it holds of this
+log) follow no redirect and read at most 64 KiB. Registering a checkpoint
+goes through the capsule-emit library's client, which still follows a
+redirect.
+
 A witness holding a checkpoint means one thing: a later rewrite of this log is
 detectable by someone other than this node. It does not make the records true.
 
