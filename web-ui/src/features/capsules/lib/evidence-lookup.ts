@@ -1,7 +1,7 @@
 // The console's chat and Logs views each give this plugin's contribution the
 // host's ids for one exchange; this asks the plugin whether this node sealed
 // it (`http/lookup`) and says so in one line. Nothing is guessed: no ids, no
-// lookup; no record, said plainly.
+// lookup; no match, nothing shown (see EvidenceChip).
 import type { MeshPluginUiContributionSubject } from '@/plugin-host/host-contract'
 import { PLUGIN_NAME } from '@/plugin-host/standalone-host'
 
@@ -25,4 +25,3 @@ export function recordPath(result: LookupResult): string | null {
 }
 
 export const SEALED_LINE = 'Sealed on this node · see the record'
-export const NOT_SEALED_LINE = 'No sealed record of this exchange on this node'

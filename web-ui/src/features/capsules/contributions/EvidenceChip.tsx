@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import type { MeshPluginUiContributionSubject, MeshPluginUiHost } from '@/plugin-host/host-contract'
 import {
   lookupPath,
-  NOT_SEALED_LINE,
   recordPath,
   SEALED_LINE,
   type LookupResult
@@ -35,14 +34,12 @@ export function EvidenceChip({ host, subject }: { host: MeshPluginUiHost; subjec
 
   if (state.kind !== 'done') return null
   const to = recordPath(state.result)
+  // A miss is not shown: a miss does not mean this node sealed nothing. For an
+  // exchange this node served itself, the host gives the plugin no client
+  // nonce and a different exchange id from the one the chat and Logs views
+  // hold, so the record is there and still cannot be matched.
+  if (!state.result.found || !to) return null
   const style = { fontSize: '12px', color: 'var(--color-fg-dim, inherit)' }
-  if (!state.result.found || !to) {
-    return (
-      <span data-testid="evidence-chip" style={style}>
-        {NOT_SEALED_LINE}
-      </span>
-    )
-  }
   return (
     <a
       data-testid="evidence-chip"

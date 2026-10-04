@@ -39,6 +39,16 @@
   unchecked or failing receipt is shown, with the reason, and never counted. A witness that does
   not hold the latest checkpoint (or whose receipt for it does not check) says why: timed out,
   refused, an HTTP error, or a different key.
+- **The Evidence page can be a primary tab** (mesh-llm 0.78 and later). The page asks for primary
+  placement; the operator turns it on in the console's plugin settings ("Primary tab"), and with it
+  off the page stays a navigation item. The page draws its own header, so the host's header is
+  turned off for it.
+- **Under a chat answer and in the Logs request inspector** (mesh-llm 0.78 and later): whether
+  this node sealed that exchange, with a link to its record on the Evidence page. The lookup is
+  local (`GET /lookup?exchange_id=` or `?client_nonce=`); nothing is shown when it fails or finds
+  no record. It works on the node that asked a peer for the answer. For an exchange this node
+  served itself, mesh-llm 0.78 does not give the plugin the ids those views hold, so nothing is
+  shown there. On mesh-llm 0.77 the plugin installs and runs as before, without these.
 
 ### Fixed
 
