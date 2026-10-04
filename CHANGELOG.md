@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.2
+
+### Fixed
+
+- **The plugin serves no models unless asked.** 0.1.1 registered an OpenAI-compatible inference
+  provider on every node and, with `CAPSULE_EMIT_MESH_BLOCKED_MODELS` unset or empty, advertised
+  `blocked-test-model` through it. That model always answers 403, so a client that takes the first
+  model `/v1/models` lists, or "Mesh automatic" routing, could pick it. From 0.1.2 the admission
+  endpoint is opt-in: only when `CAPSULE_EMIT_MESH_BLOCKED_MODELS` names models does the plugin
+  register the provider and declare `admission_policy.v1`. Unset, empty, `none` or `off`: no
+  provider, no admission capability, no models. The plugin seals records and serves the Evidence
+  page.
+
 ## 0.1.1
 
 ### Added
