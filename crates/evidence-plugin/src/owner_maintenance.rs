@@ -785,10 +785,7 @@ mod tests {
             resolve_log_id(&dir, "capsules", "capsule-emit-mesh", "k1", None).unwrap(),
             "capsule-emit-mesh"
         );
-        assert_eq!(
-            recorded_log_id(&dir).as_deref(),
-            Some("capsule-emit-mesh")
-        );
+        assert_eq!(recorded_log_id(&dir).as_deref(), Some("capsule-emit-mesh"));
         // A fresh node takes the new name in its node-unique default.
         let fresh = temp_dir("log-id-renamed-fresh");
         assert_eq!(
@@ -816,7 +813,8 @@ mod tests {
             resolve_log_id(&fresh, "plugin", "plugin", "k1", Some("my-node-2")).unwrap(),
             "my-node-2"
         );
-        let refused = resolve_log_id(&fresh, "plugin", "plugin", "k1", Some("my-node-3")).unwrap_err();
+        let refused =
+            resolve_log_id(&fresh, "plugin", "plugin", "k1", Some("my-node-3")).unwrap_err();
         assert!(refused.to_string().contains("start a new log"));
         assert_eq!(recorded_log_id(&fresh).as_deref(), Some("my-node-2"));
         // Unset: the recorded id stays.
@@ -851,7 +849,8 @@ mod tests {
         drop(m);
         put_checkpoint(&dir, "node-under-test");
         let key_id = key_id_of_node(&dir);
-        let log_id = resolve_log_id(&dir, "node-under-test", "node-under-test", &key_id, None).unwrap();
+        let log_id =
+            resolve_log_id(&dir, "node-under-test", "node-under-test", &key_id, None).unwrap();
         assert_eq!(log_id, "node-under-test");
         let state = Arc::new(CapsuleState::open(&dir, "node-under-test").unwrap());
         Maintenance::new(dir.clone(), state, log_id)
@@ -859,7 +858,8 @@ mod tests {
             .unwrap();
 
         // --- restart ---
-        let log_id = resolve_log_id(&dir, "node-under-test", "node-under-test", &key_id, None).unwrap();
+        let log_id =
+            resolve_log_id(&dir, "node-under-test", "node-under-test", &key_id, None).unwrap();
         assert_eq!(log_id, format!("node-under-test/{key_id}/h2"));
         let state = CapsuleState::open(&dir, "node-under-test").unwrap();
         finish_pending_after_open(&dir, &state, &log_id).unwrap();

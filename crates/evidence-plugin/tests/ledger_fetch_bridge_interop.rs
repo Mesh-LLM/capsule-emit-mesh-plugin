@@ -329,8 +329,7 @@ async fn responder_declines_a_record_naming_no_other_side_by_default() {
 async fn responder_answers_a_real_sealed_capsule_over_the_real_wire() {
     // This capsule names no other side (the fake host sends no requester),
     // so only the `peers` tier serves it; the default declines it (below).
-    let mut harness =
-        Harness::spawn(&[("CAPSULES_SHARE_HISTORY_SEGMENTS", "peers")]).await;
+    let mut harness = Harness::spawn(&[("CAPSULES_SHARE_HISTORY_SEGMENTS", "peers")]).await;
     let manifest = harness.initialize().await;
     let capsule_id = harness.seal_one_real_capsule(&manifest).await;
 

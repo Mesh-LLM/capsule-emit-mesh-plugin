@@ -109,10 +109,7 @@ pub fn fetch_missing_keys(
         {
             let mut tries = LAST_TRY.lock().unwrap_or_else(|e| e.into_inner());
             let tries = tries.get_or_insert_with(HashMap::new);
-            if tries
-                .get(url)
-                .is_some_and(|at| at.elapsed() < KEY_RETRY)
-            {
+            if tries.get(url).is_some_and(|at| at.elapsed() < KEY_RETRY) {
                 continue;
             }
             tries.insert(url.clone(), Instant::now());
@@ -131,8 +128,12 @@ pub fn fetch_missing_keys(
                 );
                 changed = true;
             }
-            Ok(_) => tracing::warn!(witness = %display_url(url), "the witness's key is not a 32-byte Ed25519 key; its receipts stay unchecked"),
-            Err(err) => tracing::warn!(witness = %display_url(url), %err, "could not fetch the witness's key; its receipts stay unchecked for now"),
+            Ok(_) => {
+                tracing::warn!(witness = %display_url(url), "the witness's key is not a 32-byte Ed25519 key; its receipts stay unchecked")
+            }
+            Err(err) => {
+                tracing::warn!(witness = %display_url(url), %err, "could not fetch the witness's key; its receipts stay unchecked for now")
+            }
         }
     }
     if changed {
@@ -257,14 +258,21 @@ pub fn annotate(
             continue;
         };
         for receipt in receipts.iter_mut() {
-            let Some(url) = receipt.get("ts_url").and_then(Value::as_str).map(str::to_string)
+            let Some(url) = receipt
+                .get("ts_url")
+                .and_then(Value::as_str)
+                .map(str::to_string)
             else {
                 continue;
             };
             if seen.insert(url.clone()) {
                 urls.push(url.clone());
             }
-            let check = check_receipt(&snapshot, receipt, key_for(&url, configured_keys, &pinned).map(|(k, _)| k));
+            let check = check_receipt(
+                &snapshot,
+                receipt,
+                key_for(&url, configured_keys, &pinned).map(|(k, _)| k),
+            );
             let t = tally.entry(url).or_default();
             t.held += 1;
             match &check {
@@ -297,16 +305,18 @@ pub fn annotate(
         .map(|url| {
             let t = tally.remove(url).unwrap_or_default();
             let is_configured = configured.contains(url);
-            let state = if t.holds_latest {
+            // A witness no longer named says so first; its checked
+            // receipts still show in the counts.
+            let state = if !is_configured {
+                "removed"
+            } else if t.holds_latest {
                 "latest"
             } else if t.checked > 0 {
                 "earlier"
             } else if t.held > 0 {
                 "unchecked"
-            } else if is_configured {
-                "pending"
             } else {
-                "removed"
+                "pending"
             };
             json!({
                 "name": witness_name(url),
@@ -360,7 +370,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(KEYS_FILE), fixture::keys_json()).unwrap();
         let mut lines = vec![fixture::held_line()];
-        let rows = annotate(&mut lines, &[fixture::WITNESS.to_string()], &BTreeMap::new(), dir.path());
+        let rows = annotate(
+            &mut lines,
+            &[fixture::WITNESS.to_string()],
+            &BTreeMap::new(),
+            dir.path(),
+        );
         assert_eq!(rows[0]["state"], json!("latest"));
         assert_eq!(rows[0]["key_source"], json!("pinned_on_first_contact"));
         assert_eq!(rows[0]["checked_count"], json!(1));
@@ -374,11 +389,20 @@ mod tests {
         let cp = fixture::held_line();
         let receipt = cp["witnesses"][0].clone();
         let other_key = "11".repeat(32);
-        assert!(matches!(check_receipt(&cp, &receipt, Some(&other_key)), Check::Failed(_)));
+        assert!(matches!(
+            check_receipt(&cp, &receipt, Some(&other_key)),
+            Check::Failed(_)
+        ));
         let mut moved = cp.clone();
         moved["root"] = json!("bb");
-        assert_eq!(check_receipt(&cp, &receipt, Some(fixture::PUBKEY_HEX)), Check::Checked);
-        assert!(matches!(check_receipt(&moved, &receipt, Some(fixture::PUBKEY_HEX)), Check::Failed(_)));
+        assert_eq!(
+            check_receipt(&cp, &receipt, Some(fixture::PUBKEY_HEX)),
+            Check::Checked
+        );
+        assert!(matches!(
+            check_receipt(&moved, &receipt, Some(fixture::PUBKEY_HEX)),
+            Check::Failed(_)
+        ));
     }
 
     fn line(mmr: u64, witnesses: Value) -> Value {
@@ -423,7 +447,10 @@ mod tests {
         let key = "11".repeat(32);
         let garbage = json!({"ts_url": "https://w.example",
                              "entry_hash": expected_entry_hash(&cp).unwrap(), "receipt_b64": "AAEC"});
-        assert!(matches!(check_receipt(&cp, &garbage, Some(&key)), Check::Failed(_)));
+        assert!(matches!(
+            check_receipt(&cp, &garbage, Some(&key)),
+            Check::Failed(_)
+        ));
         drop(dir);
     }
 
@@ -431,7 +458,10 @@ mod tests {
     fn every_configured_witness_has_a_row_and_none_counts_without_a_checked_receipt() {
         let dir = tempfile::tempdir().unwrap();
         let mut lines = vec![
-            line(3, json!([{"ts_url": "https://a.example/log", "entry_hash": "00", "receipt_b64": ""}])),
+            line(
+                3,
+                json!([{"ts_url": "https://a.example/log", "entry_hash": "00", "receipt_b64": ""}]),
+            ),
             line(7, json!([])),
         ];
         let configured = vec![
@@ -446,7 +476,11 @@ mod tests {
         assert_eq!(rows[0]["held_count"], json!(1));
         assert_eq!(rows[0]["checked_count"], json!(0));
         assert_eq!(rows[1]["name"], json!("b.example"));
-        assert_eq!(rows[1]["url"], json!("https://b.example"), "no credentials shown");
+        assert_eq!(
+            rows[1]["url"],
+            json!("https://b.example"),
+            "no credentials shown"
+        );
         assert_eq!(rows[1]["state"], json!("pending"));
         assert_eq!(lines[0]["witnesses"][0]["checked"], json!(false));
     }
@@ -460,7 +494,8 @@ mod tests {
         )];
         let rows = annotate(&mut lines, &[], &BTreeMap::new(), dir.path());
         assert_eq!(rows[0]["configured"], json!(false));
-        assert_eq!(rows[0]["state"], json!("unchecked"));
+        assert_eq!(rows[0]["state"], json!("removed"));
+        assert_eq!(rows[0]["held_count"], json!(1));
     }
 
     #[test]
@@ -470,7 +505,10 @@ mod tests {
         assert!(!dir.path().join(KEYS_FILE).exists());
         // A witness whose key the operator gave is never fetched (no network
         // call is attempted for it, and nothing is pinned).
-        let given = BTreeMap::from([(fixture::WITNESS.to_string(), fixture::PUBKEY_HEX.to_string())]);
+        let given = BTreeMap::from([(
+            fixture::WITNESS.to_string(),
+            fixture::PUBKEY_HEX.to_string(),
+        )]);
         fetch_missing_keys(dir.path(), &[fixture::WITNESS.to_string()], &given);
         assert!(!dir.path().join(KEYS_FILE).exists());
     }
@@ -484,14 +522,27 @@ mod tests {
             json!({fixture::WITNESS: {"pubkey_hex": "11".repeat(32), "key_id": "x", "pinned_at": "t"}}).to_string(),
         )
         .unwrap();
-        let given = BTreeMap::from([(fixture::WITNESS.to_string(), fixture::PUBKEY_HEX.to_string())]);
+        let given = BTreeMap::from([(
+            fixture::WITNESS.to_string(),
+            fixture::PUBKEY_HEX.to_string(),
+        )]);
         let mut lines = vec![fixture::held_line()];
-        let rows = annotate(&mut lines, &[fixture::WITNESS.to_string()], &given, dir.path());
+        let rows = annotate(
+            &mut lines,
+            &[fixture::WITNESS.to_string()],
+            &given,
+            dir.path(),
+        );
         assert_eq!(rows[0]["state"], json!("latest"));
         assert_eq!(rows[0]["key_source"], json!("configured"));
         // Without the configured key, the wrong pinned one leaves it unchecked.
         let mut lines = vec![fixture::held_line()];
-        let rows = annotate(&mut lines, &[fixture::WITNESS.to_string()], &BTreeMap::new(), dir.path());
+        let rows = annotate(
+            &mut lines,
+            &[fixture::WITNESS.to_string()],
+            &BTreeMap::new(),
+            dir.path(),
+        );
         assert_eq!(rows[0]["state"], json!("unchecked"));
         assert_eq!(rows[0]["key_source"], json!("pinned_on_first_contact"));
     }

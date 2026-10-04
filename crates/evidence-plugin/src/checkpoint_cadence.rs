@@ -89,7 +89,10 @@ fn witness_keys_from(raw: Option<&str>) -> std::collections::BTreeMap<String, St
         return Default::default();
     };
     let Ok(map) = serde_json::from_str::<std::collections::BTreeMap<String, String>>(raw) else {
-        tracing::warn!(setting = ENV_WITNESS_KEYS, "not a JSON object of witness URL to key; no witness keys are configured");
+        tracing::warn!(
+            setting = ENV_WITNESS_KEYS,
+            "not a JSON object of witness URL to key; no witness keys are configured"
+        );
         return Default::default();
     };
     map.into_iter()

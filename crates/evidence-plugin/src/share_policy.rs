@@ -254,10 +254,7 @@ mod tests {
     #[test]
     fn the_referee_settings_are_the_env_names_the_referee_reads() {
         assert_eq!(
-            format!(
-                "CAPSULES_{}",
-                ADJUDICATE_DIFFERING_TWINS_KEY.to_uppercase()
-            ),
+            format!("CAPSULES_{}", ADJUDICATE_DIFFERING_TWINS_KEY.to_uppercase()),
             crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS
         );
         assert_eq!(
@@ -327,17 +324,11 @@ mod tests {
             .unwrap();
         assert_eq!(after.default_json, None, "no N by default: the rule is off");
         assert_eq!(
-            format!(
-                "CAPSULES_{}",
-                STOP_ROUTING_AFTER_KEY.to_uppercase()
-            ),
+            format!("CAPSULES_{}", STOP_ROUTING_AFTER_KEY.to_uppercase()),
             crate::routing_rule::ENV_AFTER
         );
         assert_eq!(
-            format!(
-                "CAPSULES_{}",
-                STOP_ROUTING_WINDOW_KEY.to_uppercase()
-            ),
+            format!("CAPSULES_{}", STOP_ROUTING_WINDOW_KEY.to_uppercase()),
             crate::routing_rule::ENV_WINDOW_DAYS
         );
     }

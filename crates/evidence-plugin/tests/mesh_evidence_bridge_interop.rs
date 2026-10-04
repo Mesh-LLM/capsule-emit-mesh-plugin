@@ -323,11 +323,8 @@ async fn ask_over_stream(stream: LocalStream, request_bytes: &[u8]) -> Vec<u8> {
 #[tokio::test]
 async fn responder_answers_an_evidence_request_in_process() {
     let (evidence_server_url, received) = spawn_fake_evidence_server(b"{}").await;
-    let mut harness = Harness::spawn(&[(
-        "CAPSULES_EVIDENCE_SERVER_URL",
-        &evidence_server_url,
-    )])
-    .await;
+    let mut harness =
+        Harness::spawn(&[("CAPSULES_EVIDENCE_SERVER_URL", &evidence_server_url)]).await;
     harness.initialize().await;
 
     let stream = harness.open_evidence_stream().await;

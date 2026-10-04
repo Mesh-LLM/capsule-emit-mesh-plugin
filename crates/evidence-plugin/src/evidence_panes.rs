@@ -5751,7 +5751,8 @@ mod tests {
         assert_eq!(card["witnesses"][0]["checked"], json!(false));
         assert_eq!(card["witnessed_checkpoint_count"], json!(0));
         assert!(card.get("latest_witnessed").is_none());
-        assert_eq!(card["witness_status"][0]["state"], json!("unchecked"));
+        // No witness is configured in this test, so it reads as removed.
+        assert_eq!(card["witness_status"][0]["state"], json!("removed"));
         assert_eq!(
             build_pane_a(&[], card)["card"]["checkpoint_count"],
             json!(2)

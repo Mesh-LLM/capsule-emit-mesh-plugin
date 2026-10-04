@@ -40,8 +40,7 @@ impl Harness {
 
     /// As `spawn`, with `unset` removed from the plugin's environment.
     async fn spawn_without(extra_env: &[(&str, &str)], unset: &[&str]) -> Self {
-        let socket_path =
-            std::env::temp_dir().join(format!("capsules-interop-{}.sock", nonce()));
+        let socket_path = std::env::temp_dir().join(format!("capsules-interop-{}.sock", nonce()));
         let _ = std::fs::remove_file(&socket_path);
         let listener = UnixListener::bind(&socket_path).expect("bind fake-host socket");
 

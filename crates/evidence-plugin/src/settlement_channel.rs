@@ -383,10 +383,7 @@ mod tests {
         assert!(!is_local_host_broadcast("", &our_peer_id));
         assert!(!is_local_host_broadcast("", &our_peer_id.to_uppercase()));
         // A named sender is never the local broadcast.
-        assert!(!is_local_host_broadcast(
-            &"cd".repeat(32),
-            "capsules"
-        ));
+        assert!(!is_local_host_broadcast(&"cd".repeat(32), "capsules"));
     }
     use serde_json::json;
 

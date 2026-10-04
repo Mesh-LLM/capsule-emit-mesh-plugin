@@ -360,7 +360,10 @@ mod tests {
         });
         let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
         assert_eq!(log.lines().count(), 1, "{log}");
-        assert!(log.contains("CAPSULE_EMIT_MESH_TEST_SETTINGS_LOGGED"), "{log}");
+        assert!(
+            log.contains("CAPSULE_EMIT_MESH_TEST_SETTINGS_LOGGED"),
+            "{log}"
+        );
         assert!(log.contains(name), "{log}");
         assert!(log.contains("one release"), "{log}");
     }
@@ -465,12 +468,18 @@ name = "capsules"
 witness = "https://new.example"
 "#;
         let s = settings_from_config(raw);
-        assert_eq!(s.get("witness").map(String::as_str), Some("https://new.example"));
+        assert_eq!(
+            s.get("witness").map(String::as_str),
+            Some("https://new.example")
+        );
         assert_eq!(s.get("referee_bar_days").map(String::as_str), Some("7"));
         let only_old = settings_from_config(
             "[[plugin]]\nname = \"capsule-emit-mesh\"\n[plugin.settings]\nwitness = \"https://old.example\"\n",
         );
-        assert_eq!(only_old.get("witness").map(String::as_str), Some("https://old.example"));
+        assert_eq!(
+            only_old.get("witness").map(String::as_str),
+            Some("https://old.example")
+        );
     }
 
     #[test]

@@ -118,7 +118,11 @@ fn verify_chain(dir: &Path) -> anyhow::Result<Option<ChainCheck>> {
     if !dir.join(LEDGER).exists() {
         return Ok(None);
     }
-    let ledger_dir = dir.join(LEDGER).parent().map(Path::to_path_buf).unwrap_or_default();
+    let ledger_dir = dir
+        .join(LEDGER)
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
     let (ledger, _) = crate::producer::index::open_ledger(&ledger_dir)
         .map_err(|e| anyhow::anyhow!("{e:?}"))
         .with_context(|| format!("verify the ledger in {}", dir.display()))?;
@@ -214,9 +218,7 @@ pub fn data_dir() -> anyhow::Result<PathBuf> {
         &cwd,
     )?;
     if let Some(moved) = move_old_default(&dir, chosen)? {
-        let (entries, head) = moved
-            .chain
-            .map_or((0, None), |c| (c.entries, c.head));
+        let (entries, head) = moved.chain.map_or((0, None), |c| (c.entries, c.head));
         tracing::warn!(
             from = %moved.from.display(),
             to = %dir.display(),
@@ -339,7 +341,9 @@ mod tests {
     #[test]
     fn a_fresh_node_moves_nothing() {
         let parent = tmp("move-fresh");
-        assert!(move_old_default(&parent.join(APP_DIR), false).unwrap().is_none());
+        assert!(move_old_default(&parent.join(APP_DIR), false)
+            .unwrap()
+            .is_none());
         assert!(!parent.join(OLD_APP_DIR).exists());
     }
 
@@ -354,7 +358,11 @@ mod tests {
         assert_eq!(moved.from, old);
         assert_eq!(moved.chain.as_ref(), Some(&before));
         assert!(!old.exists(), "one copy only: the old directory is gone");
-        assert_eq!(std::fs::read(new.join(NODE_KEY)).unwrap(), key, "the same key");
+        assert_eq!(
+            std::fs::read(new.join(NODE_KEY)).unwrap(),
+            key,
+            "the same key"
+        );
         assert_eq!(verify_chain(&new).unwrap(), Some(before));
         // The next start finds nothing to move.
         assert!(move_old_default(&new, false).unwrap().is_none());
@@ -410,7 +418,10 @@ mod tests {
         let first_line_end = text.find('\n').unwrap() + 1;
         std::fs::write(&ledger, &text[first_line_end..]).unwrap();
         assert!(move_old_default(&new, false).is_err());
-        assert!(old.join(NODE_KEY).exists(), "the old directory stays where it was");
+        assert!(
+            old.join(NODE_KEY).exists(),
+            "the old directory stays where it was"
+        );
         assert!(!new.exists());
     }
 
