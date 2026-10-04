@@ -4,7 +4,9 @@
 //! installed package. The console mounts it at
 //! `/plugins/capsules/evidence`, and because it is the plugin's only
 //! page the console gives it a direct navigation item rather than a
-//! `Plugins` menu entry.
+//! `Plugins` menu entry. The page asks for a primary tab; the console promotes
+//! it only when the operator turns on this plugin's `web_ui_primary_tab`
+//! (off by default), so the ask changes nothing until the operator chooses.
 //!
 //! The bundle is built from `web-ui/` (`pnpm build` writes
 //! `bundle/register-mesh-plugin-ui.js`); the release workflow builds it and
@@ -38,7 +40,8 @@ pub fn evidence_web_ui() -> ManifestEntry {
                 EVIDENCE_PAGE_ROUTE,
                 WEB_UI_ENTRY_SCRIPT,
             )
-            .bundle_id(WEB_UI_BUNDLE_ID),
+            .bundle_id(WEB_UI_BUNDLE_ID)
+            .primary_placement(),
         )
         .into()
 }
@@ -94,7 +97,7 @@ mod tests {
                     "route": "evidence",
                     "bundle_id": "main",
                     "entry_script": "register-mesh-plugin-ui.js",
-                    "placement": "auxiliary"
+                    "placement": "primary"
                 }],
                 "bundles": [{ "id": "main", "root_path": "bundle" }]
             })
