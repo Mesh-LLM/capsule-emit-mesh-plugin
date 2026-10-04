@@ -11,8 +11,8 @@ const TONE_COLOR: Record<WitnessRow['tone'], string> = {
   muted: 'var(--color-fg-faint)'
 }
 
-export function WitnessList({ rows }: { rows: WitnessRow[] }) {
-  if (rows.length === 0) return null
+export function WitnessList({ rows, note }: { rows: WitnessRow[]; note?: string | null }) {
+  if (rows.length === 0 && !note) return null
   return (
     <div className="flex flex-col gap-1.5" data-testid="witness-list">
       <span className="type-label text-fg-faint">Witnesses</span>
@@ -28,6 +28,7 @@ export function WitnessList({ rows }: { rows: WitnessRow[] }) {
           </li>
         ))}
       </ul>
+      {note ? <p className="type-caption text-fg-faint" data-testid="witness-restart-note">{note}</p> : null}
     </div>
   )
 }

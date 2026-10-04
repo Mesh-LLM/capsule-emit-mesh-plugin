@@ -78,14 +78,45 @@ pub fn witness_urls() -> Vec<String> {
 }
 
 /// The witness list from the setting's raw value: none when it is unset or
-/// holds no URL.
+/// holds no URL. A URL with a user, password, query or fragment is not used
+/// (any of them can carry a credential, and the URL is kept in receipts and
+/// shown on the page); it is logged instead.
 fn witness_urls_from(raw: Option<&str>) -> Vec<String> {
     raw.unwrap_or_default()
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
+        .filter(|url| {
+            let credential_free = crate::owner_maintenance::without_credentials(url) == *url;
+            if !credential_free {
+                tracing::warn!(
+                    witness = %crate::owner_maintenance::without_credentials(url),
+                    "a witness URL with a user, password, query or fragment is not used; name the witness without them"
+                );
+            }
+            credential_free
+        })
         .map(str::to_string)
         .collect()
+}
+
+/// The witness list the checkpoint cadence took when it started: the one it
+/// registers with until mesh-llm restarts.
+static ACTIVE_WITNESSES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// The witnesses checkpoints actually go to, and whether the saved setting
+/// now names different ones (they take effect at the next restart). Before
+/// the cadence starts (or with it off), the setting as it is.
+pub fn active_witness_urls() -> (Vec<String>, bool) {
+    let saved = witness_urls();
+    match ACTIVE_WITNESSES.get() {
+        Some(active) => {
+            let differs = active.iter().map(|u| crate::witness_status::normalize_url(u)).collect::<Vec<_>>()
+                != saved.iter().map(|u| crate::witness_status::normalize_url(u)).collect::<Vec<_>>();
+            (active.clone(), differs)
+        }
+        None => (saved, false),
+    }
 }
 
 /// The witness keys the operator gave, by witness URL (hex, lower-cased).
@@ -306,6 +337,7 @@ pub fn spawn(
 ) -> anyhow::Result<CheckpointHandle> {
     let cfg = config_from_env();
     let witness_urls = cfg.witness_urls.clone();
+    let _ = ACTIVE_WITNESSES.set(witness_urls.clone());
     let keys_dir = ledger_dir.clone();
     let interval = Duration::from_secs(cfg.cadence_seconds);
     let pad_bucket = cfg.pad_bucket;
@@ -445,6 +477,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::witness_status::refresh_witnesses(dir.path(), &witness_urls_from(None), &Default::default());
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "nothing contacted, nothing written");
+    }
+
+    #[test]
+    fn a_witness_url_with_a_credential_or_a_query_is_not_used() {
+        assert!(witness_urls_from(Some("https://user:pw@w.example")).is_empty());
+        assert!(witness_urls_from(Some("https://w.example/?token=abc")).is_empty());
+        assert!(witness_urls_from(Some("https://w.example#frag")).is_empty());
+        assert_eq!(
+            witness_urls_from(Some("https://w.example/, https://x.example/log")),
+            ["https://w.example/", "https://x.example/log"]
+        );
     }
 
     #[test]

@@ -527,3 +527,11 @@ export function witnessRows(card: JsonRecord | null | undefined): WitnessRow[] {
       }
     })
 }
+
+/** Said under the witness list when the saved witnesses differ from the ones
+ *  checkpoints go to now: the list is read when mesh-llm starts. */
+export const WITNESS_RESTART_NOTE = 'Your saved witness list takes effect when mesh-llm restarts; until then checkpoints go to the witnesses above.'
+
+export function witnessRestartNote(card: JsonRecord | null | undefined): string | null {
+  return card?.witness_restart_needed === true ? WITNESS_RESTART_NOTE : null
+}

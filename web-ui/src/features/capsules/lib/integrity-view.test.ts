@@ -14,6 +14,7 @@ import {
   identityFact,
   INTEGRITY_TILE_INFO,
   RETENTION_FACT,
+  witnessRestartNote,
   witnessRows,
   witnessTileNote
 } from '@/features/capsules/lib/integrity-view'
@@ -452,5 +453,13 @@ describe('banned vocabulary — never "timestamped", never "registered", and "wi
       buildRegistrationCopy(unwitnessed)?.registeredNoLaterThan ?? ''
     ]
     for (const text of local) expect(text.toLowerCase()).not.toMatch(/\bwitnessed\b/)
+  })
+})
+
+describe('the witness list says when saved changes are not in force yet', () => {
+  it('notes a restart only when the saved list differs from the one in use', () => {
+    expect(witnessRestartNote({ witness_restart_needed: true })).toMatch(/takes effect when mesh-llm restarts/)
+    expect(witnessRestartNote({ witness_restart_needed: false })).toBeNull()
+    expect(witnessRestartNote({})).toBeNull()
   })
 })

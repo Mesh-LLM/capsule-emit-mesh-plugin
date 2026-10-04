@@ -264,11 +264,16 @@ fn mmr_leaf_count(mmr_size: u64) -> Option<u64> {
 /// checkpoint line when carried (`covered_leaf_count`/`leaf_count`), else
 /// inverted from the line's `mmr_size` (a NODE count) via `mmr_leaf_count`.
 fn read_checkpoint_card(ledger_dir: &Path) -> Value {
-    read_checkpoint_card_with(
+    // The witnesses checkpoints actually go to: the list the cadence took at
+    // start. A setting saved since then applies at the next restart.
+    let (active, restart_needed) = crate::checkpoint_cadence::active_witness_urls();
+    let mut card = read_checkpoint_card_with(
         ledger_dir,
-        &crate::checkpoint_cadence::witness_urls(),
+        &active,
         &crate::checkpoint_cadence::witness_keys(),
-    )
+    );
+    card["witness_restart_needed"] = json!(restart_needed);
+    card
 }
 
 /// [`read_checkpoint_card`] for these configured witness URLs. A receipt
