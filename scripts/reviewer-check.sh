@@ -113,10 +113,10 @@ start() { # start LOG [trace]
   # Started through env (which execs), never a shell function, so $! is the node (or its tracer).
   if [ "${2:-}" = trace ] && [ "$TRACE" = yes ]; then
     env -u XDG_DATA_HOME HOME="$H" MESH_LLM_NO_DEFAULT_PLUGINS=1 \
-      strace -ff -qq -tt -e trace=connect,sendto,sendmsg,clone,clone3,fork,vfork -o "$WORK/trace" \
+      strace -ff -qq -ttt -e trace=connect,sendto,sendmsg,clone,clone3,fork,vfork,execve -o "$WORK/trace" \
       "$MESH" serve --port "$API" --console "$CONSOLE" --headless --log-format json --gguf "$MODEL" > "$1" 2>&1 &
     TRACER=$!
-    T_START=$(date +%H:%M:%S.%6N)
+    T_START=$(date +%s.%6N)
     NODE=''
     for _ in $(seq 50); do NODE=$(cat "/proc/$TRACER/task/$TRACER/children" 2>/dev/null | awk '{print $1}'); [ -n "$NODE" ] && break; sleep 0.1; done
     [ -n "$NODE" ] || return 1
@@ -192,10 +192,12 @@ else
   PID=$(pgrep -f "^$BIN( |$)" | head -1)
 fi
 [ -n "$PID" ] || fail "cannot find the plugin process ($BIN)"
-# The plugin's threads: its main thread ($PID) and, transitively, every thread or process one of them cloned
-# (each clone/fork line in a thread's trace file ends "= <new thread id>").
+# The plugin's threads: every process that executed the plugin binary (the one running now, $PID, and any
+# earlier instance the host restarted) and, transitively, every thread or process one of them cloned (each
+# clone/fork line in a thread's trace file ends "= <new thread id>").
 plugin_threads() {
-  local queue="$PID" seen=" " tid child
+  local queue="$PID" seen=" " tid child f
+  for f in $(grep -l -F "execve(\"$BIN\"" "$WORK"/trace.* 2>/dev/null); do queue="$queue ${f##*.}"; done
   while [ -n "$queue" ]; do
     tid=${queue%% *}; queue=${queue#"$tid"}; queue=${queue# }
     case "$seen" in *" $tid "*) continue ;; esac
@@ -209,22 +211,22 @@ plugin_threads() {
 }
 # Every connect/sendto/sendmsg any plugin thread made whose address is not loopback, or that goes to a name
 # server on either family (a lookup is outbound intent even through a local resolver on 127.0.0.53).
-outbound() { # outbound FROM_TIME TO_TIME (HH:MM:SS.ffffff, the trace's -tt clock)
+outbound() { # outbound FROM_TIME TO_TIME (seconds since the epoch, the trace's -ttt clock, so midnight is no edge)
   [ -f "$WORK/trace.$PID" ] || return 2
   local files=() tid
   for tid in $(plugin_threads); do [ -f "$WORK/trace.$tid" ] && files+=("$WORK/trace.$tid"); done
   echo "THREADS ${#files[@]}" >&2
-  awk -v from="$1" -v to="$2" '$1 >= from && $1 <= to' "${files[@]}" \
+  awk -v from="$1" -v to="$2" '$1 + 0 >= from + 0 && $1 + 0 <= to + 0' "${files[@]}" \
     | grep -E 'connect\(|sendto\(|sendmsg\(' \
     | grep -E 'sin6?_addr|inet_(addr|pton)' \
     | grep -v -E 'inet_addr\("127\.|inet_pton\(AF_INET6, "::1"' \
     | sed -E 's/^([0-9:.]+) .*(inet_addr\("[^"]+"\)|inet_pton\([^)]*\)).*(sin6?_port=htons\([0-9]+\)).*/\1 \2 \3/' | sort -u
-  awk -v from="$1" -v to="$2" '$1 >= from && $1 <= to' "${files[@]}" | grep -E 'sin6?_port=htons\(53\)' | grep -q . && echo "a name lookup (port 53)"
+  awk -v from="$1" -v to="$2" '$1 + 0 >= from + 0 && $1 + 0 <= to + 0' "${files[@]}" | grep -E 'sin6?_port=htons\(53\)' | grep -q . && echo "a name lookup (port 53)"
   return 0
 }
-r0=$(lines "$RECORDS"); c0=$(lines "$DATA/ledger/checkpoints.jsonl"); t0=$(date +%H:%M:%S.%6N)
+r0=$(lines "$RECORDS"); c0=$(lines "$DATA/ledger/checkpoints.jsonl"); t0=$(date +%s.%6N)
 sleep "$IDLE_SECONDS"
-r1=$(lines "$RECORDS"); c1=$(lines "$DATA/ledger/checkpoints.jsonl"); t1=$(date +%H:%M:%S.%6N)
+r1=$(lines "$RECORDS"); c1=$(lines "$DATA/ledger/checkpoints.jsonl"); t1=$(date +%s.%6N)
 if [ -z "$PID" ]; then notchecked "3. idle network (no plugin process)"
 elif [ "$TRACE" != yes ]; then notchecked "3. idle network (needs Linux with strace: every connect/sendto is traced)"
 else
@@ -235,6 +237,7 @@ else
   else fail "idle: the plugin reached out: $(echo "$out" | head -5 | tr '\n' ';')"; fi
 fi
 if [ "$RUNNING" = no ]; then notchecked "3. idle writes (the plugin never ran)"
+elif [ ! -d "$DATA" ]; then notchecked "3. idle writes (no data directory at $DATA)"
 elif [ "$r0" = "$r1" ] && [ "$c0" = "$c1" ]; then pass "idle ${IDLE_SECONDS} s: no record and no checkpoint written ($r1 records, $c1 checkpoint lines)"
 else fail "idle: records $r0 -> $r1, checkpoint lines $c0 -> $c1"; fi
 

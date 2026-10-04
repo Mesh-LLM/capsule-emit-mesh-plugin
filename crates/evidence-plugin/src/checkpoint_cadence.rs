@@ -103,15 +103,19 @@ fn witness_urls_from(raw: Option<&str>) -> Vec<String> {
 /// The witness list the checkpoint cadence took when it started: the one it
 /// registers with until mesh-llm restarts.
 static ACTIVE_WITNESSES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-/// The witness keys taken at the same moment, so a list and its keys never
-/// come from two different reads of the settings.
-static ACTIVE_KEYS: std::sync::OnceLock<std::collections::BTreeMap<String, String>> =
+/// The witness keys (and what is wrong with them) taken at start, just after
+/// the list: two settings, read one after the other, both kept until restart.
+#[allow(clippy::type_complexity)]
+static ACTIVE_KEYS: std::sync::OnceLock<(std::collections::BTreeMap<String, String>, Vec<String>)> =
     std::sync::OnceLock::new();
 
 /// The witness keys in force: those the cadence took at start, or the
 /// setting as it is before then.
 pub fn active_witness_keys() -> std::collections::BTreeMap<String, String> {
-    ACTIVE_KEYS.get().cloned().unwrap_or_else(witness_keys)
+    ACTIVE_KEYS
+        .get()
+        .map(|(keys, _)| keys.clone())
+        .unwrap_or_else(witness_keys)
 }
 
 /// The witnesses checkpoints actually go to, and whether the saved setting
@@ -146,7 +150,10 @@ pub fn witness_keys() -> std::collections::BTreeMap<String, String> {
 /// key that is not used, its witness's key would be pinned on first contact
 /// (https only), so the operator should see it.
 pub fn witness_keys_problems() -> Vec<String> {
-    witness_keys_checked(crate::settings::var(ENV_WITNESS_KEYS).ok().as_deref()).1
+    match ACTIVE_KEYS.get() {
+        Some((_, problems)) => problems.clone(),
+        None => witness_keys_checked(crate::settings::var(ENV_WITNESS_KEYS).ok().as_deref()).1,
+    }
 }
 
 #[cfg(test)]
@@ -384,7 +391,9 @@ pub fn spawn(
     let cfg = config_from_env();
     let witness_urls = cfg.witness_urls.clone();
     let _ = ACTIVE_WITNESSES.set(witness_urls.clone());
-    let _ = ACTIVE_KEYS.set(witness_keys());
+    let _ = ACTIVE_KEYS.set(witness_keys_checked(
+        crate::settings::var(ENV_WITNESS_KEYS).ok().as_deref(),
+    ));
     let log_id_for_witnesses = log_id.clone();
     let keys_dir = ledger_dir.clone();
     let interval = Duration::from_secs(cfg.cadence_seconds);

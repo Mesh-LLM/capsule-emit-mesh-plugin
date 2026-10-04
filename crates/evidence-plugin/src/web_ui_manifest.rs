@@ -5,8 +5,8 @@
 //! `/plugins/capsules/evidence`, and because it is the plugin's only
 //! page the console gives it a direct navigation item rather than a
 //! `Plugins` menu entry. The page asks for a primary tab; the console promotes
-//! it only when the operator turns on this plugin's `web_ui_primary_tab`
-//! (off by default), so the ask changes nothing until the operator chooses.
+//! it only when the operator turns on this plugin's `web_ui_primary_tab`:
+//! the operator decides (mesh-llm 0.78.0 starts with it off).
 //!
 //! The bundle is built from `web-ui/` (`pnpm build` writes
 //! `bundle/register-mesh-plugin-ui.js`); the release workflow builds it and

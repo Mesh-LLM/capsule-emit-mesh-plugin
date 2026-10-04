@@ -136,26 +136,51 @@ fn existing_old_default(dir: &Path, chosen: bool) -> anyhow::Result<Option<PathB
     Ok(Some(old))
 }
 
+/// `lsof -t path`, from the system's own `/usr/sbin/lsof` (never one found on
+/// PATH), given at most five seconds; anything else is "cannot be told".
+fn lsof_holders(path: &Path) -> Vec<u32> {
+    use std::io::Read;
+    let me = std::process::id();
+    let Ok(mut child) = std::process::Command::new("/usr/sbin/lsof")
+        .arg("-t")
+        .arg(path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return Vec::new();
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Vec::new();
+            }
+        }
+    }
+    let mut out = String::new();
+    if let Some(mut stdout) = child.stdout.take() {
+        let _ = stdout.read_to_string(&mut out);
+    }
+    out.lines()
+        .filter_map(|l| l.trim().parse::<u32>().ok())
+        .filter(|pid| *pid != me)
+        .collect()
+}
+
 /// The other processes that hold `path` open: from `/proc` on Linux, from
 /// `lsof -t` elsewhere (macOS). Empty when it cannot be told. A writer that
 /// opens the ledger only after this check is not seen; the lock keeps out
 /// every capsules process, so that can only be a plugin from before 0.1.3.
 fn other_holders(path: &Path) -> Vec<u32> {
     if !cfg!(target_os = "linux") {
-        let me = std::process::id();
-        return std::process::Command::new("lsof")
-            .arg("-t")
-            .arg(path)
-            .output()
-            .ok()
-            .map(|out| {
-                String::from_utf8_lossy(&out.stdout)
-                    .lines()
-                    .filter_map(|l| l.trim().parse::<u32>().ok())
-                    .filter(|pid| *pid != me)
-                    .collect()
-            })
-            .unwrap_or_default();
+        return lsof_holders(path);
     }
     let Ok(target) = std::fs::canonicalize(path) else {
         return Vec::new();

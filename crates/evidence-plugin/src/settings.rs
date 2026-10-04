@@ -363,8 +363,9 @@ fn console_value(name: &str) -> Option<String> {
 
 /// Where a setting's value comes from: "env", "console", or `None` (unset).
 pub fn origin(name: &str) -> Option<&'static str> {
-    let in_env = std::env::var_os(name).is_some()
-        || legacy_name(name).is_some_and(|l| std::env::var_os(l).is_some());
+    // An empty value is no value, as in [`var`].
+    let set = |n: &str| std::env::var_os(n).is_some_and(|v| !v.to_string_lossy().trim().is_empty());
+    let in_env = set(name) || legacy_name(name).is_some_and(|l| set(&l));
     if in_env {
         Some("env")
     } else if console_value(name).is_some() {
