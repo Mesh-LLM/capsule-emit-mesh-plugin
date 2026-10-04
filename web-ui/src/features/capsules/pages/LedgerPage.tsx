@@ -52,6 +52,7 @@ import { exchangeTextNotice, heroStatusLine } from '@/features/capsules/lib/your
 import { useRecordsStatus } from '@/features/capsules/lib/use-your-records'
 import { CleanUpRecordsDialog } from '@/features/capsules/components/CleanUpRecordsDialog'
 import { YourRecordsDialog } from '@/features/capsules/components/YourRecordsDialog'
+import { WitnessList } from '@/features/capsules/components/WitnessList'
 import { formatExchangeTimestamp } from '@/features/capsules/lib/local-time'
 import {
   exceptionsFirstLine,
@@ -98,6 +99,7 @@ import {
   sealedBreakdownText,
   INTEGRITY_TILE_INFO,
   RETENTION_FACT,
+  witnessRows,
   witnessTileNote,
   type SetupStep
 } from '@/features/capsules/lib/integrity-view'
@@ -1361,6 +1363,8 @@ function IntegritySection() {
             value={contradictedCount}
           />
         </div>
+
+        <WitnessList rows={witnessRows(card ?? null)} />
 
         <CloseCard counts={closeCounts} payments={paneCQuery.data?.payments} unjoined={unjoinedPayments} />
 

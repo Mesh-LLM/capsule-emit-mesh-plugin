@@ -12,6 +12,17 @@
   with the log verified before and after. A node with both directories refuses to start and says
   why. Existing logs keep their log id.
 
+### Added
+
+- **A list of witnesses.** The console's `witness` setting is a list of URLs (the environment's
+  `CAPSULES_CHECKPOINT_WITNESS_URLS` stays a comma list). There is still no default witness, and no
+  witness is contacted until one is named. The Evidence page lists each witness by name with what
+  it holds.
+- **Receipts are checked before they count.** A witness's receipt counts only when it verifies
+  offline: the entry recomputed from the checkpoint's signed fields, and the receipt's inclusion
+  proof and signature under the witness's key (fetched once from that witness and kept). An
+  unchecked or failing receipt is shown, with the reason, and never counted.
+
 ### Fixed
 
 - **Settings saved in the console reach the plugin.** The plugin reads its `[plugin.settings]`

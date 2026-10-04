@@ -21,7 +21,8 @@
 //! (off unless set) and `CAPSULES_STOP_ROUTING_WINDOW_DAYS`.
 
 use mesh_llm_plugin::{
-    config_enum, config_integer, config_schema, config_setting, config_url, ManifestEntry,
+    config_array, config_enum, config_integer, config_schema, config_setting, config_url,
+    ManifestEntry,
 };
 
 pub const RECORD_AT_COMPLETION_KEY: &str = "share_record_at_completion";
@@ -151,13 +152,14 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
                 .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 2),
         )
         .setting(
-            config_setting(WITNESS_KEY, config_url())
+            config_setting(WITNESS_KEY, config_array(config_url()))
                 .description(
-                    "Witness service URL to checkpoint against. Empty is off (the default) -- no \
-                     default witness URL, no network call without an operator-supplied one. \
-                     Takes effect when mesh-llm is restarted.",
+                    "Witness services to offer this node's checkpoints to, one URL each. Empty is \
+                     off (the default): there is no default witness, and the plugin contacts none \
+                     until you add one. The Evidence page shows what each witness holds. Takes \
+                     effect when mesh-llm is restarted.",
                 )
-                .label("Witness")
+                .label("Witnesses")
                 .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 3),
         )
         .setting(
@@ -342,6 +344,13 @@ mod tests {
             .unwrap();
         assert_eq!(witness.default_json, None);
         assert!(!witness.required);
+        // A list of URLs: several witnesses, each named by the operator.
+        let value = witness.value_schema.as_ref().unwrap();
+        assert_eq!(value.kind, proto::PluginConfigValueKind::Array as i32);
+        assert_eq!(
+            value.items.as_ref().unwrap().kind,
+            proto::PluginConfigValueKind::Url as i32
+        );
     }
 
     #[test]

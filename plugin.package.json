@@ -81,16 +81,20 @@
       {
         "key": "witness",
         "value_schema": {
-          "kind": "url",
+          "kind": "array",
+          "items": {
+            "kind": "url",
+            "allow_additional_properties": false
+          },
           "allow_additional_properties": false
         },
         "required": false,
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Witness service URL to checkpoint against. Empty is off (the default) -- no default witness URL, no network call without an operator-supplied one. Takes effect when mesh-llm is restarted.",
+        "description": "Witness services to offer this node's checkpoints to, one URL each. Empty is off (the default): there is no default witness, and the plugin contacts none until you add one. The Evidence page shows what each witness holds. Takes effect when mesh-llm is restarted.",
         "presentation": {
-          "label": "Witness",
+          "label": "Witnesses",
           "category_id": "share",
           "category_label": "Sharing policy",
           "category_summary": "What this node shares, with whom, by default. Every default keys on relationship (counterparty in the window), never proximity or latency.",

@@ -10,16 +10,19 @@ here is a score, and nothing here ranks anyone.
 share_record_at_completion: counterparty | off                           # default: counterparty
 share_history_segments:     counterparties | prospective | peers | off   # default: prospective
 share_adjudications:        deliver_to_subjects | off                    # default: on
-witness:                    off | <url>                                  # default: off
+witness:                    [] | [<url>, ...]                            # default: [] (off)
 ```
 
 The plugin declares the four switches in its `config_schema`
 (`crates/evidence-plugin/src/share_policy.rs`), so the console shows them under
-Configuration › Plugins › Sharing policy. mesh-llm does not yet pass a
-plugin's configured values back to the running plugin, so today each value is
-read from the plugin's environment: `CAPSULES_SHARE_RECORD_AT_COMPLETION`,
-`CAPSULES_SHARE_HISTORY_SEGMENTS`, `CAPSULES_SHARE_ADJUDICATIONS`
-and `CAPSULES_WITNESS`. An unset or unknown value means the default.
+Configuration › Plugins › Sharing policy. mesh-llm keeps what you save there in
+its config file and does not pass it to the plugin, so the plugin reads it
+there (`~/.mesh-llm/config.toml`, or the file `MESH_LLM_CONFIG` names). The
+same settings can be set in the plugin's environment, which wins over the
+console: `CAPSULES_SHARE_RECORD_AT_COMPLETION`,
+`CAPSULES_SHARE_HISTORY_SEGMENTS`, `CAPSULES_SHARE_ADJUDICATIONS` and
+`CAPSULES_CHECKPOINT_WITNESS_URLS` (a comma list). An unset or unknown value
+means the default.
 
 ## The record at completion (`share_record_at_completion`)
 
@@ -95,8 +98,24 @@ still holds the verdict, and delivers it to no one. How a referee is chosen:
 
 ## Witness
 
-`witness` is a URL, or unset for off (the default). With no URL set there is
-no witness and no network call to one.
+`witness` is a list of witness URLs, empty for off (the default). There is no
+default witness: with the list empty the plugin contacts no witness at all.
+
+Each checkpoint is offered to every witness on the list. A witness that
+accepts it returns a receipt, and the Evidence page lists every witness by
+name with what it holds: the latest checkpoint, an earlier one, or none yet.
+
+A receipt counts only once the plugin has **checked** it, offline. It
+recomputes the checkpoint's digest from the checkpoint's own signed fields,
+confirms the receipt is for exactly that entry, and verifies the receipt's
+inclusion proof and signature under the witness's key. The key is fetched from
+that witness, the first time it is needed, and kept
+(`<ledger>/witness-keys.json`); a different key later from the same URL is not
+taken. "Witnessed" on the page means at least one checked receipt, from a
+witness it names.
+
+A witness holding a checkpoint means one thing: a later rewrite of this log is
+detectable by someone other than this node. It does not make the records true.
 
 ## The two mesh streams are plugin-internal
 

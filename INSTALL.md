@@ -14,9 +14,13 @@ needed.
   its data directory is `~/.local/share/capsules`. A node upgrading keeps its key and records: see
   [Upgrading from capsule-emit-mesh](#upgrading-from-capsule-emit-mesh).
 - **Settings saved in the console reach the plugin.** mesh-llm keeps them in its config file and
-  does not pass them to the plugin, so the plugin reads them there. The console's **witness** is
-  the witness checkpoints go to. A node started with `--config <path>` must also have
+  does not pass them to the plugin, so the plugin reads them there. A node started with
+  `--config <path>` must also have
   `MESH_LLM_CONFIG=<path>` in its environment, or the plugin reads `~/.mesh-llm/config.toml`.
+
+- **Several witnesses.** **Witnesses** in the console is a list of URLs (still none by default, and
+  no witness is contacted until you add one). The Evidence page shows what each witness holds, and
+  counts a witness only once its receipt checks against the witness's key.
 
 ## What's new in 0.1.2
 

@@ -80,9 +80,27 @@ export type CheckpointRegistration = {
   witnessState: WitnessState
 }
 
+/** The latest checkpoint's receipts that CHECKED: the plugin verified each
+ *  against the witness's key and this checkpoint before marking it. A
+ *  receipt that is only held, unchecked or refused, never counts. */
+export function checkedWitnesses(card: JsonRecord | null | undefined): JsonRecord[] {
+  const all = Array.isArray(card?.witnesses) ? (card.witnesses as unknown[]) : []
+  return all.filter(
+    (witness): witness is JsonRecord =>
+      !!witness && typeof witness === 'object' && (witness as JsonRecord).checked === true
+  )
+}
+
+/** A witness's short name: the host of its URL. */
+export function witnessName(url: unknown): string {
+  if (typeof url !== 'string' || url === '') return 'a witness'
+  const rest = url.includes('://') ? url.split('://')[1] : url
+  return rest.split('/')[0].split('@').pop() ?? rest
+}
+
 export function checkpointRegistration(card: JsonRecord | null | undefined): CheckpointRegistration {
   const checkpointCount = typeof card?.checkpoint_count === 'number' ? card.checkpoint_count : null
-  const witnesses = Array.isArray(card?.witnesses) ? (card.witnesses as unknown[]) : []
+  const witnesses = checkedWitnesses(card)
   const checkpointedLocally = checkpointCount !== null && checkpointCount > 0
   const registered = checkpointedLocally && witnesses.length > 0
   const counted = typeof card?.witnessed_checkpoint_count === 'number' ? card.witnessed_checkpoint_count : 0
@@ -263,7 +281,7 @@ export function buildRegistrationCopy(card: JsonRecord | null | undefined): Regi
   const registration = checkpointRegistration(card)
   if (!registration.checkpointedLocally) return null
 
-  const witnesses: unknown[] = Array.isArray(card?.witnesses) ? (card.witnesses as unknown[]) : []
+  const witnesses = checkedWitnesses(card)
   const nonProducerCount = nonProducerWitnessCount(witnesses)
   // Local time, never an ISO/UTC stamp on screen.
   const timestamp =
@@ -280,7 +298,9 @@ export function buildRegistrationCopy(card: JsonRecord | null | undefined): Regi
   }
 
   return {
-    witnessSummary: `Held by ${witnesses.length} witness${witnesses.length === 1 ? '' : 'es'} (${nonProducerCount} not operated by this node)`,
+    witnessSummary: `Held by ${witnesses.length} witness${witnesses.length === 1 ? '' : 'es'}: ${witnesses
+      .map((witness) => witnessName(witness.ts_url))
+      .join(', ')} (${nonProducerCount} not operated by this node)`,
     registeredNoLaterThan: timestamp ? `witnessed no later than ${timestamp}` : null
   }
 }
@@ -429,4 +449,65 @@ export function continuityFact(checkpointCount: number | null): string {
     return 'Continuity: 1 checkpoint so far. The next one builds on it. A witness is what lets someone else check it too.'
   }
   return `Continuity: ${checkpointCount} checkpoints so far. A witness is what lets someone else check them too.`
+}
+
+// ---------------------------------------------------------------------------
+// One row per witness (`card.witness_status`): what each holds, by name.
+// ---------------------------------------------------------------------------
+
+export type WitnessRow = {
+  name: string
+  url: string
+  /** What this witness holds, in a few words. */
+  status: string
+  /** Why it does not count yet, or what it holds; null when nothing to add. */
+  detail: string | null
+  tone: 'good' | 'pending' | 'bad' | 'muted'
+}
+
+export function witnessRows(card: JsonRecord | null | undefined): WitnessRow[] {
+  const rows = Array.isArray(card?.witness_status) ? (card.witness_status as unknown[]) : []
+  return rows
+    .filter((row): row is JsonRecord => !!row && typeof row === 'object')
+    .map((row) => {
+      const url = typeof row.url === 'string' ? row.url : ''
+      const name = typeof row.name === 'string' && row.name !== '' ? row.name : witnessName(url)
+      const checked = typeof row.checked_count === 'number' ? row.checked_count : 0
+      const held = typeof row.held_count === 'number' ? row.held_count : 0
+      const problem = typeof row.problem === 'string' ? row.problem : null
+      const latest = row.latest_checked as JsonRecord | null | undefined
+      const when =
+        latest && typeof latest.timestamp === 'string' ? formatExchangeTimestamp(latest.timestamp) : null
+      const checkedText = `${checked} checkpoint${checked === 1 ? '' : 's'} held, receipt${checked === 1 ? '' : 's'} checked`
+      switch (row.state) {
+        case 'latest':
+          return { name, url, status: 'holds the latest checkpoint', detail: checkedText, tone: 'good' as const }
+        case 'earlier':
+          return {
+            name,
+            url,
+            status: 'holds an earlier checkpoint',
+            detail: when ? `${checkedText} · latest held ${when}` : checkedText,
+            tone: 'good' as const
+          }
+        case 'unchecked':
+          return {
+            name,
+            url,
+            status: `${held} receipt${held === 1 ? '' : 's'} not checked`,
+            detail: problem,
+            tone: 'bad' as const
+          }
+        case 'removed':
+          return {
+            name,
+            url,
+            status: 'no longer in your settings',
+            detail: checked > 0 ? checkedText : null,
+            tone: 'muted' as const
+          }
+        default:
+          return { name, url, status: 'none held yet', detail: problem, tone: 'pending' as const }
+      }
+    })
 }

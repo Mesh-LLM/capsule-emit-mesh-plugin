@@ -180,6 +180,15 @@ fn settings_from_config(raw: &str) -> std::collections::BTreeMap<String, String>
                 toml::Value::Integer(n) => n.to_string(),
                 toml::Value::Boolean(b) => b.to_string(),
                 toml::Value::Float(f) => f.to_string(),
+                // A list (the witnesses): the same comma list the
+                // environment takes.
+                toml::Value::Array(items) => items
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .map(str::trim)
+                    .filter(|item| !item.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(","),
                 _ => continue,
             };
             out.insert(key.clone(), text);
@@ -421,5 +430,19 @@ witness = "https://new.example"
             "[[plugin]]\nname = \"capsule-emit-mesh\"\n[plugin.settings]\nwitness = \"https://old.example\"\n",
         );
         assert_eq!(only_old.get("witness").map(String::as_str), Some("https://old.example"));
+    }
+
+    #[test]
+    fn a_list_in_the_console_is_read_as_the_comma_list() {
+        let raw = r#"
+[[plugin]]
+name = "capsules"
+[plugin.settings]
+witness = ["https://a.example", " https://b.example ", ""]
+"#;
+        assert_eq!(
+            settings_from_config(raw).get("witness").map(String::as_str),
+            Some("https://a.example,https://b.example")
+        );
     }
 }

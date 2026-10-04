@@ -1336,7 +1336,14 @@ describe('LedgerPageContent — Part T6: Integrity section completion', () => {
       rows: [],
       card: {
         checkpoint_count: 4,
-        witnesses: [{ operated_by_producer: true }, { operated_by_producer: false }],
+        witnesses: [
+          { ts_url: 'https://a.example', operated_by_producer: true, checked: true },
+          { ts_url: 'https://b.example', operated_by_producer: false, checked: true }
+        ],
+        witness_status: [
+          { name: 'a.example', url: 'https://a.example', state: 'latest', held_count: 4, checked_count: 4 },
+          { name: 'c.example', url: 'https://c.example', state: 'pending', held_count: 0, checked_count: 0 }
+        ],
         registered_no_later_than: '2026-09-10'
       }
     })
@@ -1345,7 +1352,13 @@ describe('LedgerPageContent — Part T6: Integrity section completion', () => {
     render(<LedgerPageContent />, { wrapper: makeWrapper() })
     await user.click(screen.getByRole('tab', { name: /integrity/i }))
 
-    expect(await screen.findByText('Held by 2 witnesses (1 not operated by this node)')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Held by 2 witnesses: a.example, b.example (1 not operated by this node)')
+    ).toBeInTheDocument()
+    const witnessList = screen.getByTestId('witness-list')
+    expect(within(witnessList).getByText('holds the latest checkpoint')).toBeInTheDocument()
+    expect(within(witnessList).getByText('c.example')).toBeInTheDocument()
+    expect(within(witnessList).getByText('none held yet')).toBeInTheDocument()
     expect(screen.getByText(`witnessed no later than ${formatExchangeTimestamp('2026-09-10')}`)).toBeInTheDocument()
     // Step 1 no longer shows the "what it does not buy" sentence once done.
     expect(screen.queryByText(/does not make your records true/)).not.toBeInTheDocument()
@@ -1436,7 +1449,7 @@ describe('LedgerPageContent — Part T6: Integrity section completion', () => {
       card: {
         checkpoint_count: 2,
         continuity: 'unbroken',
-        witnesses: [{ operated_by_producer: false }],
+        witnesses: [{ operated_by_producer: false, checked: true }],
         registered_no_later_than: '2026-09-10'
       }
     })

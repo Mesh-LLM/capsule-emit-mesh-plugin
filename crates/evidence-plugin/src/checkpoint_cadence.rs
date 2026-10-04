@@ -65,7 +65,12 @@ const ENV_PAD_BUCKET: &str = "CAPSULES_CHECKPOINT_PAD_BUCKET";
 /// Whether a witness URL is configured: checkpoints are offered to a witness.
 /// The same setting [`spawn`] registers checkpoints with.
 pub fn witness_configured() -> bool {
-    !config_from_env().witness_urls.is_empty()
+    !witness_urls().is_empty()
+}
+
+/// The witness URLs the operator named, in order: none by default.
+pub fn witness_urls() -> Vec<String> {
+    config_from_env().witness_urls
 }
 
 pub fn is_enabled() -> bool {
@@ -261,6 +266,8 @@ pub fn spawn(
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<CheckpointHandle> {
     let cfg = config_from_env();
+    let witness_urls = cfg.witness_urls.clone();
+    let keys_dir = ledger_dir.clone();
     let interval = Duration::from_secs(cfg.cadence_seconds);
     let pad_bucket = cfg.pad_bucket;
     let (mut state, report) = CheckpointState::load(&ledger_dir, log_id, cfg).map_err(|e| {
@@ -316,7 +323,18 @@ pub fn spawn(
 
         loop {
             tokio::select! {
-                _ = ticker.tick() => run("tick", |s, k, a| s.tick(k, a)),
+                _ = ticker.tick() => {
+                    run("tick", |s, k, a| s.tick(k, a));
+                    // Each named witness's key, for checking its receipts;
+                    // fetched from that witness only, and only when one is named.
+                    if !witness_urls.is_empty() {
+                        let (dir, urls) = (keys_dir.clone(), witness_urls.clone());
+                        let _ = tokio::task::spawn_blocking(move || {
+                            crate::witness_status::fetch_missing_keys(&dir, &urls)
+                        })
+                        .await;
+                    }
+                }
                 _ = shutdown.changed() => {
                     if *shutdown.borrow() {
                         break;
@@ -341,9 +359,12 @@ pub fn spawn(
 /// several URLs only the first can be reached until capsule-emit dispatches
 /// each URL itself; the log says so.
 fn anchor_base_for(urls: &[String]) -> String {
-    use crate::producer::anchor::{dispatch_base_for, DEFAULT_ANCHOR_BASE};
+    use crate::producer::anchor::dispatch_base_for;
     match urls {
-        [] => DEFAULT_ANCHOR_BASE.to_string(),
+        // No witness named: the client is never called (registration walks
+        // the named witnesses only), and it is given no address at all, so
+        // no default witness can ever be reached.
+        [] => String::new(),
         [one] => dispatch_base_for(one).to_string(),
         [first, ..] => {
             tracing::warn!(
@@ -522,12 +543,8 @@ mod tests {
 
     #[test]
     fn the_witness_client_points_at_the_chosen_witness() {
-        use crate::producer::anchor::{DEFAULT_ANCHOR_BASE, DEFAULT_WITNESS_URL};
-        assert_eq!(anchor_base_for(&[]), DEFAULT_ANCHOR_BASE);
-        assert_eq!(
-            anchor_base_for(&[DEFAULT_WITNESS_URL.to_string()]),
-            DEFAULT_ANCHOR_BASE
-        );
+        // No witness named: no address at all, never a default one.
+        assert_eq!(anchor_base_for(&[]), "");
         assert_eq!(
             anchor_base_for(&["http://127.0.0.1:8088".to_string()]),
             "http://127.0.0.1:8088"

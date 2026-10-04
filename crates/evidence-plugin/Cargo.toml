@@ -80,6 +80,9 @@ cll = { package = "checkpointed-local-log", version = "0.2.1" }
 # resolution, signed refusals and the artifact answer come from the protocol
 # crate (draft-mih-agent-evidence-request-00). 0.0.2 carries the answer path.
 capsule-emit-evidence-request = "0.0.2"
+# A witness's receipt for a checkpoint is checked offline before the page
+# counts it (`witness_status`). Not on crates.io: pinned to a public commit.
+scitt-cose-receipt = { git = "https://github.com/action-state-group/scitt-cose", rev = "8833281c11d33e3c1e289cf74f11d25ee7f3c6dc" }
 
 [dev-dependencies]
 # The record-push parity run reads its own golden answers, which hold a record

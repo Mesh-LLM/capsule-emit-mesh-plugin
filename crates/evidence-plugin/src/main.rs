@@ -47,6 +47,7 @@ mod strict_json;
 mod two_node_e2e;
 mod verdict_counts;
 mod web_ui_manifest;
+mod witness_status;
 
 use crate::producer::capsule::TokenUsage;
 use axum::{

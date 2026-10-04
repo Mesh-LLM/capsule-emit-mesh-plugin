@@ -642,7 +642,7 @@ fn switch(env: &str, default: Option<&str>) -> Value {
 /// A witness URL as the page may show it: scheme, host and path only. A
 /// user, password, query or fragment can carry a credential, so none of them
 /// leaves this process.
-fn without_credentials(url: &str) -> String {
+pub(crate) fn without_credentials(url: &str) -> String {
     let url = url.trim();
     let url = url.split(['?', '#']).next().unwrap_or(url);
     match url.split_once("://") {
