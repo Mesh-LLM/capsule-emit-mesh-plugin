@@ -593,6 +593,7 @@ dependencies = [
  "chrono",
  "ed25519-dalek",
  "hex",
+ "libc",
  "mesh-llm-plugin",
  "reqwest",
  "rmcp 1.8.0",

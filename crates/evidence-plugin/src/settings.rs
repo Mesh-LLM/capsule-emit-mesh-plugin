@@ -688,6 +688,10 @@ witness = [
         assert_eq!(var(name), Err(VarError::NotPresent));
         assert_eq!(var_os(name), None);
         std::env::set_var("CAPSULE_EMIT_MESH_TEST_SETTINGS_EMPTY", "old");
-        assert_eq!(var(name).as_deref(), Ok("old"), "an empty new name does not hide the old one");
+        assert_eq!(
+            var(name).as_deref(),
+            Ok("old"),
+            "an empty new name does not hide the old one"
+        );
     }
 }

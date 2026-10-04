@@ -95,16 +95,25 @@ fn history_segments_for(raw: Option<&str>) -> &'static str {
 pub fn setting_problems() -> Vec<String> {
     let known: [(&str, &[&str]); 4] = [
         (ENV_RECORD_AT_COMPLETION, &["counterparty", "off"]),
-        (ENV_HISTORY_SEGMENTS, &["counterparties", "prospective", "peers", "off"]),
+        (
+            ENV_HISTORY_SEGMENTS,
+            &["counterparties", "prospective", "peers", "off"],
+        ),
         (ENV_ADJUDICATIONS, &["deliver_to_subjects", "off"]),
-        (crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS, &["on", "off", "1", "0", "true", "false", "yes", "no"]),
+        (
+            crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS,
+            &["on", "off", "1", "0", "true", "false", "yes", "no"],
+        ),
     ];
     known
         .iter()
         .filter_map(|(env, values)| {
             let value = normalized(crate::settings::var(env).ok().as_deref())?;
             (!values.contains(&value.as_str())).then(|| {
-                format!("{env} is {value:?}, which is not one of {}; it is read as off", values.join(", "))
+                format!(
+                    "{env} is {value:?}, which is not one of {}; it is read as off",
+                    values.join(", ")
+                )
             })
         })
         .collect()
@@ -304,9 +313,13 @@ mod tests {
     }
 
     #[test]
-    fn history_segments_defaults_to_prospective_and_reads_the_four_tiers() {
+    fn history_segments_defaults_to_prospective_reads_the_four_tiers_and_unknown_is_off() {
         assert_eq!(history_segments_for(None), "prospective");
-        assert_eq!(history_segments_for(Some("bogus")), "prospective");
+        assert_eq!(
+            history_segments_for(Some("bogus")),
+            "off",
+            "an unknown value never widens"
+        );
         for tier in ["off", "counterparties", "prospective", "peers"] {
             assert_eq!(history_segments_for(Some(tier)), tier);
         }
@@ -430,10 +443,21 @@ mod tests {
     #[test]
     fn history_segments_never_widen_on_a_typo() {
         assert_eq!(history_segments_for(None), "prospective");
-        assert_eq!(history_segments_for(Some("")), "prospective", "empty is unset");
+        assert_eq!(
+            history_segments_for(Some("")),
+            "prospective",
+            "empty is unset"
+        );
         assert_eq!(history_segments_for(Some("Off ")), "off");
-        assert_eq!(history_segments_for(Some(" COUNTERPARTIES")), "counterparties");
-        assert_eq!(history_segments_for(Some("counterparty")), "off", "unknown is off");
+        assert_eq!(
+            history_segments_for(Some(" COUNTERPARTIES")),
+            "counterparties"
+        );
+        assert_eq!(
+            history_segments_for(Some("counterparty")),
+            "off",
+            "unknown is off"
+        );
         assert_eq!(history_segments_for(Some("peeers")), "off");
         assert!(!record_at_completion_is_off_for(Some(" Counterparty")));
     }

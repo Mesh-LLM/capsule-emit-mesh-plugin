@@ -305,11 +305,16 @@ pub fn lock(dir: &Path) -> anyhow::Result<DataDirLock> {
     // (CAPSULES_RECEIVED_LOG_DIR); two nodes must not share it either.
     if let Ok(received) = crate::settings::var(crate::evidence_routes::ENV_RECEIVED_LOG_DIR) {
         let received = PathBuf::from(received.trim());
-        std::fs::create_dir_all(&received).with_context(|| format!("create {}", received.display()))?;
-        let real = std::fs::canonicalize(&received).with_context(|| format!("resolve {}", received.display()))?;
+        std::fs::create_dir_all(&received)
+            .with_context(|| format!("create {}", received.display()))?;
+        let real = std::fs::canonicalize(&received)
+            .with_context(|| format!("resolve {}", received.display()))?;
         files.push(
-            take(&real.join(LEDGER_LOCK_FILE), &format!("received-request log {}", real.display()))?
-                .map_err(anyhow::Error::msg)?,
+            take(
+                &real.join(LEDGER_LOCK_FILE),
+                &format!("received-request log {}", real.display()),
+            )?
+            .map_err(anyhow::Error::msg)?,
         );
     }
     check_no_other_writer(dir)?;
