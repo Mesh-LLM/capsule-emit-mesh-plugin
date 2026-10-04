@@ -48,6 +48,8 @@ const LEDGER: &str = "ledger/capsules.jsonl";
 /// Holds the advisory lock; its contents (the holder's pid) are only for the
 /// refusal message.
 const LOCK_FILE: &str = "capsules.lock";
+/// The lock in the ledger's own directory (see [`lock`]).
+const LEDGER_LOCK_FILE: &str = ".capsules-writer.lock";
 
 /// The data directory for these inputs, and whether the operator chose it.
 fn resolve(
@@ -208,35 +210,28 @@ pub fn data_dir() -> anyhow::Result<PathBuf> {
 /// This process's exclusive hold on the data directory, for its lifetime.
 #[must_use = "the directory is locked only while this is held"]
 pub struct DataDirLock {
-    _file: File,
+    _files: Vec<File>,
 }
 
-/// Take the data directory for this process alone.
-///
-/// An advisory OS lock (`flock` on Unix, `LockFileEx` on Windows) on
-/// `<dir>/capsules.lock`. The OS releases it when the process exits
-/// or crashes, so a lock file a crash left behind never blocks the next start;
-/// it is not a pid file. A second process on the same directory gets one plain
-/// line naming the directory and the holder's pid.
-pub fn lock(dir: &Path) -> anyhow::Result<DataDirLock> {
-    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-    let path = dir.join(LOCK_FILE);
+/// One advisory lock on the file at `path` (never through a symlink), or why
+/// not: `Ok(None)` when another process holds it, with its pid.
+fn take(path: &Path, label: &str) -> anyhow::Result<Result<File, String>> {
+    if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        bail!("{} is a symbolic link; refusing to lock through it", path.display());
+    }
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(&path)
+        .open(path)
         .with_context(|| format!("open {}", path.display()))?;
     match file.try_lock() {
         Ok(()) => {
             file.set_len(0)
                 .and_then(|()| writeln!(file, "{}", std::process::id()))
                 .with_context(|| format!("write {}", path.display()))?;
-            // The lock keeps out another capsules process; a writer from
-            // before 0.1.3 takes no lock, so check the ledger itself too.
-            check_no_other_writer(dir)?;
-            Ok(DataDirLock { _file: file })
+            Ok(Ok(file))
         }
         Err(TryLockError::WouldBlock) => {
             let mut holder = String::new();
@@ -245,15 +240,43 @@ pub fn lock(dir: &Path) -> anyhow::Result<DataDirLock> {
                 "" => "unknown",
                 pid => pid,
             };
-            bail!(
-                "data directory {} is in use by another capsules plugin process (pid {holder}); give each node its own {ENV_DATA_DIR}",
-                dir.display()
-            )
+            Ok(Err(format!(
+                "{label} is in use by another capsules plugin process (pid {holder}); give each node its own {ENV_DATA_DIR}"
+            )))
         }
         Err(TryLockError::Error(error)) => {
             Err(error).with_context(|| format!("lock {}", path.display()))
         }
     }
+}
+
+/// Take the data directory for this process alone.
+///
+/// An advisory OS lock (`flock` on Unix, `LockFileEx` on Windows) on
+/// `<dir>/capsules.lock`, and a second one in the ledger's own directory as
+/// it really is (a `ledger/` that is a link to a directory another data
+/// directory also uses is the same ledger). The OS releases a lock when the
+/// process exits or crashes, so a lock file a crash left behind never blocks
+/// the next start; it is not a pid file. A lock file that is a symbolic link
+/// is refused. A second process gets one plain line naming the directory and
+/// the holder's pid. A writer from before 0.1.3 takes no lock, so the ledger
+/// itself is checked too (`check_no_other_writer`).
+pub fn lock(dir: &Path) -> anyhow::Result<DataDirLock> {
+    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+    let dir_lock = take(&dir.join(LOCK_FILE), &format!("data directory {}", dir.display()))?
+        .map_err(anyhow::Error::msg)?;
+    let ledger = dir.join("ledger");
+    std::fs::create_dir_all(&ledger).with_context(|| format!("create {}", ledger.display()))?;
+    let real_ledger = std::fs::canonicalize(&ledger).with_context(|| format!("resolve {}", ledger.display()))?;
+    let ledger_lock = take(
+        &real_ledger.join(LEDGER_LOCK_FILE),
+        &format!("ledger {}", real_ledger.display()),
+    )?
+    .map_err(anyhow::Error::msg)?;
+    check_no_other_writer(dir)?;
+    Ok(DataDirLock {
+        _files: vec![dir_lock, ledger_lock],
+    })
 }
 
 #[cfg(test)]
@@ -374,6 +397,32 @@ mod tests {
         let message = refused.expect("refused while another process held the ledger");
         assert!(message.contains(&format!("pid {}", holder.id())), "{message}");
         assert!(check_no_other_writer(&old).is_ok(), "free once it let go");
+    }
+
+    /// Two data directories whose `ledger/` is the same directory (a link)
+    /// share one ledger: the second is refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_ledger_shared_through_a_link_is_one_ledger() {
+        let shared = tmp("lock-shared-ledger");
+        let (a, b) = (tmp("lock-link-a"), tmp("lock-link-b"));
+        std::os::unix::fs::symlink(&shared, a.join("ledger")).unwrap();
+        std::os::unix::fs::symlink(&shared, b.join("ledger")).unwrap();
+        let _held = lock(&a).expect("the first");
+        let message = lock(&b).err().expect("the second refused").to_string();
+        assert!(message.contains("ledger"), "{message}");
+        assert!(message.contains(&format!("pid {}", std::process::id())), "{message}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_file_that_is_a_link_is_refused() {
+        let dir = tmp("lock-link-file");
+        let elsewhere = tmp("lock-link-target").join("important");
+        std::fs::write(&elsewhere, "keep me").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, dir.join(LOCK_FILE)).unwrap();
+        assert!(lock(&dir).is_err());
+        assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "keep me", "never truncated through the link");
     }
 
     fn tmp(label: &str) -> PathBuf {

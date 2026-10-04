@@ -180,34 +180,52 @@ fn classify(err: &crate::producer::anchor::AnchorError) -> (&'static str, String
     }
 }
 
-/// The last checkpoint a witness holds of `log_id`: its size and root.
-/// `None`: the witness holds none of this log. One GET to that witness, no
-/// redirects, at most 64 KiB read.
-fn witness_latest(base: &str, log_id: &str) -> Result<Option<(u64, String)>, (&'static str, String)> {
+/// One GET to a witness: no redirects (a witness never sends this plugin
+/// elsewhere), 10 s, and at most 64 KiB of answer read.
+fn get_json(url: &str) -> Result<Value, crate::producer::anchor::AnchorError> {
+    use crate::producer::anchor::AnchorError;
     use std::io::Read;
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(10))
         .redirects(0)
         .build();
-    let url = format!("{}/checkpoints/{log_id}", base.trim_end_matches('/'));
-    match agent.get(&url).call() {
+    match agent.get(url).call() {
         Ok(response) => {
+            if (300..400).contains(&response.status()) {
+                return Err(AnchorError::Status { status: response.status(), body: String::new() });
+            }
             let mut body = String::new();
             response
                 .into_reader()
                 .take(64 * 1024)
                 .read_to_string(&mut body)
-                .map_err(|e| ("unreachable", format!("unreachable: {e}")))?;
-            let held: Value = serde_json::from_str(&body)
-                .map_err(|_| ("not_a_witness", "answered, but not as a witness".to_string()))?;
-            match (held.get("mmr_size").and_then(Value::as_u64), held.get("root").and_then(Value::as_str)) {
-                (Some(size), Some(root)) => Ok(Some((size, root.to_string()))),
-                _ => Err(("not_a_witness", "answered, but not as a witness".to_string())),
-            }
+                .map_err(|e| AnchorError::Transport(e.to_string()))?;
+            serde_json::from_str(&body).map_err(|e| AnchorError::Decode(e.to_string()))
         }
-        Err(ureq::Error::Status(404, _)) => Ok(None),
-        Err(ureq::Error::Status(code, _)) => Err(("http", format!("answered HTTP {code}"))),
-        Err(error) => Err(classify(&crate::producer::anchor::AnchorError::Transport(error.to_string()))),
+        Err(ureq::Error::Status(status, _)) => Err(AnchorError::Status { status, body: String::new() }),
+        Err(error) => Err(AnchorError::Transport(error.to_string())),
+    }
+}
+
+/// The key a witness presents: its raw Ed25519 key in hex, and its key id.
+fn fetch_key(base: &str) -> Result<(String, String), crate::producer::anchor::AnchorError> {
+    let body = get_json(&format!("{}/anchor/authority-pubkey", base.trim_end_matches('/')))?;
+    match (body.get("pubkey_hex").and_then(Value::as_str), body.get("key_id").and_then(Value::as_str)) {
+        (Some(key), Some(id)) => Ok((key.to_string(), id.to_string())),
+        _ => Err(crate::producer::anchor::AnchorError::Decode("no pubkey_hex/key_id".into())),
+    }
+}
+
+/// The last checkpoint a witness holds of `log_id`: its size and root.
+/// `None`: the witness holds none of this log.
+fn witness_latest(base: &str, log_id: &str) -> Result<Option<(u64, String)>, (&'static str, String)> {
+    match get_json(&format!("{}/checkpoints/{log_id}", base.trim_end_matches('/'))) {
+        Ok(held) => match (held.get("mmr_size").and_then(Value::as_u64), held.get("root").and_then(Value::as_str)) {
+            (Some(size), Some(root)) => Ok(Some((size, root.to_string()))),
+            _ => Err(("not_a_witness", "answered, but not as a witness".to_string())),
+        },
+        Err(crate::producer::anchor::AnchorError::Status { status: 404, .. }) => Ok(None),
+        Err(error) => Err(classify(&error)),
     }
 }
 
@@ -311,21 +329,18 @@ pub fn refresh_witnesses(
             tries.insert(url.clone(), Instant::now());
         }
         let base = crate::producer::anchor::dispatch_base_for(raw_url.trim()).to_string();
-        let (outcome, reason) = match crate::producer::anchor::AnchorClient::new(base)
-            .authority_pubkey()
-        {
-            Ok(key) if ed25519_pem(&key.pubkey_hex).is_none() => (
+        let (outcome, reason) = match fetch_key(&base) {
+            Ok((pubkey_hex, _)) if ed25519_pem(&pubkey_hex).is_none() => (
                 "not_a_witness",
                 "answered with a key that is not a 32-byte Ed25519 key".to_string(),
             ),
-            Ok(key) => {
-                let presented = key.pubkey_hex.to_ascii_lowercase();
+            Ok((pubkey_hex, key_id)) => {
+                let presented = pubkey_hex.to_ascii_lowercase();
                 match &expected {
                     Some((want, source)) if *want != presented => (
                         "key_mismatch",
                         format!(
-                            "presents a different key than the one {source} (key id {})",
-                            key.key_id
+                            "presents a different key than the one {source} (key id {key_id})"
                         ),
                     ),
                     Some(_) => ("ok", "answers".to_string()),
@@ -338,12 +353,12 @@ pub fn refresh_witnesses(
                         "its key is not pinned over plain http; configure its public_key".to_string(),
                     ),
                     None => {
-                        tracing::info!(witness = %display_url(url), key_id = %key.key_id, "pinned the witness's key");
+                        tracing::info!(witness = %display_url(url), %key_id, "pinned the witness's key");
                         keys.insert(
                             url.clone(),
                             PinnedKey {
                                 pubkey_hex: presented,
-                                key_id: key.key_id,
+                                key_id: key_id.clone(),
                                 pinned_at: chrono::Utc::now().to_rfc3339(),
                             },
                         );
@@ -947,6 +962,15 @@ mod tests {
                 assert!(reach.reason.contains("rolled back"), "{}", reach.reason);
             }
         }
+    }
+
+    /// A witness never sends this plugin elsewhere: a redirect is an answer
+    /// to report, not to follow.
+    #[test]
+    fn a_redirect_is_not_followed() {
+        let w = serve_seq(vec![("302 Found\r\nLocation: http://169.254.169.254/", String::new())]);
+        let refused = fetch_key(&w).unwrap_err();
+        assert!(matches!(refused, crate::producer::anchor::AnchorError::Status { status: 302, .. }), "{refused}");
     }
 
     #[test]

@@ -100,6 +100,9 @@ pub fn console_key(name: &str) -> Option<String> {
     })
 }
 
+/// mesh's config file is read only up to this size.
+const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+
 /// mesh's config file: the one `MESH_LLM_CONFIG` names, or the default.
 fn host_config_path() -> Option<std::path::PathBuf> {
     if let Some(path) = std::env::var_os("MESH_LLM_CONFIG") {
@@ -109,12 +112,46 @@ fn host_config_path() -> Option<std::path::PathBuf> {
     if cfg!(test) {
         return None;
     }
+    warn_if_host_uses_another_config();
     let home = std::env::var_os("HOME").filter(|h| !h.is_empty())?;
     Some(
         std::path::Path::new(&home)
             .join(".mesh-llm")
             .join("config.toml"),
     )
+}
+
+/// mesh-llm started with `--config <path>` reads that file, but does not tell
+/// this plugin; without `MESH_LLM_CONFIG` the plugin reads the default file and
+/// the console's settings do not reach it. Said once (Linux: from the host's
+/// command line).
+fn warn_if_host_uses_another_config() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // `/proc/self/stat` is "pid (comm) state ppid ...".
+        let host_cmdline = || -> Option<Vec<u8>> {
+            let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+            let ppid = stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.to_string();
+            std::fs::read(format!("/proc/{ppid}/cmdline")).ok()
+        };
+        let Some(raw) = host_cmdline() else {
+            return;
+        };
+        if host_args_name_a_config(&raw) {
+            tracing::warn!(
+                "mesh-llm was started with --config, but MESH_LLM_CONFIG is not set for this plugin: \
+                 the console's plugin settings are read from ~/.mesh-llm/config.toml, not that file. \
+                 Set MESH_LLM_CONFIG to the same path"
+            );
+        }
+    });
+}
+
+/// Whether a NUL-separated command line passes `--config`.
+fn host_args_name_a_config(cmdline: &[u8]) -> bool {
+    cmdline
+        .split(|b| *b == 0)
+        .any(|arg| arg == b"--config" || arg.starts_with(b"--config="))
 }
 
 /// The settings saved in the console for this plugin, from mesh's config
@@ -145,7 +182,12 @@ fn console_settings() -> std::collections::BTreeMap<String, String> {
             return values.clone();
         }
     }
+    let too_big = meta.as_ref().is_some_and(|m| m.len() > MAX_CONFIG_BYTES);
     let parsed = match std::fs::read_to_string(&path) {
+        Ok(_) if too_big => Err(format!(
+            "{} is larger than {MAX_CONFIG_BYTES} bytes; not read",
+            path.display()
+        )),
         Ok(raw) => settings_from_config(&raw),
         // No config file: no console settings, nothing wrong.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
@@ -608,5 +650,12 @@ witness = [
         let (fine, problem) = next_values(Some(&first), Ok(good.clone()));
         assert_eq!(fine, good);
         assert!(problem.is_none());
+    }
+
+    #[test]
+    fn the_hosts_config_flag_is_seen_in_its_command_line() {
+        assert!(host_args_name_a_config(b"mesh-llm\0serve\0--config\0/etc/mesh.toml\0"));
+        assert!(host_args_name_a_config(b"mesh-llm\0--config=/etc/mesh.toml\0"));
+        assert!(!host_args_name_a_config(b"mesh-llm\0serve\0--console\03131\0"));
     }
 }
