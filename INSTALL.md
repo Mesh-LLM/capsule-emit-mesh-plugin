@@ -173,6 +173,13 @@ node's environment to a JSON object mapping each peer's id to its raw Ed25519
 public key in hex. A node writes its own id to `<data dir>/self-peer-id` and
 its public key to `<data dir>/keys/node-key.pub.pem`.
 
+**A client-only node (`mesh-llm client`) cannot be named there.** mesh-llm
+gives a client node a new peer id each time it starts, so no entry in
+`CAPSULES_PEER_KEYS` stays true, and its pushed records are refused by every
+peer. Its own records are still sealed and kept on that node. A node started
+with `mesh-llm serve` keeps its id across restarts of the same home directory
+and can be named.
+
 ## Where the records are kept
 
 Under the plugin's data directory: `CAPSULES_DATA_DIR` if set in the

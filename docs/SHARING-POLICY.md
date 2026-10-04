@@ -55,7 +55,9 @@ mesh-llm has told it who the other side is. A pushed record is received and
 checked in-process (the sender's announced key, the signature, the claims, and
 a bundle's proof and checkpoint) and held only if every check passes; anything
 else gets a signed refusal. The sender's key must be configured
-(`CAPSULES_PEER_KEYS`, see INSTALL.md): nodes do not exchange keys yet.
+(`CAPSULES_PEER_KEYS`, see INSTALL.md): nodes do not exchange keys yet. That
+map is keyed by peer id, and a client-only node gets a new id each time it
+starts, so a push from a client node is never accepted (INSTALL.md says more).
 
 ## Reading records back (`share_history_segments`)
 
