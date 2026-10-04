@@ -28,6 +28,9 @@ export type RecordsStatus = {
   /** Why mesh's config file is not being read as written: the sharing
    *  switches are then its last values that parsed, or all off. */
   config_problem?: string | null
+  /** Sharing switches set to a value the plugin does not know; each is
+   *  read as off. */
+  setting_problems?: string[]
   /** Whether this plugin keeps the exchange text it is handed, and for how
    *  long. Absent from a plugin that predates it. */
   exchange_text?: { kept: boolean; retention_days: number }

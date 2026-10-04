@@ -59,7 +59,14 @@ pub fn record_at_completion_is_off() -> bool {
 }
 
 fn record_at_completion_is_off_for(raw: Option<&str>) -> bool {
-    raw.map(str::trim) != Some("counterparty")
+    normalized(raw).as_deref() != Some("counterparty")
+}
+
+/// A switch's value as the operator meant it: trimmed and lower-cased;
+/// empty is no value.
+fn normalized(raw: Option<&str>) -> Option<String> {
+    raw.map(|r| r.trim().to_ascii_lowercase())
+        .filter(|r| !r.is_empty())
 }
 
 /// This process's own env var for `share_history_segments`.
@@ -73,12 +80,34 @@ pub fn history_segments() -> &'static str {
 }
 
 fn history_segments_for(raw: Option<&str>) -> &'static str {
-    match raw {
-        Some("off") => "off",
+    match normalized(raw).as_deref() {
+        None | Some("prospective") => "prospective",
         Some("counterparties") => "counterparties",
         Some("peers") => "peers",
-        _ => "prospective",
+        // "off", and anything this plugin does not know: never wider than
+        // the operator could have meant (`setting_problems` says so).
+        Some(_) => "off",
     }
+}
+
+/// The sharing switches set to a value this plugin does not know, each read
+/// as off: for the page, so a typo is seen rather than silently obeyed.
+pub fn setting_problems() -> Vec<String> {
+    let known: [(&str, &[&str]); 4] = [
+        (ENV_RECORD_AT_COMPLETION, &["counterparty", "off"]),
+        (ENV_HISTORY_SEGMENTS, &["counterparties", "prospective", "peers", "off"]),
+        (ENV_ADJUDICATIONS, &["deliver_to_subjects", "off"]),
+        (crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS, &["on", "off", "1", "0", "true", "false", "yes", "no"]),
+    ];
+    known
+        .iter()
+        .filter_map(|(env, values)| {
+            let value = normalized(crate::settings::var(env).ok().as_deref())?;
+            (!values.contains(&value.as_str())).then(|| {
+                format!("{env} is {value:?}, which is not one of {}; it is read as off", values.join(", "))
+            })
+        })
+        .collect()
 }
 
 /// This process's own env var for `share_adjudications`.
@@ -91,7 +120,7 @@ pub fn adjudications_delivered() -> bool {
 }
 
 fn adjudications_delivered_for(raw: Option<&str>) -> bool {
-    raw.map(str::trim) == Some("deliver_to_subjects")
+    normalized(raw).as_deref() == Some("deliver_to_subjects")
 }
 
 const CATEGORY_ID: &str = "share";
@@ -392,6 +421,19 @@ mod tests {
         assert!(record_at_completion_is_off_for(None));
         assert!(record_at_completion_is_off_for(Some("off")));
         assert!(record_at_completion_is_off_for(Some("garbage")));
+    }
+
+    /// A typo, odd case, stray spaces or an empty value never widen who may
+    /// read records back.
+    #[test]
+    fn history_segments_never_widen_on_a_typo() {
+        assert_eq!(history_segments_for(None), "prospective");
+        assert_eq!(history_segments_for(Some("")), "prospective", "empty is unset");
+        assert_eq!(history_segments_for(Some("Off ")), "off");
+        assert_eq!(history_segments_for(Some(" COUNTERPARTIES")), "counterparties");
+        assert_eq!(history_segments_for(Some("counterparty")), "off", "unknown is off");
+        assert_eq!(history_segments_for(Some("peeers")), "off");
+        assert!(!record_at_completion_is_off_for(Some(" Counterparty")));
     }
 
     #[test]

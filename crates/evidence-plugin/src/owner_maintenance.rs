@@ -470,6 +470,9 @@ impl Maintenance {
             // Why mesh's config file is not being read as written, when it
             // is not: the switches are then its last good values, or all off.
             "config_problem": crate::settings::config_problem(),
+            // Sharing switches set to a value this plugin does not know (each
+            // read as off).
+            "setting_problems": crate::share_policy::setting_problems(),
             // Whether this plugin keeps exchange text it is handed
             // (`exchange_text`), and for how long: the page says so.
             "exchange_text": {

@@ -380,16 +380,14 @@ pub fn var(name: &str) -> Result<String, VarError> {
     let Some(legacy) = legacy_name(name) else {
         return std::env::var(name);
     };
-    let current = match std::env::var(name) {
+    // An empty value is no value: `export X=` never overrides the console.
+    let set = |n: &str| match std::env::var(n) {
+        Ok(value) if value.trim().is_empty() => None,
         Ok(value) => Some(Ok(value)),
         Err(VarError::NotPresent) => None,
         Err(error) => Some(Err(error)),
     };
-    let old = match std::env::var(&legacy) {
-        Ok(value) => Some(Ok(value)),
-        Err(VarError::NotPresent) => None,
-        Err(error) => Some(Err(error)),
-    };
+    let (current, old) = (set(name), set(&legacy));
     match pick(current, old) {
         Some((value, source)) => {
             log_once(name, &legacy, source);
@@ -404,7 +402,8 @@ pub fn var_os(name: &str) -> Option<OsString> {
     let Some(legacy) = legacy_name(name) else {
         return std::env::var_os(name);
     };
-    match pick(std::env::var_os(name), std::env::var_os(&legacy)) {
+    let set = |n: &str| std::env::var_os(n).filter(|v| !v.to_string_lossy().trim().is_empty());
+    match pick(set(name), set(&legacy)) {
         Some((value, source)) => {
             log_once(name, &legacy, source);
             Some(value)
@@ -680,5 +679,15 @@ witness = [
         assert!(!host_args_name_a_config(
             b"mesh-llm\0serve\0--console\0port\0"
         ));
+    }
+
+    #[test]
+    fn an_empty_value_is_no_value() {
+        let name = "CAPSULES_TEST_SETTINGS_EMPTY";
+        std::env::set_var(name, "  ");
+        assert_eq!(var(name), Err(VarError::NotPresent));
+        assert_eq!(var_os(name), None);
+        std::env::set_var("CAPSULE_EMIT_MESH_TEST_SETTINGS_EMPTY", "old");
+        assert_eq!(var(name).as_deref(), Ok("old"), "an empty new name does not hide the old one");
     }
 }

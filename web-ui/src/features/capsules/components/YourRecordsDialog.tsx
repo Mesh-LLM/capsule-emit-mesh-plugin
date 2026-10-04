@@ -103,6 +103,11 @@ export function YourRecordsDialog({
             <h3 className="type-label text-fg-faint" id="what-you-share-title">
               What you share
             </h3>
+            {(status?.setting_problems ?? []).map((problem) => (
+              <p className="text-[var(--color-bad-text)]" data-testid="setting-problem" key={problem} role="status">
+                {problem}
+              </p>
+            ))}
             {status?.config_problem ? (
               <p className="text-[var(--color-bad-text)]" data-testid="config-problem" role="status">
                 {status.config_problem}
