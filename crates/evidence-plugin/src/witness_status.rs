@@ -91,7 +91,11 @@ fn load_keys(ledger_dir: &Path) -> Result<BTreeMap<String, PinnedKey>, String> {
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
     serde_json::from_str::<BTreeMap<String, PinnedKey>>(&text)
-        .map(|keys| keys.into_iter().map(|(url, key)| (normalize_url(&url), key)).collect())
+        .map(|keys| {
+            keys.into_iter()
+                .map(|(url, key)| (normalize_url(&url), key))
+                .collect()
+        })
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -118,7 +122,10 @@ pub(crate) fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 fn save_keys(ledger_dir: &Path, keys: &BTreeMap<String, PinnedKey>) -> anyhow::Result<()> {
-    write_synced(&ledger_dir.join(KEYS_FILE), &serde_json::to_vec_pretty(keys)?)?;
+    write_synced(
+        &ledger_dir.join(KEYS_FILE),
+        &serde_json::to_vec_pretty(keys)?,
+    )?;
     Ok(())
 }
 
@@ -192,7 +199,10 @@ fn get_json(url: &str) -> Result<Value, crate::producer::anchor::AnchorError> {
     match agent.get(url).call() {
         Ok(response) => {
             if (300..400).contains(&response.status()) {
-                return Err(AnchorError::Status { status: response.status(), body: String::new() });
+                return Err(AnchorError::Status {
+                    status: response.status(),
+                    body: String::new(),
+                });
             }
             let mut body = String::new();
             response
@@ -202,27 +212,50 @@ fn get_json(url: &str) -> Result<Value, crate::producer::anchor::AnchorError> {
                 .map_err(|e| AnchorError::Transport(e.to_string()))?;
             serde_json::from_str(&body).map_err(|e| AnchorError::Decode(e.to_string()))
         }
-        Err(ureq::Error::Status(status, _)) => Err(AnchorError::Status { status, body: String::new() }),
+        Err(ureq::Error::Status(status, _)) => Err(AnchorError::Status {
+            status,
+            body: String::new(),
+        }),
         Err(error) => Err(AnchorError::Transport(error.to_string())),
     }
 }
 
 /// The key a witness presents: its raw Ed25519 key in hex, and its key id.
 fn fetch_key(base: &str) -> Result<(String, String), crate::producer::anchor::AnchorError> {
-    let body = get_json(&format!("{}/anchor/authority-pubkey", base.trim_end_matches('/')))?;
-    match (body.get("pubkey_hex").and_then(Value::as_str), body.get("key_id").and_then(Value::as_str)) {
+    let body = get_json(&format!(
+        "{}/anchor/authority-pubkey",
+        base.trim_end_matches('/')
+    ))?;
+    match (
+        body.get("pubkey_hex").and_then(Value::as_str),
+        body.get("key_id").and_then(Value::as_str),
+    ) {
         (Some(key), Some(id)) => Ok((key.to_string(), id.to_string())),
-        _ => Err(crate::producer::anchor::AnchorError::Decode("no pubkey_hex/key_id".into())),
+        _ => Err(crate::producer::anchor::AnchorError::Decode(
+            "no pubkey_hex/key_id".into(),
+        )),
     }
 }
 
 /// The last checkpoint a witness holds of `log_id`: its size and root.
 /// `None`: the witness holds none of this log.
-fn witness_latest(base: &str, log_id: &str) -> Result<Option<(u64, String)>, (&'static str, String)> {
-    match get_json(&format!("{}/checkpoints/{log_id}", base.trim_end_matches('/'))) {
-        Ok(held) => match (held.get("mmr_size").and_then(Value::as_u64), held.get("root").and_then(Value::as_str)) {
+fn witness_latest(
+    base: &str,
+    log_id: &str,
+) -> Result<Option<(u64, String)>, (&'static str, String)> {
+    match get_json(&format!(
+        "{}/checkpoints/{log_id}",
+        base.trim_end_matches('/')
+    )) {
+        Ok(held) => match (
+            held.get("mmr_size").and_then(Value::as_u64),
+            held.get("root").and_then(Value::as_str),
+        ) {
             (Some(size), Some(root)) => Ok(Some((size, root.to_string()))),
-            _ => Err(("not_a_witness", "answered, but not as a witness".to_string())),
+            _ => Err((
+                "not_a_witness",
+                "answered, but not as a witness".to_string(),
+            )),
         },
         Err(crate::producer::anchor::AnchorError::Status { status: 404, .. }) => Ok(None),
         Err(error) => Err(classify(&error)),
@@ -235,7 +268,10 @@ fn local_holds(ledger_dir: &Path, size: u64, root: &str) -> bool {
         .unwrap_or_default()
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
-        .any(|cp| cp.get("mmr_size").and_then(Value::as_u64) == Some(size) && cp.get("root").and_then(Value::as_str) == Some(root))
+        .any(|cp| {
+            cp.get("mmr_size").and_then(Value::as_u64) == Some(size)
+                && cp.get("root").and_then(Value::as_str) == Some(root)
+        })
 }
 
 /// The latest checkpoint line, if any.
@@ -259,7 +295,13 @@ fn holds_latest_checked(latest: Option<&Value>, url: &str, key_hex: &str) -> boo
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|w| w.get("ts_url").and_then(Value::as_str).map(normalize_url).as_deref() == Some(url))
+        .filter(|w| {
+            w.get("ts_url")
+                .and_then(Value::as_str)
+                .map(normalize_url)
+                .as_deref()
+                == Some(url)
+        })
         .any(|w| check_receipt(cp, w, Some(key_hex)) == Check::Checked)
 }
 
@@ -339,9 +381,7 @@ pub fn refresh_witnesses(
                 match &expected {
                     Some((want, source)) if *want != presented => (
                         "key_mismatch",
-                        format!(
-                            "presents a different key than the one {source} (key id {key_id})"
-                        ),
+                        format!("presents a different key than the one {source} (key id {key_id})"),
                     ),
                     Some(_) => ("ok", "answers".to_string()),
                     None if !keys_readable => (
@@ -350,7 +390,8 @@ pub fn refresh_witnesses(
                     ),
                     None if !url.starts_with("https://") => (
                         "insecure",
-                        "its key is not pinned over plain http; configure its public_key".to_string(),
+                        "its key is not pinned over plain http; configure its public_key"
+                            .to_string(),
                     ),
                     None => {
                         tracing::info!(witness = %display_url(url), %key_id, "pinned the witness's key");
@@ -408,7 +449,9 @@ pub fn refresh_witnesses(
     if reach_changed {
         let written = serde_json::to_vec_pretty(&reach)
             .map_err(anyhow::Error::from)
-            .and_then(|bytes| write_synced(&ledger_dir.join(REACH_FILE), &bytes).map_err(Into::into));
+            .and_then(|bytes| {
+                write_synced(&ledger_dir.join(REACH_FILE), &bytes).map_err(Into::into)
+            });
         if let Err(err) = written {
             tracing::warn!(%err, "could not save the witness contact record");
         }
@@ -631,7 +674,10 @@ pub fn annotate(
         .collect();
     // A key given for a URL that is not in the witness list matches nothing:
     // most often the same witness written another way.
-    for url in configured_keys.keys().filter(|url| !configured.contains(url)) {
+    for url in configured_keys
+        .keys()
+        .filter(|url| !configured.contains(url))
+    {
         tracing::warn!(witness = %display_url(url), "a public key is configured for a URL that is not in the witness list");
         rows.push(json!({
             "name": witness_name(url),
@@ -874,7 +920,12 @@ mod tests {
         let swapped = serve_once("200 OK", other);
         let failing = serve_once("503 Service Unavailable", "{}".to_string());
         let given = BTreeMap::from([(swapped.clone(), fixture::PUBKEY_HEX.to_string())]);
-        refresh_witnesses(dir.path(), &[swapped.clone(), failing.clone()], &given, None);
+        refresh_witnesses(
+            dir.path(),
+            &[swapped.clone(), failing.clone()],
+            &given,
+            None,
+        );
         let reach = load_reach(dir.path());
         assert_eq!(reach[&swapped].outcome, "key_mismatch");
         assert!(
@@ -901,7 +952,9 @@ mod tests {
         let url = format!("http://{}", listener.local_addr().unwrap());
         std::thread::spawn(move || {
             for (status, body) in answers {
-                let Ok((mut stream, _)) = listener.accept() else { return };
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
                 let mut buf = [0u8; 2048];
                 let _ = stream.read(&mut buf);
                 let _ = write!(
@@ -927,16 +980,36 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = json!({"pubkey_hex": fixture::PUBKEY_HEX, "key_id": "t"}).to_string();
         let w = serve_seq(vec![("200 OK", key)]);
-        std::fs::write(dir.path().join("checkpoints.jsonl"), format!("{}\n", held_line_from(&w))).unwrap();
+        std::fs::write(
+            dir.path().join("checkpoints.jsonl"),
+            format!("{}\n", held_line_from(&w)),
+        )
+        .unwrap();
         let given = BTreeMap::from([(w.clone(), fixture::PUBKEY_HEX.to_string())]);
         refresh_witnesses(dir.path(), std::slice::from_ref(&w), &given, None);
-        assert_eq!(load_reach(dir.path())[&normalize_url(&w)].outcome, "ok", "contacted once at start");
+        assert_eq!(
+            load_reach(dir.path())[&normalize_url(&w)].outcome,
+            "ok",
+            "contacted once at start"
+        );
         // The server is gone now; a second contact would read as refused.
         refresh_witnesses(dir.path(), std::slice::from_ref(&w), &given, None);
-        assert_eq!(load_reach(dir.path())[&normalize_url(&w)].outcome, "ok", "not contacted again");
+        assert_eq!(
+            load_reach(dir.path())[&normalize_url(&w)].outcome,
+            "ok",
+            "not contacted again"
+        );
         let latest = latest_line(dir.path());
-        assert!(holds_latest_checked(latest.as_ref(), &normalize_url(&w), fixture::PUBKEY_HEX));
-        assert!(!holds_latest_checked(latest.as_ref(), &normalize_url(&w), &"11".repeat(32)));
+        assert!(holds_latest_checked(
+            latest.as_ref(),
+            &normalize_url(&w),
+            fixture::PUBKEY_HEX
+        ));
+        assert!(!holds_latest_checked(
+            latest.as_ref(),
+            &normalize_url(&w),
+            &"11".repeat(32)
+        ));
     }
 
     /// The witness holds a checkpoint of this log that the log no longer
@@ -955,7 +1028,12 @@ mod tests {
             line["witnesses"] = json!([]);
             std::fs::write(dir.path().join("checkpoints.jsonl"), format!("{line}\n")).unwrap();
             let given = BTreeMap::from([(w.clone(), fixture::PUBKEY_HEX.to_string())]);
-            refresh_witnesses(dir.path(), std::slice::from_ref(&w), &given, Some("capsules/abc"));
+            refresh_witnesses(
+                dir.path(),
+                std::slice::from_ref(&w),
+                &given,
+                Some("capsules/abc"),
+            );
             let reach = &load_reach(dir.path())[&normalize_url(&w)];
             assert_eq!(reach.outcome, expected, "{}", reach.reason);
             if expected == "diverged" {
@@ -968,9 +1046,18 @@ mod tests {
     /// to report, not to follow.
     #[test]
     fn a_redirect_is_not_followed() {
-        let w = serve_seq(vec![("302 Found\r\nLocation: http://169.254.169.254/", String::new())]);
+        let w = serve_seq(vec![(
+            "302 Found\r\nLocation: http://169.254.169.254/",
+            String::new(),
+        )]);
         let refused = fetch_key(&w).unwrap_err();
-        assert!(matches!(refused, crate::producer::anchor::AnchorError::Status { status: 302, .. }), "{refused}");
+        assert!(
+            matches!(
+                refused,
+                crate::producer::anchor::AnchorError::Status { status: 302, .. }
+            ),
+            "{refused}"
+        );
     }
 
     #[test]

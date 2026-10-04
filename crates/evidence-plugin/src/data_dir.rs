@@ -151,7 +151,11 @@ fn other_holders(path: &Path) -> Vec<u32> {
     };
     let mut holders = Vec::new();
     for entry in procs.flatten() {
-        let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
             continue;
         };
         if pid == me {
@@ -217,7 +221,10 @@ pub struct DataDirLock {
 /// not: `Ok(None)` when another process holds it, with its pid.
 fn take(path: &Path, label: &str) -> anyhow::Result<Result<File, String>> {
     if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
-        bail!("{} is a symbolic link; refusing to lock through it", path.display());
+        bail!(
+            "{} is a symbolic link; refusing to lock through it",
+            path.display()
+        );
     }
     let mut file = OpenOptions::new()
         .read(true)
@@ -263,11 +270,15 @@ fn take(path: &Path, label: &str) -> anyhow::Result<Result<File, String>> {
 /// itself is checked too (`check_no_other_writer`).
 pub fn lock(dir: &Path) -> anyhow::Result<DataDirLock> {
     std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-    let dir_lock = take(&dir.join(LOCK_FILE), &format!("data directory {}", dir.display()))?
-        .map_err(anyhow::Error::msg)?;
+    let dir_lock = take(
+        &dir.join(LOCK_FILE),
+        &format!("data directory {}", dir.display()),
+    )?
+    .map_err(anyhow::Error::msg)?;
     let ledger = dir.join("ledger");
     std::fs::create_dir_all(&ledger).with_context(|| format!("create {}", ledger.display()))?;
-    let real_ledger = std::fs::canonicalize(&ledger).with_context(|| format!("resolve {}", ledger.display()))?;
+    let real_ledger =
+        std::fs::canonicalize(&ledger).with_context(|| format!("resolve {}", ledger.display()))?;
     let ledger_lock = take(
         &real_ledger.join(LEDGER_LOCK_FILE),
         &format!("ledger {}", real_ledger.display()),
@@ -341,7 +352,9 @@ mod tests {
     #[test]
     fn a_fresh_node_uses_the_new_name() {
         let parent = tmp("old-fresh");
-        assert!(existing_old_default(&parent.join(APP_DIR), false).unwrap().is_none());
+        assert!(existing_old_default(&parent.join(APP_DIR), false)
+            .unwrap()
+            .is_none());
     }
 
     /// An upgraded node keeps its directory where it is: nothing moves, so a
@@ -351,7 +364,10 @@ mod tests {
         let (old, new) = old_node("old-in-place", 3);
         let key = std::fs::read(old.join(NODE_KEY)).unwrap();
         let ledger = std::fs::read(old.join(LEDGER)).unwrap();
-        assert_eq!(existing_old_default(&new, false).unwrap(), Some(old.clone()));
+        assert_eq!(
+            existing_old_default(&new, false).unwrap(),
+            Some(old.clone())
+        );
         assert!(!new.exists(), "nothing created under the new name");
         assert_eq!(std::fs::read(old.join(NODE_KEY)).unwrap(), key);
         assert_eq!(std::fs::read(old.join(LEDGER)).unwrap(), ledger);
@@ -381,7 +397,10 @@ mod tests {
         let (old, _new) = old_node("old-held", 1);
         let mut holder = std::process::Command::new("sh")
             .arg("-c")
-            .arg(format!("exec 3>>'{}'; exec sleep 30", old.join(LEDGER).display()))
+            .arg(format!(
+                "exec 3>>'{}'; exec sleep 30",
+                old.join(LEDGER).display()
+            ))
             .spawn()
             .unwrap();
         let mut refused = None;
@@ -395,7 +414,10 @@ mod tests {
         let _ = holder.kill();
         let _ = holder.wait();
         let message = refused.expect("refused while another process held the ledger");
-        assert!(message.contains(&format!("pid {}", holder.id())), "{message}");
+        assert!(
+            message.contains(&format!("pid {}", holder.id())),
+            "{message}"
+        );
         assert!(check_no_other_writer(&old).is_ok(), "free once it let go");
     }
 
@@ -411,7 +433,10 @@ mod tests {
         let _held = lock(&a).expect("the first");
         let message = lock(&b).err().expect("the second refused").to_string();
         assert!(message.contains("ledger"), "{message}");
-        assert!(message.contains(&format!("pid {}", std::process::id())), "{message}");
+        assert!(
+            message.contains(&format!("pid {}", std::process::id())),
+            "{message}"
+        );
     }
 
     #[cfg(unix)]
@@ -422,7 +447,11 @@ mod tests {
         std::fs::write(&elsewhere, "keep me").unwrap();
         std::os::unix::fs::symlink(&elsewhere, dir.join(LOCK_FILE)).unwrap();
         assert!(lock(&dir).is_err());
-        assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "keep me", "never truncated through the link");
+        assert_eq!(
+            std::fs::read_to_string(&elsewhere).unwrap(),
+            "keep me",
+            "never truncated through the link"
+        );
     }
 
     fn tmp(label: &str) -> PathBuf {

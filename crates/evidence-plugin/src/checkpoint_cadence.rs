@@ -111,8 +111,14 @@ pub fn active_witness_urls() -> (Vec<String>, bool) {
     let saved = witness_urls();
     match ACTIVE_WITNESSES.get() {
         Some(active) => {
-            let differs = active.iter().map(|u| crate::witness_status::normalize_url(u)).collect::<Vec<_>>()
-                != saved.iter().map(|u| crate::witness_status::normalize_url(u)).collect::<Vec<_>>();
+            let differs = active
+                .iter()
+                .map(|u| crate::witness_status::normalize_url(u))
+                .collect::<Vec<_>>()
+                != saved
+                    .iter()
+                    .map(|u| crate::witness_status::normalize_url(u))
+                    .collect::<Vec<_>>();
             (active.clone(), differs)
         }
         None => (saved, false),
@@ -477,8 +483,17 @@ mod tests {
         );
         assert!(CheckpointCadenceConfig::default().witness_urls.is_empty());
         let dir = tempfile::tempdir().unwrap();
-        crate::witness_status::refresh_witnesses(dir.path(), &witness_urls_from(None), &Default::default(), None);
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "nothing contacted, nothing written");
+        crate::witness_status::refresh_witnesses(
+            dir.path(),
+            &witness_urls_from(None),
+            &Default::default(),
+            None,
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            0,
+            "nothing contacted, nothing written"
+        );
     }
 
     #[test]

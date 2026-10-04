@@ -81,7 +81,10 @@ impl Host {
         }))
         .await;
         let reply = host.recv(Duration::from_secs(10)).await.unwrap();
-        assert!(matches!(reply.payload, Some(Payload::InitializeResponse(_))));
+        assert!(matches!(
+            reply.payload,
+            Some(Payload::InitializeResponse(_))
+        ));
         host
     }
 
@@ -102,7 +105,10 @@ impl Host {
     }
 
     async fn recv(&mut self, wait: Duration) -> Option<proto::Envelope> {
-        timeout(wait, read_envelope(&mut self.stream)).await.ok()?.ok()
+        timeout(wait, read_envelope(&mut self.stream))
+            .await
+            .ok()?
+            .ok()
     }
 
     /// Everything the plugin sends that would reach a peer (or the routing
@@ -115,10 +121,16 @@ impl Host {
                 break;
             };
             match envelope.payload {
-                Some(Payload::OpenMeshStreamRequest(r)) => seen.push(format!("open_mesh_stream {r:?}")),
-                Some(Payload::ChannelMessage(m)) => seen.push(format!("channel_message {}", m.channel)),
+                Some(Payload::OpenMeshStreamRequest(r)) => {
+                    seen.push(format!("open_mesh_stream {r:?}"))
+                }
+                Some(Payload::ChannelMessage(m)) => {
+                    seen.push(format!("channel_message {}", m.channel))
+                }
                 Some(Payload::BulkTransferMessage(_)) => seen.push("bulk_transfer".into()),
-                Some(Payload::PeerBlockRequest(r)) => seen.push(format!("peer_block {}", r.peer_id)),
+                Some(Payload::PeerBlockRequest(r)) => {
+                    seen.push(format!("peer_block {}", r.peer_id))
+                }
                 _ => {}
             }
         }
@@ -159,7 +171,9 @@ impl Host {
 async fn a_default_node_sends_nothing_to_peers_idle_or_serving() {
     let mut host = Host::spawn(&[]).await;
     assert!(
-        host.peer_bound_within(Duration::from_secs(5)).await.is_empty(),
+        host.peer_bound_within(Duration::from_secs(5))
+            .await
+            .is_empty(),
         "idle"
     );
     host.completed_exchange().await;
@@ -176,7 +190,8 @@ async fn with_the_push_turned_on_the_counterparty_is_contacted() {
     host.completed_exchange().await;
     let sent = host.peer_bound_within(Duration::from_secs(8)).await;
     assert!(
-        sent.iter().any(|s| s.starts_with("open_mesh_stream") && s.contains(SERVING_PEER)),
+        sent.iter()
+            .any(|s| s.starts_with("open_mesh_stream") && s.contains(SERVING_PEER)),
         "expected a push to the counterparty, saw {sent:?}"
     );
     host.stop().await;

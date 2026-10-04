@@ -237,7 +237,10 @@ pub struct ContextHost<'a, 'b>(pub &'a mut mesh_llm_plugin::PluginContext<'b>);
 
 impl BlockHost for ContextHost<'_, '_> {
     async fn block(&mut self, peer_id: &str, reason_json: String) -> Result<String, Refusal> {
-        use mesh_llm_plugin::proto::{self, peer_block_request::{Change, Length}};
+        use mesh_llm_plugin::proto::{
+            self,
+            peer_block_request::{Change, Length},
+        };
         if !self
             .0
             .host_supports(mesh_llm_plugin::host_capabilities::PEER_BLOCKS)
@@ -694,8 +697,10 @@ mod tests {
 
     /// The operator's own unblock (or block), as the host publishes it.
     fn host_publishes(capsules: &CapsuleState, change: &str, peer: &str, at_ms: u64) {
-        let choice = json!({"change": change, "peer": peer, "at_ms": at_ms, "requested_by": "operator"});
-        crate::peer_blocks_seen::record(capsules.ledger_dir(), choice.to_string().as_bytes()).unwrap();
+        let choice =
+            json!({"change": change, "peer": peer, "at_ms": at_ms, "requested_by": "operator"});
+        crate::peer_blocks_seen::record(capsules.ledger_dir(), choice.to_string().as_bytes())
+            .unwrap();
     }
 
     /// The record ids the rule's blocks sealed, in order.
@@ -807,7 +812,10 @@ mod tests {
             read_cited(capsules.ledger_dir()),
             [v1.clone(), v2.clone()].into()
         );
-        assert_eq!(crate::peer_blocks_seen::blocked_at(capsules.ledger_dir(), 2000), ["p"]);
+        assert_eq!(
+            crate::peer_blocks_seen::blocked_at(capsules.ledger_dir(), 2000),
+            ["p"]
+        );
 
         // The operator undoes it.
         host_publishes(&capsules, "unblock", "p", 5000);
@@ -860,19 +868,32 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let capsules = open(&dir);
         let mut host = FakeHost {
-            refuse: Some("plugin capsules may not request peer blocks: allow_peer_blocks is off".into()),
+            refuse: Some(
+                "plugin capsules may not request peer blocks: allow_peer_blocks is off".into(),
+            ),
             ..FakeHost::default()
         };
         let now = Utc::now();
         contradiction(&capsules, "g", &"1".repeat(64), "r1", true, now);
         contradiction(&capsules, "g", &"2".repeat(64), "r2", true, now);
         let outcomes = evaluate(&capsules, N2, &mut host, now).await;
-        assert!(matches!(&outcomes[..], [Outcome::Refused { peer_id, error }]
-            if peer_id == "g" && error.contains("allow_peer_blocks")));
-        assert!(read_cited(capsules.ledger_dir()).is_empty(), "nothing used up");
+        assert!(
+            matches!(&outcomes[..], [Outcome::Refused { peer_id, error }]
+            if peer_id == "g" && error.contains("allow_peer_blocks"))
+        );
+        assert!(
+            read_cited(capsules.ledger_dir()).is_empty(),
+            "nothing used up"
+        );
         assert!(sealed_ids(&capsules).is_empty(), "nothing sealed");
-        assert!(crate::peer_blocks_seen::blocked_now(capsules.ledger_dir()).is_empty(), "nothing blocked");
-        assert!(evaluate(&capsules, N2, &mut host, now).await.is_empty(), "not asked again within the hour");
+        assert!(
+            crate::peer_blocks_seen::blocked_now(capsules.ledger_dir()).is_empty(),
+            "nothing blocked"
+        );
+        assert!(
+            evaluate(&capsules, N2, &mut host, now).await.is_empty(),
+            "not asked again within the hour"
+        );
         assert_eq!(host.asked, ["g"]);
     }
 
@@ -901,7 +922,10 @@ mod tests {
             .await,
             vec![Outcome::NoHostPath]
         );
-        assert!(read_cited(capsules.ledger_dir()).is_empty(), "nothing blocked, so nothing is used up");
+        assert!(
+            read_cited(capsules.ledger_dir()).is_empty(),
+            "nothing blocked, so nothing is used up"
+        );
         assert!(sealed_ids(&capsules).is_empty());
     }
 
@@ -934,7 +958,13 @@ mod tests {
     fn the_cited_file_round_trips() {
         let dir = tempfile::tempdir().unwrap();
         assert!(read_cited(dir.path()).is_empty());
-        record_cited(dir.path(), Some("r1"), Some("ab"), &["a".into(), "b".into()]).unwrap();
+        record_cited(
+            dir.path(),
+            Some("r1"),
+            Some("ab"),
+            &["a".into(), "b".into()],
+        )
+        .unwrap();
         record_cited(dir.path(), None, None, &["c".into()]).unwrap();
         assert_eq!(
             read_cited(dir.path()),

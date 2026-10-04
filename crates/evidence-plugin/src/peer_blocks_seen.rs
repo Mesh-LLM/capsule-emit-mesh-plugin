@@ -51,7 +51,10 @@ pub fn record(ledger_dir: &Path, choice_json: &[u8]) -> anyhow::Result<Choice> {
     );
     let mut seen = load(ledger_dir);
     let peer = choice.peer.to_ascii_lowercase();
-    if seen.get(&peer).is_some_and(|known| known.at_ms > choice.at_ms) {
+    if seen
+        .get(&peer)
+        .is_some_and(|known| known.at_ms > choice.at_ms)
+    {
         return Ok(choice);
     }
     seen.insert(peer, choice.clone());
@@ -85,7 +88,8 @@ mod tests {
     use serde_json::json;
 
     fn choice(change: &str, peer: &str, at_ms: u64, until_ms: Option<u64>) -> Vec<u8> {
-        let mut c = json!({"change": change, "peer": peer, "at_ms": at_ms, "requested_by": "operator"});
+        let mut c =
+            json!({"change": change, "peer": peer, "at_ms": at_ms, "requested_by": "operator"});
         if let Some(until) = until_ms {
             c["until_ms"] = json!(until);
         }

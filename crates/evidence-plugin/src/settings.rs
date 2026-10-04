@@ -246,11 +246,15 @@ fn next_values(
         Err(error) => match previous {
             Some(last_good) => (
                 last_good.clone(),
-                Some(format!("{error}; using the last plugin settings that parsed")),
+                Some(format!(
+                    "{error}; using the last plugin settings that parsed"
+                )),
             ),
             None => (
                 narrowest(),
-                Some(format!("{error}; every sharing switch is off until it parses")),
+                Some(format!(
+                    "{error}; every sharing switch is off until it parses"
+                )),
             ),
         },
     }
@@ -592,7 +596,10 @@ name = "capsules"
 witness = ["https://a.example", " https://b.example ", ""]
 "#;
         assert_eq!(
-            settings_from_config(raw).unwrap().get("witness").map(String::as_str),
+            settings_from_config(raw)
+                .unwrap()
+                .get("witness")
+                .map(String::as_str),
             Some("https://a.example,https://b.example")
         );
     }
@@ -637,11 +644,21 @@ witness = [
         assert!(broken.is_err());
 
         let (kept, problem) = next_values(Some(&good), broken.clone());
-        assert_eq!(kept.get("share_history_segments").map(String::as_str), Some("counterparties"));
-        assert!(problem.unwrap().contains("last plugin settings that parsed"));
+        assert_eq!(
+            kept.get("share_history_segments").map(String::as_str),
+            Some("counterparties")
+        );
+        assert!(problem
+            .unwrap()
+            .contains("last plugin settings that parsed"));
 
         let (first, problem) = next_values(None, broken);
-        for key in ["share_record_at_completion", "share_history_segments", "share_adjudications", "adjudicate_differing_twins"] {
+        for key in [
+            "share_record_at_completion",
+            "share_history_segments",
+            "share_adjudications",
+            "adjudicate_differing_twins",
+        ] {
             assert_eq!(first.get(key).map(String::as_str), Some("off"), "{key}");
         }
         assert!(!first.contains_key("witness"), "no witness named");
@@ -654,8 +671,14 @@ witness = [
 
     #[test]
     fn the_hosts_config_flag_is_seen_in_its_command_line() {
-        assert!(host_args_name_a_config(b"mesh-llm\0serve\0--config\0/etc/mesh.toml\0"));
-        assert!(host_args_name_a_config(b"mesh-llm\0--config=/etc/mesh.toml\0"));
-        assert!(!host_args_name_a_config(b"mesh-llm\0serve\0--console\03131\0"));
+        assert!(host_args_name_a_config(
+            b"mesh-llm\0serve\0--config\0/etc/mesh.toml\0"
+        ));
+        assert!(host_args_name_a_config(
+            b"mesh-llm\0--config=/etc/mesh.toml\0"
+        ));
+        assert!(!host_args_name_a_config(
+            b"mesh-llm\0serve\0--console\0port\0"
+        ));
     }
 }

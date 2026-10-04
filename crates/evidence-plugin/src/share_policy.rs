@@ -322,13 +322,17 @@ mod tests {
             Some("\"off\"")
         );
         assert_eq!(
-            by_key(ADJUDICATE_DIFFERING_TWINS_KEY).default_json.as_deref(),
+            by_key(ADJUDICATE_DIFFERING_TWINS_KEY)
+                .default_json
+                .as_deref(),
             Some("\"off\"")
         );
         // Answering a request for a record is unchanged.
         assert_eq!(history_segments_for(None), "prospective");
         assert!(!adjudications_delivered_for(None));
-        assert!(!crate::referee::request::adjudicate_differing_twins_from(None));
+        assert!(!crate::referee::request::adjudicate_differing_twins_from(
+            None
+        ));
     }
 
     #[test]

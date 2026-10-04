@@ -17,6 +17,7 @@ mod ledger_fetch_bridge;
 mod lifecycle_channel;
 mod mesh_evidence_bridge;
 mod owner_maintenance;
+mod peer_blocks_seen;
 mod peer_keys;
 /// Not wired into `on_mesh_event` yet -- see the module doc for why
 /// (`mesh-llm-plugin = "0.75"` predates the `checkpoint` field this needs to
@@ -48,7 +49,6 @@ mod two_node_e2e;
 mod verdict_counts;
 mod web_ui_manifest;
 mod witness_status;
-mod peer_blocks_seen;
 
 use crate::producer::capsule::TokenUsage;
 use axum::{
