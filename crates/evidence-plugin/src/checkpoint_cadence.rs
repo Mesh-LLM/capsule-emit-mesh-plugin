@@ -567,5 +567,4 @@ mod tests {
         head.set(cp(3));
         assert_eq!(head.get().unwrap().mmr_size, 7);
     }
-
 }

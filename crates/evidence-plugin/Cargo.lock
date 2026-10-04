@@ -164,8 +164,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 [[package]]
 name = "capsule-emit"
 version = "0.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e84f1470177a6f8e4265f825ca173e34fd9dc3f5f4cddc6857658889d6e50b7"
+source = "git+https://github.com/action-state-group/capsule-emit?rev=fd740085ef846b4ceb679daf22b38f5963dd5ff2#fd740085ef846b4ceb679daf22b38f5963dd5ff2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

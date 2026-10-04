@@ -24,7 +24,8 @@
   proof and signature under the witness's key: the one configured, else one fetched once from that
   witness and kept, which the page labels "pinned on first contact, not configured". An
   unchecked or failing receipt is shown, with the reason, and never counted. A witness that does
-  not hold the latest checkpoint says why: timed out, refused, an HTTP error, or a different key.
+  not hold the latest checkpoint (or whose receipt for it does not check) says why: timed out,
+  refused, an HTTP error, or a different key.
 
 ### Fixed
 

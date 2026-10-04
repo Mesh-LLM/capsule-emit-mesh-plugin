@@ -132,22 +132,29 @@ fn classify(err: &crate::producer::anchor::AnchorError) -> (&'static str, String
     }
 }
 
-/// The URLs the latest checkpoint line carries a receipt from.
-fn latest_holders(ledger_dir: &Path) -> BTreeSet<String> {
+/// The latest checkpoint line, if any.
+fn latest_line(ledger_dir: &Path) -> Option<Value> {
     std::fs::read_to_string(ledger_dir.join("checkpoints.jsonl"))
-        .ok()
-        .and_then(|text| {
-            text.lines()
-                .rev()
-                .map(str::trim)
-                .find(|line| !line.is_empty())
-                .and_then(|line| serde_json::from_str::<Value>(line).ok())
-        })
-        .and_then(|cp| cp.get("witnesses").and_then(Value::as_array).cloned())
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|w| w.get("ts_url").and_then(Value::as_str).map(str::to_string))
-        .collect()
+        .ok()?
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .and_then(|line| serde_json::from_str::<Value>(line).ok())
+}
+
+/// Whether `url` holds the latest checkpoint with a receipt that checks
+/// under `key_hex`.
+fn holds_latest_checked(latest: Option<&Value>, url: &str, key_hex: &str) -> bool {
+    let Some(cp) = latest else {
+        return false;
+    };
+    cp.get("witnesses")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|w| w.get("ts_url").and_then(Value::as_str) == Some(url))
+        .any(|w| check_receipt(cp, w, Some(key_hex)) == Check::Checked)
 }
 
 /// Contact each named witness that needs it, to that witness only: one with
@@ -169,26 +176,39 @@ pub fn refresh_witnesses(
     }
     let mut keys = load_keys(ledger_dir);
     let mut reach = load_reach(ledger_dir);
-    let holders = latest_holders(ledger_dir);
+    let latest = latest_line(ledger_dir);
     let (mut keys_changed, mut reach_changed) = (false, false);
     for url in witness_urls {
         let expected = configured_keys
             .get(url)
             .map(|k| (k.clone(), "configured"))
-            .or_else(|| keys.get(url).map(|k| (k.pubkey_hex.clone(), "pinned on first contact")));
-        if expected.is_some() && holders.contains(url) {
+            .or_else(|| {
+                keys.get(url)
+                    .map(|k| (k.pubkey_hex.clone(), "pinned on first contact"))
+            });
+        // Holding the latest checkpoint with a receipt that checks: nothing
+        // to explain, so not contacted.
+        if expected
+            .as_ref()
+            .is_some_and(|(key, _)| holds_latest_checked(latest.as_ref(), url, key))
+        {
             continue;
         }
         {
             let mut tries = LAST_TRY.lock().unwrap_or_else(|e| e.into_inner());
             let tries = tries.get_or_insert_with(HashMap::new);
-            if tries.get(url).is_some_and(|at| at.elapsed() < CONTACT_EVERY) {
+            if tries
+                .get(url)
+                .is_some_and(|at| at.elapsed() < CONTACT_EVERY)
+            {
                 continue;
             }
             tries.insert(url.clone(), Instant::now());
         }
         let base = crate::producer::anchor::dispatch_base_for(url).to_string();
-        let (outcome, reason) = match crate::producer::anchor::AnchorClient::new(base).authority_pubkey() {
+        let (outcome, reason) = match crate::producer::anchor::AnchorClient::new(base)
+            .authority_pubkey()
+        {
             Ok(key) if ed25519_pem(&key.pubkey_hex).is_none() => (
                 "not_a_witness",
                 "answered with a key that is not a 32-byte Ed25519 key".to_string(),
@@ -198,7 +218,10 @@ pub fn refresh_witnesses(
                 match &expected {
                     Some((want, source)) if *want != presented => (
                         "key_mismatch",
-                        format!("presents a different key than the one {source} (key id {})", key.key_id),
+                        format!(
+                            "presents a different key than the one {source} (key id {})",
+                            key.key_id
+                        ),
                     ),
                     Some(_) => ("ok", "answers".to_string()),
                     None => {
@@ -635,19 +658,22 @@ mod tests {
         // Nothing listens on port 1: the connection is refused at once.
         let down = "http://127.0.0.1:1".to_string();
         let given = BTreeMap::from([(down.clone(), fixture::PUBKEY_HEX.to_string())]);
-        refresh_witnesses(dir.path(), &[down.clone()], &given);
-        assert!(!dir.path().join(KEYS_FILE).exists(), "a configured key is never fetched over");
+        refresh_witnesses(dir.path(), std::slice::from_ref(&down), &given);
+        assert!(
+            !dir.path().join(KEYS_FILE).exists(),
+            "a configured key is never fetched over"
+        );
         let reach = load_reach(dir.path());
         assert_eq!(reach[&down].outcome, "refused");
         let mut lines = vec![line(3, json!([]))];
-        let rows = annotate(&mut lines, &[down.clone()], &given, dir.path());
+        let rows = annotate(&mut lines, std::slice::from_ref(&down), &given, dir.path());
         assert_eq!(rows[0]["state"], json!("pending"));
         assert_eq!(rows[0]["problem"], json!("refused the connection"));
         assert_eq!(rows[0]["last_contact"]["outcome"], json!("refused"));
         // Contacted at most once a minute: a second call right away does not
         // contact it again (the record keeps its first time).
         let first = reach[&down].at.clone();
-        refresh_witnesses(dir.path(), &[down.clone()], &given);
+        refresh_witnesses(dir.path(), std::slice::from_ref(&down), &given);
         assert_eq!(load_reach(dir.path())[&down].at, first);
     }
 
@@ -680,22 +706,79 @@ mod tests {
         refresh_witnesses(dir.path(), &[swapped.clone(), failing.clone()], &given);
         let reach = load_reach(dir.path());
         assert_eq!(reach[&swapped].outcome, "key_mismatch");
-        assert!(reach[&swapped].reason.contains("different key than the one configured"), "{}", reach[&swapped].reason);
+        assert!(
+            reach[&swapped]
+                .reason
+                .contains("different key than the one configured"),
+            "{}",
+            reach[&swapped].reason
+        );
         assert!(reach[&swapped].reason.contains("other-id"));
         assert_eq!(reach[&failing].outcome, "http");
         assert_eq!(reach[&failing].reason, "answered HTTP 503");
-        assert!(!dir.path().join(KEYS_FILE).exists(), "nothing pinned from a failing witness");
+        assert!(
+            !dir.path().join(KEYS_FILE).exists(),
+            "nothing pinned from a failing witness"
+        );
+    }
+
+    /// A witness holding the latest checkpoint with a receipt that checks is
+    /// not contacted; the same witness whose receipt does not check under the
+    /// configured key is (so its row can say whether it changed keys).
+    #[test]
+    fn only_a_witness_with_something_to_explain_is_contacted() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("checkpoints.jsonl"),
+            format!("{}\n", fixture::held_line()),
+        )
+        .unwrap();
+        let w = fixture::WITNESS.to_string();
+        let good = BTreeMap::from([(w.clone(), fixture::PUBKEY_HEX.to_string())]);
+        refresh_witnesses(dir.path(), std::slice::from_ref(&w), &good);
+        assert!(!dir.path().join(REACH_FILE).exists(), "not contacted");
+        let latest = latest_line(dir.path());
+        assert!(holds_latest_checked(
+            latest.as_ref(),
+            &w,
+            fixture::PUBKEY_HEX
+        ));
+        assert!(!holds_latest_checked(latest.as_ref(), &w, &"11".repeat(32)));
     }
 
     #[test]
     fn client_errors_read_as_reasons() {
         use crate::producer::anchor::AnchorError;
         let words = |e: AnchorError| classify(&e).1;
-        assert_eq!(words(AnchorError::Status { status: 503, body: String::new() }), "answered HTTP 503");
-        assert_eq!(words(AnchorError::Transport("…: timed out reading response".into())), "did not answer in time");
-        assert_eq!(words(AnchorError::Transport("Connection refused (os error 111)".into())), "refused the connection");
-        assert_eq!(words(AnchorError::Transport("Dns Failed: failed to lookup address".into())), "its host name does not resolve");
-        assert_eq!(words(AnchorError::Decode("x".into())), "answered, but not as a witness");
+        assert_eq!(
+            words(AnchorError::Status {
+                status: 503,
+                body: String::new()
+            }),
+            "answered HTTP 503"
+        );
+        assert_eq!(
+            words(AnchorError::Transport(
+                "…: timed out reading response".into()
+            )),
+            "did not answer in time"
+        );
+        assert_eq!(
+            words(AnchorError::Transport(
+                "Connection refused (os error 111)".into()
+            )),
+            "refused the connection"
+        );
+        assert_eq!(
+            words(AnchorError::Transport(
+                "Dns Failed: failed to lookup address".into()
+            )),
+            "its host name does not resolve"
+        );
+        assert_eq!(
+            words(AnchorError::Decode("x".into())),
+            "answered, but not as a witness"
+        );
     }
 
     #[test]
