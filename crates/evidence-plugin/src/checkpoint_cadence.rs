@@ -338,6 +338,7 @@ pub fn spawn(
     let cfg = config_from_env();
     let witness_urls = cfg.witness_urls.clone();
     let _ = ACTIVE_WITNESSES.set(witness_urls.clone());
+    let log_id_for_witnesses = log_id.clone();
     let keys_dir = ledger_dir.clone();
     let interval = Duration::from_secs(cfg.cadence_seconds);
     let pad_bucket = cfg.pad_bucket;
@@ -402,8 +403,9 @@ pub fn spawn(
                     if !witness_urls.is_empty() {
                         let (dir, urls) = (keys_dir.clone(), witness_urls.clone());
                         let configured = witness_keys();
+                        let log_id = log_id_for_witnesses.clone();
                         let _ = tokio::task::spawn_blocking(move || {
-                            crate::witness_status::refresh_witnesses(&dir, &urls, &configured)
+                            crate::witness_status::refresh_witnesses(&dir, &urls, &configured, Some(&log_id))
                         })
                         .await;
                     }
@@ -475,7 +477,7 @@ mod tests {
         );
         assert!(CheckpointCadenceConfig::default().witness_urls.is_empty());
         let dir = tempfile::tempdir().unwrap();
-        crate::witness_status::refresh_witnesses(dir.path(), &witness_urls_from(None), &Default::default());
+        crate::witness_status::refresh_witnesses(dir.path(), &witness_urls_from(None), &Default::default(), None);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "nothing contacted, nothing written");
     }
 

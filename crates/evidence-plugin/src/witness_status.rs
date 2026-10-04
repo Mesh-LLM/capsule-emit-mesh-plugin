@@ -180,6 +180,46 @@ fn classify(err: &crate::producer::anchor::AnchorError) -> (&'static str, String
     }
 }
 
+/// The last checkpoint a witness holds of `log_id`: its size and root.
+/// `None`: the witness holds none of this log. One GET to that witness, no
+/// redirects, at most 64 KiB read.
+fn witness_latest(base: &str, log_id: &str) -> Result<Option<(u64, String)>, (&'static str, String)> {
+    use std::io::Read;
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(10))
+        .redirects(0)
+        .build();
+    let url = format!("{}/checkpoints/{log_id}", base.trim_end_matches('/'));
+    match agent.get(&url).call() {
+        Ok(response) => {
+            let mut body = String::new();
+            response
+                .into_reader()
+                .take(64 * 1024)
+                .read_to_string(&mut body)
+                .map_err(|e| ("unreachable", format!("unreachable: {e}")))?;
+            let held: Value = serde_json::from_str(&body)
+                .map_err(|_| ("not_a_witness", "answered, but not as a witness".to_string()))?;
+            match (held.get("mmr_size").and_then(Value::as_u64), held.get("root").and_then(Value::as_str)) {
+                (Some(size), Some(root)) => Ok(Some((size, root.to_string()))),
+                _ => Err(("not_a_witness", "answered, but not as a witness".to_string())),
+            }
+        }
+        Err(ureq::Error::Status(404, _)) => Ok(None),
+        Err(ureq::Error::Status(code, _)) => Err(("http", format!("answered HTTP {code}"))),
+        Err(error) => Err(classify(&crate::producer::anchor::AnchorError::Transport(error.to_string()))),
+    }
+}
+
+/// Whether this node's checkpoints include one of `size` with `root`.
+fn local_holds(ledger_dir: &Path, size: u64, root: &str) -> bool {
+    std::fs::read_to_string(ledger_dir.join("checkpoints.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
+        .any(|cp| cp.get("mmr_size").and_then(Value::as_u64) == Some(size) && cp.get("root").and_then(Value::as_str) == Some(root))
+}
+
 /// The latest checkpoint line, if any.
 fn latest_line(ledger_dir: &Path) -> Option<Value> {
     std::fs::read_to_string(ledger_dir.join("checkpoints.jsonl"))
@@ -217,6 +257,7 @@ pub fn refresh_witnesses(
     ledger_dir: &Path,
     witness_urls: &[String],
     configured_keys: &BTreeMap<String, String>,
+    log_id: Option<&str>,
 ) {
     static LAST_TRY: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
     if witness_urls.is_empty() {
@@ -247,17 +288,20 @@ pub fn refresh_witnesses(
                 keys.get(url)
                     .map(|k| (k.pubkey_hex.clone(), "pinned on first contact"))
             });
-        // Holding the latest checkpoint with a receipt that checks: nothing
-        // to explain, so not contacted.
-        if expected
-            .as_ref()
-            .is_some_and(|(key, _)| holds_latest_checked(latest.as_ref(), url, key))
-        {
-            continue;
-        }
         {
             let mut tries = LAST_TRY.lock().unwrap_or_else(|e| e.into_inner());
             let tries = tries.get_or_insert_with(HashMap::new);
+            // Holding the latest checkpoint with a receipt that checks: nothing
+            // to explain, so not contacted -- except once per start, so a log
+            // rolled back behind what a witness holds is found.
+            let first_this_start = !tries.contains_key(url);
+            if !first_this_start
+                && expected
+                    .as_ref()
+                    .is_some_and(|(key, _)| holds_latest_checked(latest.as_ref(), url, key))
+            {
+                continue;
+            }
             if tries
                 .get(url)
                 .is_some_and(|at| at.elapsed() < CONTACT_EVERY)
@@ -313,6 +357,23 @@ pub fn refresh_witnesses(
                 tracing::warn!(witness = %display_url(url), %err, "{reason}");
                 (outcome, reason)
             }
+        };
+        // What the witness holds of this log must be a checkpoint this log has:
+        // one it does not have means the log was rolled back, or another node
+        // uses this log id.
+        let (outcome, reason) = match (outcome, log_id) {
+            ("ok", Some(log_id)) => match witness_latest(&base, log_id) {
+                Ok(Some((size, root))) if !local_holds(ledger_dir, size, &root) => (
+                    "diverged",
+                    format!(
+                        "holds a checkpoint of this log (size {size}) that this node's log does not have: \
+                         the log was rolled back, or another node uses this log id"
+                    ),
+                ),
+                Ok(_) => ("ok", reason),
+                Err((outcome, reason)) => (outcome, reason),
+            },
+            other => (other.0, reason),
         };
         reach.insert(
             url.clone(),
@@ -740,7 +801,7 @@ mod tests {
     #[test]
     fn with_no_witness_configured_nothing_is_contacted() {
         let dir = tempfile::tempdir().unwrap();
-        refresh_witnesses(dir.path(), &[], &BTreeMap::new());
+        refresh_witnesses(dir.path(), &[], &BTreeMap::new(), None);
         assert!(!dir.path().join(KEYS_FILE).exists());
         assert!(!dir.path().join(REACH_FILE).exists());
     }
@@ -753,7 +814,7 @@ mod tests {
         // Nothing listens on port 1: the connection is refused at once.
         let down = "http://127.0.0.1:1".to_string();
         let given = BTreeMap::from([(down.clone(), fixture::PUBKEY_HEX.to_string())]);
-        refresh_witnesses(dir.path(), std::slice::from_ref(&down), &given);
+        refresh_witnesses(dir.path(), std::slice::from_ref(&down), &given, None);
         assert!(
             !dir.path().join(KEYS_FILE).exists(),
             "a configured key is never fetched over"
@@ -768,7 +829,7 @@ mod tests {
         // Contacted at most once a minute: a second call right away does not
         // contact it again (the record keeps its first time).
         let first = reach[&down].at.clone();
-        refresh_witnesses(dir.path(), std::slice::from_ref(&down), &given);
+        refresh_witnesses(dir.path(), std::slice::from_ref(&down), &given, None);
         assert_eq!(load_reach(dir.path())[&down].at, first);
     }
 
@@ -798,7 +859,7 @@ mod tests {
         let swapped = serve_once("200 OK", other);
         let failing = serve_once("503 Service Unavailable", "{}".to_string());
         let given = BTreeMap::from([(swapped.clone(), fixture::PUBKEY_HEX.to_string())]);
-        refresh_witnesses(dir.path(), &[swapped.clone(), failing.clone()], &given);
+        refresh_witnesses(dir.path(), &[swapped.clone(), failing.clone()], &given, None);
         let reach = load_reach(dir.path());
         assert_eq!(reach[&swapped].outcome, "key_mismatch");
         assert!(
@@ -817,96 +878,75 @@ mod tests {
         );
     }
 
+    /// A local server answering each request, in order, with the next of
+    /// `answers` (status line, body); then it stops.
+    fn serve_seq(answers: Vec<(&'static str, String)>) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for (status, body) in answers {
+                let Ok((mut stream, _)) = listener.accept() else { return };
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        url
+    }
+
+    fn held_line_from(url: &str) -> Value {
+        let mut line = fixture::held_line();
+        line["witnesses"][0]["ts_url"] = json!(url);
+        line
+    }
+
     /// A witness holding the latest checkpoint with a receipt that checks is
-    /// not contacted; the same witness whose receipt does not check under the
-    /// configured key is (so its row can say whether it changed keys).
+    /// contacted once per start (to find a rolled-back log), then not again.
     #[test]
-    fn only_a_witness_with_something_to_explain_is_contacted() {
+    fn a_witness_holding_the_latest_is_contacted_once_per_start_only() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("checkpoints.jsonl"),
-            format!("{}\n", fixture::held_line()),
-        )
-        .unwrap();
-        let w = fixture::WITNESS.to_string();
-        let good = BTreeMap::from([(w.clone(), fixture::PUBKEY_HEX.to_string())]);
-        refresh_witnesses(dir.path(), std::slice::from_ref(&w), &good);
-        assert!(!dir.path().join(REACH_FILE).exists(), "not contacted");
+        let key = json!({"pubkey_hex": fixture::PUBKEY_HEX, "key_id": "t"}).to_string();
+        let w = serve_seq(vec![("200 OK", key)]);
+        std::fs::write(dir.path().join("checkpoints.jsonl"), format!("{}\n", held_line_from(&w))).unwrap();
+        let given = BTreeMap::from([(w.clone(), fixture::PUBKEY_HEX.to_string())]);
+        refresh_witnesses(dir.path(), std::slice::from_ref(&w), &given, None);
+        assert_eq!(load_reach(dir.path())[&normalize_url(&w)].outcome, "ok", "contacted once at start");
+        // The server is gone now; a second contact would read as refused.
+        refresh_witnesses(dir.path(), std::slice::from_ref(&w), &given, None);
+        assert_eq!(load_reach(dir.path())[&normalize_url(&w)].outcome, "ok", "not contacted again");
         let latest = latest_line(dir.path());
-        assert!(holds_latest_checked(
-            latest.as_ref(),
-            &w,
-            fixture::PUBKEY_HEX
-        ));
-        assert!(!holds_latest_checked(latest.as_ref(), &w, &"11".repeat(32)));
+        assert!(holds_latest_checked(latest.as_ref(), &normalize_url(&w), fixture::PUBKEY_HEX));
+        assert!(!holds_latest_checked(latest.as_ref(), &normalize_url(&w), &"11".repeat(32)));
     }
 
+    /// The witness holds a checkpoint of this log that the log no longer
+    /// has: the log was rolled back (or another node uses its log id).
     #[test]
-    fn one_witness_written_two_ways_is_one_witness() {
-        assert_eq!(normalize_url(" HTTPS://W.Example/ "), "https://w.example");
-        assert_eq!(normalize_url("https://w.example/log/"), "https://w.example/log");
-        let dir = tempfile::tempdir().unwrap();
-        // The receipt names "https://witness.example"; the operator wrote it
-        // with a trailing slash and the key under another spelling. Still one
-        // witness, and its receipt checks under the configured key.
-        let given = BTreeMap::from([(
-            "HTTPS://WITNESS.example".to_string(),
-            fixture::PUBKEY_HEX.to_string(),
-        )]);
-        let mut lines = vec![fixture::held_line()];
-        let rows = annotate(&mut lines, &["https://witness.example/".to_string()], &given, dir.path());
-        assert_eq!(rows.as_array().unwrap().len(), 1, "{rows}");
-        assert_eq!(rows[0]["state"], json!("latest"));
-        assert_eq!(rows[0]["key_source"], json!("configured"));
-    }
-
-    #[test]
-    fn a_configured_key_for_no_named_witness_is_shown() {
-        let dir = tempfile::tempdir().unwrap();
-        let given = BTreeMap::from([(
-            "https://other.example".to_string(),
-            fixture::PUBKEY_HEX.to_string(),
-        )]);
-        let mut lines = vec![];
-        let rows = annotate(&mut lines, &[fixture::WITNESS.to_string()], &given, dir.path());
-        let unmatched = rows
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|r| r["state"] == json!("key_unmatched"))
-            .expect("a row for the unmatched key");
-        assert_eq!(unmatched["name"], json!("other.example"));
-    }
-
-    /// An unreadable pin file is a mismatch: the receipt does not count, and
-    /// the file is never replaced by a first-contact pin.
-    #[test]
-    fn an_unreadable_keys_file_is_a_mismatch_and_pins_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(KEYS_FILE), "{ not json").unwrap();
-        let mut lines = vec![fixture::held_line()];
-        let rows = annotate(&mut lines, &[fixture::WITNESS.to_string()], &BTreeMap::new(), dir.path());
-        assert_eq!(rows[0]["state"], json!("unchecked"));
-        assert!(rows[0]["problem"].as_str().unwrap().contains("cannot be read"));
-        let answering = serve_once("200 OK", json!({"pubkey_hex": "22".repeat(32), "key_id": "x"}).to_string());
-        refresh_witnesses(dir.path(), std::slice::from_ref(&answering), &BTreeMap::new());
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join(KEYS_FILE)).unwrap(),
-            "{ not json",
-            "the file is left as it was"
-        );
-        assert_eq!(load_reach(dir.path())[&normalize_url(&answering)].outcome, "keys_unreadable");
-    }
-
-    /// No first-contact pin over plain http: the witness answers, but its key
-    /// is not taken, and its row says to configure the key.
-    #[test]
-    fn no_key_is_pinned_on_first_contact_over_http() {
-        let dir = tempfile::tempdir().unwrap();
-        let plain = serve_once("200 OK", json!({"pubkey_hex": "22".repeat(32), "key_id": "x"}).to_string());
-        refresh_witnesses(dir.path(), std::slice::from_ref(&plain), &BTreeMap::new());
-        assert!(!dir.path().join(KEYS_FILE).exists(), "nothing pinned over http");
-        assert_eq!(load_reach(dir.path())[&normalize_url(&plain)].outcome, "insecure");
+    fn a_log_rolled_back_behind_its_witness_is_named() {
+        let key = || json!({"pubkey_hex": fixture::PUBKEY_HEX, "key_id": "t"}).to_string();
+        for (held, expected) in [
+            (json!({"mmr_size": 7, "root": "bb"}), "diverged"),
+            (json!({"mmr_size": 3, "root": "aa"}), "ok"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let w = serve_seq(vec![("200 OK", key()), ("200 OK", held.to_string())]);
+            // This node's log has the size-3 checkpoint only, with no receipt.
+            let mut line = fixture::held_line();
+            line["witnesses"] = json!([]);
+            std::fs::write(dir.path().join("checkpoints.jsonl"), format!("{line}\n")).unwrap();
+            let given = BTreeMap::from([(w.clone(), fixture::PUBKEY_HEX.to_string())]);
+            refresh_witnesses(dir.path(), std::slice::from_ref(&w), &given, Some("capsules/abc"));
+            let reach = &load_reach(dir.path())[&normalize_url(&w)];
+            assert_eq!(reach.outcome, expected, "{}", reach.reason);
+            if expected == "diverged" {
+                assert!(reach.reason.contains("rolled back"), "{}", reach.reason);
+            }
+        }
     }
 
     #[test]

@@ -93,6 +93,12 @@ export function YourRecordsDialog({
             </p>
           ) : null}
 
+          {typeof status?.torn_write_cut_at === 'number' ? (
+            <p className="text-[var(--color-bad-text)]" data-testid="torn-write" role="status">
+              {`When this node last started, the last line of its log was cut short (a write that did not finish) and was removed, back to the last whole record (byte ${status.torn_write_cut_at}). Every record before it still checks.`}
+            </p>
+          ) : null}
+
           <section aria-labelledby="what-you-share-title" className="flex flex-col gap-2">
             <h3 className="type-label text-fg-faint" id="what-you-share-title">
               What you share

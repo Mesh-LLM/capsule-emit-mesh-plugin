@@ -456,6 +456,9 @@ impl Maintenance {
         json!({
             "records_path": self.ledger_dir().display().to_string(),
             "record_count": ids.len(),
+            // The ledger's last line was torn when it was opened (a write cut
+            // short) and was cut back to the last whole record.
+            "torn_write_cut_at": self.capsules.torn_write_cut_at(),
             "head": ids.last(),
             "log_id": self.log_id,
             "stored_text_count": stored_text_count(self.ledger_dir()),

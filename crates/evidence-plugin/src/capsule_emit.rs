@@ -395,6 +395,10 @@ pub struct CapsuleState {
     /// label used for the ledger issuer / sequence-counter key), which is
     /// NEVER used as a stand-in for the mesh node id domain.
     learned_self_node_id: Mutex<LearnedSelfNodeId>,
+    /// The byte offset the ledger was cut back to when it was opened, when
+    /// its last line was torn (a write cut short, e.g. by a crash): that line
+    /// is gone. Logged, and shown in the records status.
+    torn_write_cut_at: Option<u64>,
     /// Settlement-records legs waiting on the other side (in memory only).
     settlement_legs: crate::settlement_legs::Legs,
     /// See [`CapsuleState::observed_not_sealed`].
@@ -466,6 +470,12 @@ impl CapsuleState {
         let ledger_dir = data_dir.join("ledger");
         let (ledger, report) = crate::producer::index::open_ledger(&ledger_dir)?;
         tracing::info!(recovered_entries = report.valid_entries, "ledger opened");
+        if let Some(offset) = report.truncated_torn_write_at {
+            tracing::warn!(
+                offset,
+                "the ledger's last line was torn (a write cut short); it was cut back to the last whole record"
+            );
+        }
         let sequence_counters = SequenceCounterStore::open(data_dir.join("sequence_counters.json"));
         let learned_self_node_id =
             LearnedSelfNodeId::open(data_dir.join("learned_self_node_id.json"));
@@ -478,7 +488,14 @@ impl CapsuleState {
             learned_self_node_id: Mutex::new(learned_self_node_id),
             settlement_legs: crate::settlement_legs::Legs::default(),
             observed_not_sealed: std::sync::atomic::AtomicU64::new(0),
+            torn_write_cut_at: report.truncated_torn_write_at,
         })
+    }
+
+    /// Where the ledger was cut back to when it was opened, if its last line
+    /// was torn.
+    pub fn torn_write_cut_at(&self) -> Option<u64> {
+        self.torn_write_cut_at
     }
 
     /// This node's settlement-records state ([`crate::settlement_legs`]).
