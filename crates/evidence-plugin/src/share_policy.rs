@@ -132,7 +132,8 @@ const REFEREE_CATEGORY_ID: &str = "referee";
 const REFEREE_CATEGORY_LABEL: &str = "Referee";
 const REFEREE_CATEGORY_SUMMARY: &str =
     "An independent check of two twins that answered the same request differently. \
-    Eligibility is yes or no, from this node's own records; no figure about a peer is computed, and nothing is sent.";
+    Eligibility is yes or no, from this node's own records; no figure about a peer is computed. Off by default: \
+    asking a referee sends the twins' request, including the prompt, and both twins' answers to the referee peer.";
 
 const RULE_CATEGORY_ID: &str = "routing_rule";
 const RULE_CATEGORY_LABEL: &str = "Routing rule";
@@ -211,8 +212,9 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
                 .description(
                     "Ask a referee when two twins of a pair a client marked answered the same \
                      request at temperature 0, on the same model and weights, and differ (on), or \
-                     never (off, the default). A referee answers with its own inference, so only \
-                     you turn this on. At most one call per pair, never retried. A pair \
+                     never (off, the default). Asking sends the twins' request, including the \
+                     prompt, and both twins' answers to the referee peer, which answers the \
+                     request with its own inference; so only you turn this on. At most one call per pair, never retried. A pair \
                      with no ruling reads \"Not adjudicated\" with the reason, and never counts \
                      against either twin.",
                 )

@@ -6,7 +6,8 @@ import type {
   CleanupAction,
   CleanupResult,
   RecordsStatus,
-  SharingSwitchKey
+  SharingSwitchKey,
+  SharingSwitchState
 } from '@/features/capsules/api/recordsClient'
 import {
   SAMPLE_DATA_UNAVAILABLE,
@@ -138,11 +139,15 @@ export const NEW_LOG_PENDING = 'A new log begins the next time this node starts.
 export function nothingIsShared(status: RecordsStatus | null): boolean {
   const sharing = status?.sharing
   if (!sharing) return false
+  // The referee switch is not one of the four rows, but with it on a prompt
+  // can leave this machine, so "Local only" needs it off too.
+  const referee = (sharing as Partial<Record<string, SharingSwitchState>>).adjudicate_differing_twins
   return (
     sharing.record_at_completion?.value === 'off' &&
     sharing.history_segments?.value === 'off' &&
     sharing.adjudications?.value === 'off' &&
-    !sharing.witness?.value
+    !sharing.witness?.value &&
+    (referee === undefined || referee.value === 'off' || referee.value === null)
   )
 }
 

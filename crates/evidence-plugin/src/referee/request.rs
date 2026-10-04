@@ -1,6 +1,6 @@
 //! When a referee is asked, and at most once per pair.
 //!
-//! A referee is asked only when two twins of a pair the host marked (a twin
+//! A referee is asked only when two twins of a pair a client marked (a twin
 //! bracket id) answered the same request at temperature 0, on the same model
 //! and weights, and their answers differ. It is on unless the operator turns
 //! it off (`adjudicate_differing_twins`). At most one call per pair, never
@@ -89,7 +89,7 @@ pub struct Twin {
 /// Two twins of one request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pair {
-    /// The host's twin bracket id; `None` when the host does not mark twins.
+    /// The twin bracket id a client sent; `None` when no client marked a pair.
     pub twin_bracket_id: Option<String>,
     pub request_digest: String,
     pub twins: [Twin; 2],

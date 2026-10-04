@@ -146,6 +146,14 @@ describe('Local only', () => {
     expect(nothingIsShared(allOff)).toBe(true)
   })
 
+  it('does not hold with the referee on: it sends a prompt to a peer', () => {
+    const refereeOn = {
+      ...allOff,
+      sharing: { ...allOff.sharing, adjudicate_differing_twins: { value: 'on', source: 'set' } }
+    } as typeof allOff
+    expect(nothingIsShared(refereeOn)).toBe(false)
+  })
+
   it('does not hold with the defaults, with any one switch on, or without a status', () => {
     expect(nothingIsShared(status())).toBe(false)
     expect(

@@ -12,7 +12,7 @@ This page says when a referee is asked, who can be asked, and which one is.
 
 Only when all of these hold:
 
-- the host marked the two exchanges as twins (a twin bracket id);
+- a client marked the two exchanges as one pair (the `x-mesh-twin-bracket` header, which the host passes on as a twin bracket id);
 - both twins answered the same request, at temperature 0;
 - both served the same model and the same weights, as their signed records say;
 - their answers differ. Any difference counts: there is no similarity
@@ -66,7 +66,7 @@ either twin:
 | Reason | The line |
 | --- | --- |
 | the check is off | Not adjudicated: the independent check is turned off on this node. |
-| no twin bracket id | Not adjudicated: this host does not mark twins. |
+| no twin bracket id | Not adjudicated: no client marked these as a pair. |
 | the answers agree | Not adjudicated: the two answers agree. |
 | sampled, another or unnamed model, other or unknown weights | Not adjudicated: not comparable, with why. |
 | nobody eligible | Not adjudicated: no eligible referee. |
@@ -99,8 +99,10 @@ and no further call follows on its own.
 ## 5. What this is not
 
 These are yes/no rules applied to this node's own verified records. Nothing is
-ordered by merit, weighted or combined into a number, and nothing is sent to
-other nodes. A verdict is a ruling on one pair of answers; it proves nothing
+ordered by merit, weighted or combined into a number, and choosing sends
+nothing to other nodes. Asking the chosen referee does: it receives the twins'
+request, including the prompt, and both twins' answers (off by default:
+`adjudicate_differing_twins`). A verdict is a ruling on one pair of answers; it proves nothing
 about a node's future answers.
 
 ## 6. Settings

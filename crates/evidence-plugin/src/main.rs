@@ -1317,7 +1317,7 @@ async fn main() -> anyhow::Result<()> {
                             &[],
                         )
                         .await;
-                        // A twin of a pair the host marked: when both twins'
+                        // A twin of a pair a client marked: when both twins'
                         // halves are held here, the referee rules apply
                         // (`referee::request`). No bracket id, nothing runs.
                         if let (Some(bracket), Some(self_id)) =

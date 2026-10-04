@@ -19,7 +19,7 @@ const NOT_COMPARABLE_BECAUSE: Record<string, string> = {
 /** Every reason the plugin gives, and its line. */
 export const NOT_ADJUDICATED_LINES: Record<string, string> = {
   off: 'Not adjudicated: the independent check is turned off on this node.',
-  host_does_not_mark_twins: 'Not adjudicated: this host does not mark twins.',
+  host_does_not_mark_twins: 'Not adjudicated: no client marked these as a pair.',
   twins_agree: 'Not adjudicated: the two answers agree.',
   not_comparable: 'Not adjudicated: the two answers cannot be compared.',
   no_eligible_referee: 'Not adjudicated: no eligible referee.',

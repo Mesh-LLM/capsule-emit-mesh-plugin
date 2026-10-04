@@ -1,6 +1,6 @@
 //! The live referee call for a twin pair this node asked (the requester).
 //!
-//! A pair is two of this node's own exchanges the host marked with one twin
+//! A pair is two of this node's own exchanges a client marked with one twin
 //! bracket id, whose texts this node kept (`exchange_text`), each answered by
 //! a provider whose signed half this node holds (pushed to it). With the pair
 //! complete, [`consider`] applies the rules of `request` (the trigger, the
@@ -17,7 +17,7 @@
 //! 4. holds the verdict itself and delivers it to both providers.
 //!
 //! Without a twin bracket id from the host nothing here runs: no pair is
-//! ever guessed from timing, and the page says the host does not mark twins.
+//! ever guessed from timing, and the page says no client marked them as a pair.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -512,7 +512,7 @@ pub const ASK_AGAIN_OPERATION: &str = "referee_ask_again";
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AskAgainArgs {
-    /// The pair's twin bracket id, as the host marked it.
+    /// The pair's twin bracket id, as a client marked it.
     pub twin_bracket_id: String,
 }
 
