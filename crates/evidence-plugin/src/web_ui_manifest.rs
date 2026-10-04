@@ -52,12 +52,22 @@ pub fn evidence_web_ui() -> ManifestEntry {
             .host_header(false),
         )
         .contribution(
-            web_ui_contribution(CHAT_CONTRIBUTION_ID, "chat_message", EVIDENCE_PAGE_LABEL, WEB_UI_ENTRY_SCRIPT)
-                .bundle_id(WEB_UI_BUNDLE_ID),
+            web_ui_contribution(
+                CHAT_CONTRIBUTION_ID,
+                "chat_message",
+                EVIDENCE_PAGE_LABEL,
+                WEB_UI_ENTRY_SCRIPT,
+            )
+            .bundle_id(WEB_UI_BUNDLE_ID),
         )
         .contribution(
-            web_ui_contribution(LOGS_CONTRIBUTION_ID, "logs_request", EVIDENCE_PAGE_LABEL, WEB_UI_ENTRY_SCRIPT)
-                .bundle_id(WEB_UI_BUNDLE_ID),
+            web_ui_contribution(
+                LOGS_CONTRIBUTION_ID,
+                "logs_request",
+                EVIDENCE_PAGE_LABEL,
+                WEB_UI_ENTRY_SCRIPT,
+            )
+            .bundle_id(WEB_UI_BUNDLE_ID),
         )
         .into()
 }

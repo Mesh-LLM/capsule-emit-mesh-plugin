@@ -917,8 +917,7 @@ pub(crate) fn find_own_record(
     client_nonce: Option<&str>,
 ) -> Value {
     let matches = |record: &&Value| {
-        let by_exchange = exchange_id
-            .is_some_and(|id| record_exchange_id(record) == Some(id));
+        let by_exchange = exchange_id.is_some_and(|id| record_exchange_id(record) == Some(id));
         let by_nonce = client_nonce.is_some_and(|nonce| {
             poc_block(record)
                 .and_then(|poc| poc.get("client_nonce"))

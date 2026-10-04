@@ -650,14 +650,22 @@ mod tests {
         let by_id = crate::evidence_panes::find_own_record(&records, Some("ex-1"), None);
         assert_eq!(by_id["found"], json!(true));
         assert_eq!(by_id["capsule_id"], json!("a".repeat(64)));
-        assert_eq!(by_id["exchange_key"], json!("ex-1"));
+        // The Evidence page's grouping key, which the link focuses: the
+        // request digest first, the host's exchange id only without one.
+        assert_eq!(
+            by_id["exchange_key"],
+            json!(format!("digest:{}", "a".repeat(64)))
+        );
         let by_nonce = crate::evidence_panes::find_own_record(&records, None, Some("n-1"));
         assert_eq!(by_nonce["capsule_id"], json!("a".repeat(64)));
         assert_eq!(
             crate::evidence_panes::find_own_record(&records, Some("ex-2"), Some("n-2")),
             json!({"found": false})
         );
-        assert_eq!(query_text(&Some(json!(12345))).unwrap().as_deref(), Some("12345"));
+        assert_eq!(
+            query_text(&Some(json!(12345))).unwrap().as_deref(),
+            Some("12345")
+        );
         assert_eq!(query_text(&Some(json!(""))).unwrap(), None);
     }
 }
