@@ -33,10 +33,10 @@ concurrency:
 env:
   RUST_TOOLCHAIN: "1.97.1"
   CARGO_TERM_COLOR: always
-  # mesh-llm v0.77.0, Linux x86_64, CPU build: the unmodified release.
-  MESH_LLM_VERSION: "0.77.0"
-  MESH_LLM_ASSET: mesh-llm-v0.77.0-x86_64-unknown-linux-gnu.tar.gz
-  MESH_LLM_SHA256: 775ee7611a99da18b14cb2eebe81a8e278b83809273ea70a27c898304fc12940
+  # mesh-llm v0.78.0, Linux x86_64, CPU build: the unmodified release.
+  MESH_LLM_VERSION: "0.78.0"
+  MESH_LLM_ASSET: mesh-llm-v0.78.0-x86_64-unknown-linux-gnu.tar.gz
+  MESH_LLM_SHA256: 93ded873023b0d2de84f9c1c197e3f5fd410efe3f5a9457343497d5732eaa446
   # Qwen2.5-0.5B-Instruct, Q4_K_M GGUF (491 MB), at a fixed repository revision.
   MODEL_FILE: qwen2.5-0.5b-instruct-q4_k_m.gguf
   MODEL_URL: https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q4_k_m.gguf

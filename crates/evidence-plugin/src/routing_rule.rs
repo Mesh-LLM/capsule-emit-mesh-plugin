@@ -898,7 +898,7 @@ mod tests {
     }
 
     /// A host without the plugin peer-block path (it does not list
-    /// `peer_blocks.v1`, e.g. mesh-llm 0.77) is never asked.
+    /// `peer_blocks.v1`, e.g. mesh-llm 0.77; 0.78 has it) is never asked.
     #[tokio::test]
     async fn a_host_without_the_path_blocks_nothing() {
         let dir = tempfile::tempdir().unwrap();
