@@ -153,7 +153,7 @@ pub struct ServingProvenance {
     /// terminal envelope (`mesh-llm-host-runtime`'s
     /// `CapsuleIdProvenance::PeerAsserted`) -- an unauthenticated,
     /// relay-injectable value observed on the peer's raw response header
-    /// while ROUTING, never itself verified or countersigned here. `None`
+    /// while ROUTING, never itself verified or signed by anyone here. `None`
     /// on every `role: "served"` record (there is no peer half to name) and
     /// on a `requested` record where no value was observed.
     pub peer_capsule_id: Option<String>,
@@ -161,7 +161,7 @@ pub struct ServingProvenance {
     /// `CapsuleIdProvenance` (`"peer_asserted"` today; `"unknown"` for a
     /// value this mirror predates). `None` exactly when `peer_capsule_id`
     /// is `None`. Graded self-attested/peer-asserted, never promoted to a
-    /// verified or countersigned claim by this field's mere presence.
+    /// verified or signed claim by this field's mere presence.
     pub peer_capsule_id_provenance: Option<String>,
     /// The id shared by BOTH halves of an ambient twin comparison, forwarded
     /// verbatim from the terminal `openai.exchange.v1` envelope's own
