@@ -62,18 +62,63 @@ pub struct PinnedKey {
     pub pinned_at: String,
 }
 
-fn load_keys(ledger_dir: &Path) -> BTreeMap<String, PinnedKey> {
-    std::fs::read_to_string(ledger_dir.join(KEYS_FILE))
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+/// One form of a witness URL for every comparison: scheme and host
+/// lower-cased, no trailing `/`. `https://W.example/` and `https://w.example`
+/// are one witness. Contact still uses the URL as the operator wrote it.
+pub fn normalize_url(url: &str) -> String {
+    let url = url.trim();
+    let (scheme, rest) = match url.split_once("://") {
+        Some((scheme, rest)) => (scheme.to_ascii_lowercase(), rest),
+        None => (String::new(), url),
+    };
+    let (authority, path) = rest.find('/').map_or((rest, ""), |i| rest.split_at(i));
+    let path = path.trim_end_matches('/');
+    if scheme.is_empty() {
+        format!("{}{path}", authority.to_ascii_lowercase())
+    } else {
+        format!("{scheme}://{}{path}", authority.to_ascii_lowercase())
+    }
+}
+
+/// The pinned keys. A missing file is no keys; a file that cannot be read
+/// or parsed is an error, never "no keys": an unreadable pin must not let a
+/// witness be pinned again on first contact.
+fn load_keys(ledger_dir: &Path) -> Result<BTreeMap<String, PinnedKey>, String> {
+    let path = ledger_dir.join(KEYS_FILE);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    serde_json::from_str::<BTreeMap<String, PinnedKey>>(&text)
+        .map(|keys| keys.into_iter().map(|(url, key)| (normalize_url(&url), key)).collect())
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Write `bytes` to `path` whole: a temporary file, flushed to disk, renamed
+/// over `path`, and the directory flushed, so a crash leaves the old file or
+/// the new one, never a torn one.
+pub(crate) fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let tmp = dir.join(format!(
+        ".{}.tmp",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("file")
+    ));
+    {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    if let Ok(dir) = std::fs::File::open(dir) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
 }
 
 fn save_keys(ledger_dir: &Path, keys: &BTreeMap<String, PinnedKey>) -> anyhow::Result<()> {
-    let path = ledger_dir.join(KEYS_FILE);
-    let tmp = ledger_dir.join(format!("{KEYS_FILE}.tmp"));
-    std::fs::write(&tmp, serde_json::to_vec_pretty(keys)?)?;
-    std::fs::rename(&tmp, &path)?;
+    write_synced(&ledger_dir.join(KEYS_FILE), &serde_json::to_vec_pretty(keys)?)?;
     Ok(())
 }
 
@@ -107,8 +152,11 @@ pub struct Reach {
 fn load_reach(ledger_dir: &Path) -> BTreeMap<String, Reach> {
     std::fs::read_to_string(ledger_dir.join(REACH_FILE))
         .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
+        .and_then(|text| serde_json::from_str::<BTreeMap<String, Reach>>(&text).ok())
         .unwrap_or_default()
+        .into_iter()
+        .map(|(url, reach)| (normalize_url(&url), reach))
+        .collect()
 }
 
 /// Why a witness could not be reached, from the client's error.
@@ -153,7 +201,7 @@ fn holds_latest_checked(latest: Option<&Value>, url: &str, key_hex: &str) -> boo
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|w| w.get("ts_url").and_then(Value::as_str) == Some(url))
+        .filter(|w| w.get("ts_url").and_then(Value::as_str).map(normalize_url).as_deref() == Some(url))
         .any(|w| check_receipt(cp, w, Some(key_hex)) == Check::Checked)
 }
 
@@ -174,11 +222,24 @@ pub fn refresh_witnesses(
     if witness_urls.is_empty() {
         return;
     }
-    let mut keys = load_keys(ledger_dir);
+    // An unreadable keys file pins nothing new: a witness is never pinned
+    // again on first contact because its earlier pin could not be read.
+    let (mut keys, keys_readable) = match load_keys(ledger_dir) {
+        Ok(keys) => (keys, true),
+        Err(error) => {
+            tracing::warn!(%error, "the pinned witness keys cannot be read; no key is pinned until it is fixed");
+            (BTreeMap::new(), false)
+        }
+    };
+    let configured_keys: BTreeMap<String, String> = configured_keys
+        .iter()
+        .map(|(url, key)| (normalize_url(url), key.clone()))
+        .collect();
     let mut reach = load_reach(ledger_dir);
     let latest = latest_line(ledger_dir);
     let (mut keys_changed, mut reach_changed) = (false, false);
-    for url in witness_urls {
+    for raw_url in witness_urls {
+        let url = &normalize_url(raw_url);
         let expected = configured_keys
             .get(url)
             .map(|k| (k.clone(), "configured"))
@@ -205,7 +266,7 @@ pub fn refresh_witnesses(
             }
             tries.insert(url.clone(), Instant::now());
         }
-        let base = crate::producer::anchor::dispatch_base_for(url).to_string();
+        let base = crate::producer::anchor::dispatch_base_for(raw_url.trim()).to_string();
         let (outcome, reason) = match crate::producer::anchor::AnchorClient::new(base)
             .authority_pubkey()
         {
@@ -224,6 +285,14 @@ pub fn refresh_witnesses(
                         ),
                     ),
                     Some(_) => ("ok", "answers".to_string()),
+                    None if !keys_readable => (
+                        "keys_unreadable",
+                        "its key cannot be pinned: the pinned keys file cannot be read".to_string(),
+                    ),
+                    None if !url.starts_with("https://") => (
+                        "insecure",
+                        "its key is not pinned over plain http; configure its public_key".to_string(),
+                    ),
                     None => {
                         tracing::info!(witness = %display_url(url), key_id = %key.key_id, "pinned the witness's key");
                         keys.insert(
@@ -261,12 +330,9 @@ pub fn refresh_witnesses(
         }
     }
     if reach_changed {
-        let path = ledger_dir.join(REACH_FILE);
-        let tmp = ledger_dir.join(format!("{REACH_FILE}.tmp"));
         let written = serde_json::to_vec_pretty(&reach)
             .map_err(anyhow::Error::from)
-            .and_then(|bytes| std::fs::write(&tmp, bytes).map_err(Into::into))
-            .and_then(|()| std::fs::rename(&tmp, &path).map_err(Into::into));
+            .and_then(|bytes| write_synced(&ledger_dir.join(REACH_FILE), &bytes).map_err(Into::into));
         if let Err(err) = written {
             tracing::warn!(%err, "could not save the witness contact record");
         }
@@ -369,9 +435,18 @@ pub fn annotate(
     configured_keys: &BTreeMap<String, String>,
     ledger_dir: &Path,
 ) -> Value {
-    let pinned = load_keys(ledger_dir);
+    let (pinned, pinned_error) = match load_keys(ledger_dir) {
+        Ok(keys) => (keys, None),
+        Err(error) => (BTreeMap::new(), Some(error)),
+    };
     let reach = load_reach(ledger_dir);
-    let mut urls: Vec<String> = configured.to_vec();
+    let configured: Vec<String> = configured.iter().map(|u| normalize_url(u)).collect();
+    let configured_keys: BTreeMap<String, String> = configured_keys
+        .iter()
+        .map(|(url, key)| (normalize_url(url), key.clone()))
+        .collect();
+    let configured_keys = &configured_keys;
+    let mut urls: Vec<String> = configured.clone();
     let mut seen: BTreeSet<String> = configured.iter().cloned().collect();
     #[derive(Default)]
     struct Tally {
@@ -392,18 +467,21 @@ pub fn annotate(
             let Some(url) = receipt
                 .get("ts_url")
                 .and_then(Value::as_str)
-                .map(str::to_string)
+                .map(normalize_url)
             else {
                 continue;
             };
             if seen.insert(url.clone()) {
                 urls.push(url.clone());
             }
-            let check = check_receipt(
-                &snapshot,
-                receipt,
-                key_for(&url, configured_keys, &pinned).map(|(k, _)| k),
-            );
+            let key = key_for(&url, configured_keys, &pinned).map(|(k, _)| k);
+            let check = match (key, &pinned_error) {
+                // An unreadable pin is a mismatch, never "no key yet".
+                (None, Some(_)) => {
+                    Check::Failed("the pinned witness keys file cannot be read".into())
+                }
+                (key, _) => check_receipt(&snapshot, receipt, key),
+            };
             let t = tally.entry(url).or_default();
             t.held += 1;
             match &check {
@@ -431,7 +509,7 @@ pub fn annotate(
             }
         }
     }
-    let rows: Vec<Value> = urls
+    let mut rows: Vec<Value> = urls
         .iter()
         .map(|url| {
             let t = tally.remove(url).unwrap_or_default();
@@ -475,6 +553,23 @@ pub fn annotate(
             })
         })
         .collect();
+    // A key given for a URL that is not in the witness list matches nothing:
+    // most often the same witness written another way.
+    for url in configured_keys.keys().filter(|url| !configured.contains(url)) {
+        tracing::warn!(witness = %display_url(url), "a public key is configured for a URL that is not in the witness list");
+        rows.push(json!({
+            "name": witness_name(url),
+            "url": display_url(url),
+            "configured": false,
+            "state": "key_unmatched",
+            "held_count": 0,
+            "checked_count": 0,
+            "latest_checked": Value::Null,
+            "key_source": "configured",
+            "problem": "a public key is configured for this URL, but it is not in the witness list",
+            "last_contact": Value::Null,
+        }));
+    }
     Value::Array(rows)
 }
 
@@ -744,6 +839,74 @@ mod tests {
             fixture::PUBKEY_HEX
         ));
         assert!(!holds_latest_checked(latest.as_ref(), &w, &"11".repeat(32)));
+    }
+
+    #[test]
+    fn one_witness_written_two_ways_is_one_witness() {
+        assert_eq!(normalize_url(" HTTPS://W.Example/ "), "https://w.example");
+        assert_eq!(normalize_url("https://w.example/log/"), "https://w.example/log");
+        let dir = tempfile::tempdir().unwrap();
+        // The receipt names "https://witness.example"; the operator wrote it
+        // with a trailing slash and the key under another spelling. Still one
+        // witness, and its receipt checks under the configured key.
+        let given = BTreeMap::from([(
+            "HTTPS://WITNESS.example".to_string(),
+            fixture::PUBKEY_HEX.to_string(),
+        )]);
+        let mut lines = vec![fixture::held_line()];
+        let rows = annotate(&mut lines, &["https://witness.example/".to_string()], &given, dir.path());
+        assert_eq!(rows.as_array().unwrap().len(), 1, "{rows}");
+        assert_eq!(rows[0]["state"], json!("latest"));
+        assert_eq!(rows[0]["key_source"], json!("configured"));
+    }
+
+    #[test]
+    fn a_configured_key_for_no_named_witness_is_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let given = BTreeMap::from([(
+            "https://other.example".to_string(),
+            fixture::PUBKEY_HEX.to_string(),
+        )]);
+        let mut lines = vec![];
+        let rows = annotate(&mut lines, &[fixture::WITNESS.to_string()], &given, dir.path());
+        let unmatched = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["state"] == json!("key_unmatched"))
+            .expect("a row for the unmatched key");
+        assert_eq!(unmatched["name"], json!("other.example"));
+    }
+
+    /// An unreadable pin file is a mismatch: the receipt does not count, and
+    /// the file is never replaced by a first-contact pin.
+    #[test]
+    fn an_unreadable_keys_file_is_a_mismatch_and_pins_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(KEYS_FILE), "{ not json").unwrap();
+        let mut lines = vec![fixture::held_line()];
+        let rows = annotate(&mut lines, &[fixture::WITNESS.to_string()], &BTreeMap::new(), dir.path());
+        assert_eq!(rows[0]["state"], json!("unchecked"));
+        assert!(rows[0]["problem"].as_str().unwrap().contains("cannot be read"));
+        let answering = serve_once("200 OK", json!({"pubkey_hex": "22".repeat(32), "key_id": "x"}).to_string());
+        refresh_witnesses(dir.path(), std::slice::from_ref(&answering), &BTreeMap::new());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(KEYS_FILE)).unwrap(),
+            "{ not json",
+            "the file is left as it was"
+        );
+        assert_eq!(load_reach(dir.path())[&normalize_url(&answering)].outcome, "keys_unreadable");
+    }
+
+    /// No first-contact pin over plain http: the witness answers, but its key
+    /// is not taken, and its row says to configure the key.
+    #[test]
+    fn no_key_is_pinned_on_first_contact_over_http() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = serve_once("200 OK", json!({"pubkey_hex": "22".repeat(32), "key_id": "x"}).to_string());
+        refresh_witnesses(dir.path(), std::slice::from_ref(&plain), &BTreeMap::new());
+        assert!(!dir.path().join(KEYS_FILE).exists(), "nothing pinned over http");
+        assert_eq!(load_reach(dir.path())[&normalize_url(&plain)].outcome, "insecure");
     }
 
     #[test]
