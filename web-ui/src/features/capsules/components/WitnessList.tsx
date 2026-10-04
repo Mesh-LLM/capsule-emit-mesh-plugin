@@ -24,6 +24,7 @@ export function WitnessList({ rows }: { rows: WitnessRow[] }) {
             </span>
             <span style={{ color: TONE_COLOR[row.tone] }}>{row.status}</span>
             {row.detail ? <span className="type-caption text-fg-faint">{row.detail}</span> : null}
+            {row.key ? <span className="type-caption text-fg-faint">· {row.key}</span> : null}
           </li>
         ))}
       </ul>

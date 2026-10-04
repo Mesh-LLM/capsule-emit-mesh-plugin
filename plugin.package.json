@@ -83,7 +83,27 @@
         "value_schema": {
           "kind": "array",
           "items": {
-            "kind": "url",
+            "kind": "object",
+            "object_properties": [
+              {
+                "key": "endpoint",
+                "value_schema": {
+                  "kind": "url",
+                  "allow_additional_properties": false
+                },
+                "required": true,
+                "description": "The witness service's URL."
+              },
+              {
+                "key": "public_key",
+                "value_schema": {
+                  "kind": "string",
+                  "allow_additional_properties": false
+                },
+                "required": false,
+                "description": "The witness's Ed25519 public key in hex, as its operator publishes it. Leave empty to have the plugin fetch it from the witness once and keep it; the Evidence page then says the key was pinned on first contact, not configured."
+              }
+            ],
             "allow_additional_properties": false
           },
           "allow_additional_properties": false
@@ -92,7 +112,7 @@
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Witness services to offer this node's checkpoints to, one URL each. Empty is off (the default): there is no default witness, and the plugin contacts none until you add one. The Evidence page shows what each witness holds. Takes effect when mesh-llm is restarted.",
+        "description": "Witness services to offer this node's checkpoints to: each one's URL, and its public key if you have it. Empty is off (the default): there is no default witness, and the plugin contacts none until you add one. The Evidence page shows what each witness holds. Takes effect when mesh-llm is restarted.",
         "presentation": {
           "label": "Witnesses",
           "category_id": "share",

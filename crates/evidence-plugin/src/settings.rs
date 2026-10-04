@@ -94,6 +94,8 @@ pub fn console_key(name: &str) -> Option<String> {
     let rest = name.strip_prefix(PREFIX)?;
     Some(match rest {
         "CHECKPOINT_WITNESS_URLS" => "witness".to_string(),
+        // Read from the same console list: each witness's `public_key`.
+        "CHECKPOINT_WITNESS_KEYS" => "witness_keys".to_string(),
         other => other.to_ascii_lowercase(),
     })
 }
@@ -180,8 +182,19 @@ fn settings_from_config(raw: &str) -> std::collections::BTreeMap<String, String>
                 toml::Value::Integer(n) => n.to_string(),
                 toml::Value::Boolean(b) => b.to_string(),
                 toml::Value::Float(f) => f.to_string(),
-                // A list (the witnesses): the same comma list the
-                // environment takes.
+                // The witnesses: `{ endpoint, public_key }` rows (or bare
+                // URLs), read as the environment's comma list of URLs plus a
+                // JSON object of the keys given.
+                toml::Value::Array(items) if key == "witness" => {
+                    let (urls, keys) = witness_rows(items);
+                    if !keys.is_empty() {
+                        out.insert(
+                            "witness_keys".to_string(),
+                            serde_json::to_string(&keys).unwrap_or_default(),
+                        );
+                    }
+                    urls.join(",")
+                }
                 toml::Value::Array(items) => items
                     .iter()
                     .filter_map(|item| item.as_str())
@@ -195,6 +208,34 @@ fn settings_from_config(raw: &str) -> std::collections::BTreeMap<String, String>
         }
     }
     out
+}
+
+/// The console's witness rows: their endpoints in order, and the public key of
+/// each row that gives one. A bare string row is an endpoint with no key.
+fn witness_rows(
+    items: &[toml::Value],
+) -> (Vec<String>, std::collections::BTreeMap<String, String>) {
+    let mut urls = Vec::new();
+    let mut keys = std::collections::BTreeMap::new();
+    for item in items {
+        let (endpoint, key) = match item {
+            toml::Value::String(url) => (url.as_str(), None),
+            toml::Value::Table(row) => (
+                row.get("endpoint").and_then(|v| v.as_str()).unwrap_or(""),
+                row.get("public_key").and_then(|v| v.as_str()),
+            ),
+            _ => continue,
+        };
+        let endpoint = endpoint.trim();
+        if endpoint.is_empty() {
+            continue;
+        }
+        urls.push(endpoint.to_string());
+        if let Some(key) = key.map(str::trim).filter(|k| !k.is_empty()) {
+            keys.insert(endpoint.to_string(), key.to_string());
+        }
+    }
+    (urls, keys)
 }
 
 /// The console's value for a setting, when the environment sets neither its
@@ -443,6 +484,34 @@ witness = ["https://a.example", " https://b.example ", ""]
         assert_eq!(
             settings_from_config(raw).get("witness").map(String::as_str),
             Some("https://a.example,https://b.example")
+        );
+    }
+
+    #[test]
+    fn witness_rows_give_the_url_list_and_the_keys_given() {
+        let raw = r#"
+[[plugin]]
+name = "capsules"
+[plugin.settings]
+witness = [
+  { endpoint = "https://a.example", public_key = "AB01" },
+  { endpoint = "https://b.example" },
+  "https://c.example",
+  { public_key = "no endpoint" },
+]
+"#;
+        let s = settings_from_config(raw);
+        assert_eq!(
+            s.get("witness").map(String::as_str),
+            Some("https://a.example,https://b.example,https://c.example")
+        );
+        assert_eq!(
+            s.get("witness_keys").map(String::as_str),
+            Some(r#"{"https://a.example":"AB01"}"#)
+        );
+        assert_eq!(
+            console_key("CAPSULES_CHECKPOINT_WITNESS_KEYS").as_deref(),
+            Some("witness_keys")
         );
     }
 }

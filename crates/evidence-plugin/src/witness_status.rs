@@ -18,11 +18,15 @@
 //!    (`scitt_cose_receipt::verify_receipt`: the inclusion proof and the
 //!    witness's signature over the tree head).
 //!
-//! The witness's key is fetched from that witness only, the first time it is
-//! needed, and pinned in `<ledger>/witness-keys.json`: a later different key
-//! from the same URL is not taken, and its receipts stay unchecked. A witness
-//! is never trusted for more than this: it holds a checkpoint, so a later
-//! rewrite of the log is detectable by someone else.
+//! The witness's key: the operator gives it with the URL (the console's
+//! `public_key` on the witness's row, or `CAPSULES_CHECKPOINT_WITNESS_KEYS`),
+//! the same endpoint-plus-key shape capsule-cli takes. Only when none is given
+//! is the key fetched from that witness, the first time it is needed, and
+//! pinned in `<ledger>/witness-keys.json`; the page then says the key was
+//! pinned on first contact, not configured. A later different key from the
+//! same URL is not taken, and its receipts stay unchecked. A witness is never
+//! trusted for more than this: it holds a checkpoint, so a later rewrite of
+//! the log is detectable by someone else.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -89,12 +93,17 @@ fn ed25519_pem(pubkey_hex: &str) -> Option<String> {
 /// Fetch and pin the key of every configured witness that has none yet.
 /// Blocking (one GET per witness, to that witness only); call it off the
 /// async runtime. A failed fetch is retried after [`KEY_RETRY`].
-pub fn fetch_missing_keys(ledger_dir: &Path, witness_urls: &[String]) {
+pub fn fetch_missing_keys(
+    ledger_dir: &Path,
+    witness_urls: &[String],
+    configured_keys: &BTreeMap<String, String>,
+) {
     static LAST_TRY: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
     let mut keys = load_keys(ledger_dir);
     let mut changed = false;
     for url in witness_urls {
-        if keys.contains_key(url) {
+        // A key the operator gave is never fetched, and never replaced.
+        if configured_keys.contains_key(url) || keys.contains_key(url) {
             continue;
         }
         {
@@ -153,7 +162,7 @@ pub enum Check {
     Failed(String),
 }
 
-fn check_receipt(cp: &Value, receipt: &Value, key: Option<&PinnedKey>) -> Check {
+fn check_receipt(cp: &Value, receipt: &Value, key_hex: Option<&str>) -> Check {
     if receipt.get("is_stub").and_then(Value::as_bool) == Some(true) {
         return Check::Failed("a placeholder, not a receipt".into());
     }
@@ -163,7 +172,7 @@ fn check_receipt(cp: &Value, receipt: &Value, key: Option<&PinnedKey>) -> Check 
     if receipt.get("entry_hash").and_then(Value::as_str) != Some(expected.as_str()) {
         return Check::Failed("the receipt is for a different entry than this checkpoint".into());
     }
-    let Some(pem) = key.and_then(|k| ed25519_pem(&k.pubkey_hex)) else {
+    let Some(pem) = key_hex.and_then(ed25519_pem) else {
         return Check::NoKey;
     };
     let Some(bytes) = receipt
@@ -187,6 +196,23 @@ fn check_receipt(cp: &Value, receipt: &Value, key: Option<&PinnedKey>) -> Check 
     }
 }
 
+/// The key a witness's receipts are checked under, and where it came from:
+/// the operator's, else one pinned on first contact.
+fn key_for<'a>(
+    url: &str,
+    configured: &'a BTreeMap<String, String>,
+    pinned: &'a BTreeMap<String, PinnedKey>,
+) -> Option<(&'a str, &'static str)> {
+    configured
+        .get(url)
+        .map(|k| (k.as_str(), "configured"))
+        .or_else(|| {
+            pinned
+                .get(url)
+                .map(|k| (k.pubkey_hex.as_str(), "pinned_on_first_contact"))
+        })
+}
+
 /// A witness URL as shown: no userinfo, query or fragment.
 pub fn display_url(url: &str) -> String {
     crate::owner_maintenance::without_credentials(url)
@@ -206,8 +232,13 @@ fn witness_name(url: &str) -> String {
 ///   verified) and, when not, `check` (why).
 /// - `witness_status` lists every configured witness, and every witness a
 ///   receipt names, with what it holds.
-pub fn annotate(checkpoints: &mut [Value], configured: &[String], ledger_dir: &Path) -> Value {
-    let keys = load_keys(ledger_dir);
+pub fn annotate(
+    checkpoints: &mut [Value],
+    configured: &[String],
+    configured_keys: &BTreeMap<String, String>,
+    ledger_dir: &Path,
+) -> Value {
+    let pinned = load_keys(ledger_dir);
     let mut urls: Vec<String> = configured.to_vec();
     let mut seen: BTreeSet<String> = configured.iter().cloned().collect();
     #[derive(Default)]
@@ -233,7 +264,7 @@ pub fn annotate(checkpoints: &mut [Value], configured: &[String], ledger_dir: &P
             if seen.insert(url.clone()) {
                 urls.push(url.clone());
             }
-            let check = check_receipt(&snapshot, receipt, keys.get(&url));
+            let check = check_receipt(&snapshot, receipt, key_for(&url, configured_keys, &pinned).map(|(k, _)| k));
             let t = tally.entry(url).or_default();
             t.held += 1;
             match &check {
@@ -285,7 +316,7 @@ pub fn annotate(checkpoints: &mut [Value], configured: &[String], ledger_dir: &P
                 "held_count": t.held,
                 "checked_count": t.checked,
                 "latest_checked": t.latest_checked.map(|(size, ts)| json!({"mmr_size": size, "timestamp": ts})),
-                "key_pinned": keys.contains_key(url),
+                "key_source": key_for(url, configured_keys, &pinned).map_or(Value::Null, |(_, source)| Value::from(source)),
                 "problem": if t.checked > 0 && t.holds_latest { Value::Null } else { t.problem.map_or(Value::Null, Value::from) },
             })
         })
@@ -329,8 +360,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(KEYS_FILE), fixture::keys_json()).unwrap();
         let mut lines = vec![fixture::held_line()];
-        let rows = annotate(&mut lines, &[fixture::WITNESS.to_string()], dir.path());
+        let rows = annotate(&mut lines, &[fixture::WITNESS.to_string()], &BTreeMap::new(), dir.path());
         assert_eq!(rows[0]["state"], json!("latest"));
+        assert_eq!(rows[0]["key_source"], json!("pinned_on_first_contact"));
         assert_eq!(rows[0]["checked_count"], json!(1));
         assert_eq!(rows[0]["latest_checked"]["mmr_size"], json!(3));
         assert_eq!(rows[0]["problem"], Value::Null);
@@ -341,13 +373,12 @@ mod tests {
     fn the_same_receipt_under_another_key_or_on_another_checkpoint_does_not_check() {
         let cp = fixture::held_line();
         let receipt = cp["witnesses"][0].clone();
-        let other_key = PinnedKey { pubkey_hex: "11".repeat(32), key_id: "k".into(), pinned_at: "t".into() };
+        let other_key = "11".repeat(32);
         assert!(matches!(check_receipt(&cp, &receipt, Some(&other_key)), Check::Failed(_)));
         let mut moved = cp.clone();
         moved["root"] = json!("bb");
-        let key = PinnedKey { pubkey_hex: fixture::PUBKEY_HEX.into(), key_id: "k".into(), pinned_at: "t".into() };
-        assert_eq!(check_receipt(&cp, &receipt, Some(&key)), Check::Checked);
-        assert!(matches!(check_receipt(&moved, &receipt, Some(&key)), Check::Failed(_)));
+        assert_eq!(check_receipt(&cp, &receipt, Some(fixture::PUBKEY_HEX)), Check::Checked);
+        assert!(matches!(check_receipt(&moved, &receipt, Some(fixture::PUBKEY_HEX)), Check::Failed(_)));
     }
 
     fn line(mmr: u64, witnesses: Value) -> Value {
@@ -388,8 +419,8 @@ mod tests {
         assert_eq!(check_receipt(&cp, &right, None), Check::NoKey);
         let stub = json!({"ts_url": "https://w.example", "is_stub": true});
         assert!(matches!(check_receipt(&cp, &stub, None), Check::Failed(_)));
-        // A pinned key and garbage receipt bytes: refused, never counted.
-        let key = PinnedKey { pubkey_hex: "11".repeat(32), key_id: "k".into(), pinned_at: "t".into() };
+        // A key and garbage receipt bytes: refused, never counted.
+        let key = "11".repeat(32);
         let garbage = json!({"ts_url": "https://w.example",
                              "entry_hash": expected_entry_hash(&cp).unwrap(), "receipt_b64": "AAEC"});
         assert!(matches!(check_receipt(&cp, &garbage, Some(&key)), Check::Failed(_)));
@@ -407,7 +438,7 @@ mod tests {
             "https://a.example/log".to_string(),
             "https://user:pw@b.example".to_string(),
         ];
-        let rows = annotate(&mut lines, &configured, dir.path());
+        let rows = annotate(&mut lines, &configured, &BTreeMap::new(), dir.path());
         let rows = rows.as_array().unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["name"], json!("a.example"));
@@ -427,7 +458,7 @@ mod tests {
             3,
             json!([{"ts_url": "https://old.example", "entry_hash": "00", "receipt_b64": ""}]),
         )];
-        let rows = annotate(&mut lines, &[], dir.path());
+        let rows = annotate(&mut lines, &[], &BTreeMap::new(), dir.path());
         assert_eq!(rows[0]["configured"], json!(false));
         assert_eq!(rows[0]["state"], json!("unchecked"));
     }
@@ -435,7 +466,33 @@ mod tests {
     #[test]
     fn with_no_witness_configured_nothing_is_fetched() {
         let dir = tempfile::tempdir().unwrap();
-        fetch_missing_keys(dir.path(), &[]);
+        fetch_missing_keys(dir.path(), &[], &BTreeMap::new());
         assert!(!dir.path().join(KEYS_FILE).exists());
+        // A witness whose key the operator gave is never fetched (no network
+        // call is attempted for it, and nothing is pinned).
+        let given = BTreeMap::from([(fixture::WITNESS.to_string(), fixture::PUBKEY_HEX.to_string())]);
+        fetch_missing_keys(dir.path(), &[fixture::WITNESS.to_string()], &given);
+        assert!(!dir.path().join(KEYS_FILE).exists());
+    }
+
+    #[test]
+    fn a_configured_key_is_used_and_wins_over_a_pinned_one() {
+        let dir = tempfile::tempdir().unwrap();
+        // A wrong key pinned on first contact, the right one configured.
+        std::fs::write(
+            dir.path().join(KEYS_FILE),
+            json!({fixture::WITNESS: {"pubkey_hex": "11".repeat(32), "key_id": "x", "pinned_at": "t"}}).to_string(),
+        )
+        .unwrap();
+        let given = BTreeMap::from([(fixture::WITNESS.to_string(), fixture::PUBKEY_HEX.to_string())]);
+        let mut lines = vec![fixture::held_line()];
+        let rows = annotate(&mut lines, &[fixture::WITNESS.to_string()], &given, dir.path());
+        assert_eq!(rows[0]["state"], json!("latest"));
+        assert_eq!(rows[0]["key_source"], json!("configured"));
+        // Without the configured key, the wrong pinned one leaves it unchecked.
+        let mut lines = vec![fixture::held_line()];
+        let rows = annotate(&mut lines, &[fixture::WITNESS.to_string()], &BTreeMap::new(), dir.path());
+        assert_eq!(rows[0]["state"], json!("unchecked"));
+        assert_eq!(rows[0]["key_source"], json!("pinned_on_first_contact"));
     }
 }

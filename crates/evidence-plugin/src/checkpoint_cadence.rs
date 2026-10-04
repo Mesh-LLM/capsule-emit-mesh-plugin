@@ -57,6 +57,10 @@ const ENV_CADENCE_ENTRIES: &str = "CAPSULES_CHECKPOINT_CADENCE_ENTRIES";
 /// OPT-IN, always (this repo's posture) -- empty/unset means
 /// self-checkpointed only, no network.
 const ENV_WITNESS_URLS: &str = "CAPSULES_CHECKPOINT_WITNESS_URLS";
+/// Each witness's public key, as the operator gives it: a JSON object from
+/// witness URL to its raw Ed25519 key in hex. A witness with no key here has
+/// its key fetched from it once and pinned (`witness_status`).
+const ENV_WITNESS_KEYS: &str = "CAPSULES_CHECKPOINT_WITNESS_KEYS";
 /// `checkpoint_pad_bucket`: pad every checkpoint's leaf count up to a
 /// multiple of this (Evidence Layer -00 §12.1). Defaults to
 /// `DEFAULT_PAD_BUCKET` (32); `0` turns padding off.
@@ -71,6 +75,34 @@ pub fn witness_configured() -> bool {
 /// The witness URLs the operator named, in order: none by default.
 pub fn witness_urls() -> Vec<String> {
     config_from_env().witness_urls
+}
+
+/// The witness keys the operator gave, by witness URL (hex, lower-cased).
+/// A value that is not a 32-byte hex key is dropped with a warning, so that
+/// witness's receipts stay unchecked rather than checked under a guess.
+pub fn witness_keys() -> std::collections::BTreeMap<String, String> {
+    witness_keys_from(crate::settings::var(ENV_WITNESS_KEYS).ok().as_deref())
+}
+
+fn witness_keys_from(raw: Option<&str>) -> std::collections::BTreeMap<String, String> {
+    let Some(raw) = raw.map(str::trim).filter(|r| !r.is_empty()) else {
+        return Default::default();
+    };
+    let Ok(map) = serde_json::from_str::<std::collections::BTreeMap<String, String>>(raw) else {
+        tracing::warn!(setting = ENV_WITNESS_KEYS, "not a JSON object of witness URL to key; no witness keys are configured");
+        return Default::default();
+    };
+    map.into_iter()
+        .filter_map(|(url, key)| {
+            let key = key.trim().to_ascii_lowercase();
+            if key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()) {
+                Some((url.trim().to_string(), key))
+            } else {
+                tracing::warn!(witness = %crate::witness_status::display_url(&url), "the configured witness key is not a 32-byte key in hex; it is not used");
+                None
+            }
+        })
+        .collect()
 }
 
 pub fn is_enabled() -> bool {
@@ -329,8 +361,9 @@ pub fn spawn(
                     // fetched from that witness only, and only when one is named.
                     if !witness_urls.is_empty() {
                         let (dir, urls) = (keys_dir.clone(), witness_urls.clone());
+                        let configured = witness_keys();
                         let _ = tokio::task::spawn_blocking(move || {
-                            crate::witness_status::fetch_missing_keys(&dir, &urls)
+                            crate::witness_status::fetch_missing_keys(&dir, &urls, &configured)
                         })
                         .await;
                     }
@@ -409,6 +442,18 @@ fn report_checkpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_witness_keys_are_hex_32_byte_keys_by_url() {
+        let k = "AB".repeat(32);
+        let keys = witness_keys_from(Some(&format!(
+            r#"{{"https://a.example": "{k}", "https://b.example": "short"}}"#
+        )));
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys["https://a.example"], "ab".repeat(32));
+        assert!(witness_keys_from(Some("not json")).is_empty());
+        assert!(witness_keys_from(None).is_empty());
+    }
 
     #[test]
     fn on_by_default_when_unset() {

@@ -238,17 +238,25 @@ describe('buildRegistrationCopy — only renders once a checkpoint exists', () =
   it('lists every witness by name with what it holds', () => {
     const rows = witnessRows({
       witness_status: [
-        { name: 'a.example', url: 'https://a.example', state: 'latest', held_count: 3, checked_count: 3 },
+        { name: 'a.example', url: 'https://a.example', state: 'latest', held_count: 3, checked_count: 3, key_source: 'configured' },
         { name: 'b.example', url: 'https://b.example', state: 'pending', held_count: 0, checked_count: 0 },
-        { name: 'c.example', url: 'https://c.example', state: 'unchecked', held_count: 1, checked_count: 0, problem: 'its key is not fetched yet' }
+        { name: 'c.example', url: 'https://c.example', state: 'unchecked', held_count: 1, checked_count: 0, problem: 'its key is not fetched yet' },
+        { name: 'd.example', url: 'https://d.example', state: 'earlier', held_count: 2, checked_count: 2, key_source: 'pinned_on_first_contact' }
       ]
     })
     expect(rows.map((row) => [row.name, row.status, row.tone])).toEqual([
       ['a.example', 'holds the latest checkpoint', 'good'],
       ['b.example', 'none held yet', 'pending'],
-      ['c.example', '1 receipt not checked', 'bad']
+      ['c.example', '1 receipt not checked', 'bad'],
+      ['d.example', 'holds an earlier checkpoint', 'good']
     ])
     expect(rows[2].detail).toBe('its key is not fetched yet')
+    expect(rows.map((row) => row.key)).toEqual([
+      'key configured',
+      null,
+      null,
+      'key pinned on first contact, not configured'
+    ])
     expect(witnessRows({})).toEqual([])
   })
 

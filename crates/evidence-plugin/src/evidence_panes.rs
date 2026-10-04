@@ -264,12 +264,20 @@ fn mmr_leaf_count(mmr_size: u64) -> Option<u64> {
 /// checkpoint line when carried (`covered_leaf_count`/`leaf_count`), else
 /// inverted from the line's `mmr_size` (a NODE count) via `mmr_leaf_count`.
 fn read_checkpoint_card(ledger_dir: &Path) -> Value {
-    read_checkpoint_card_with(ledger_dir, &crate::checkpoint_cadence::witness_urls())
+    read_checkpoint_card_with(
+        ledger_dir,
+        &crate::checkpoint_cadence::witness_urls(),
+        &crate::checkpoint_cadence::witness_keys(),
+    )
 }
 
 /// [`read_checkpoint_card`] for these configured witness URLs. A receipt
 /// counts only once `witness_status` has checked it.
-fn read_checkpoint_card_with(ledger_dir: &Path, configured: &[String]) -> Value {
+fn read_checkpoint_card_with(
+    ledger_dir: &Path,
+    configured: &[String],
+    configured_keys: &std::collections::BTreeMap<String, String>,
+) -> Value {
     let path = ledger_dir.join("checkpoints.jsonl");
     let mut checkpoints: Vec<Value> = match std::fs::read_to_string(&path) {
         Ok(text) => text
@@ -281,7 +289,7 @@ fn read_checkpoint_card_with(ledger_dir: &Path, configured: &[String]) -> Value 
         Err(_) => Vec::new(),
     };
     let witness_status =
-        crate::witness_status::annotate(&mut checkpoints, configured, ledger_dir);
+        crate::witness_status::annotate(&mut checkpoints, configured, configured_keys, ledger_dir);
     let held = |cp: &Value| {
         cp.get("witnesses")
             .and_then(Value::as_array)
@@ -5766,7 +5774,11 @@ mod tests {
             format!("{}\n{}\n", fixture::held_line(), latest),
         )
         .unwrap();
-        let card = read_checkpoint_card_with(dir.path(), &[fixture::WITNESS.to_string()]);
+        let card = read_checkpoint_card_with(
+            dir.path(),
+            &[fixture::WITNESS.to_string()],
+            &Default::default(),
+        );
         assert_eq!(card["witnesses"], json!([]), "the latest is not held");
         assert_eq!(card["witnessed_checkpoint_count"], json!(1));
         assert_eq!(card["latest_witnessed"]["mmr_size"], json!(3));

@@ -462,8 +462,15 @@ export type WitnessRow = {
   status: string
   /** Why it does not count yet, or what it holds; null when nothing to add. */
   detail: string | null
+  /** Where the key its receipts are checked under came from; null when it
+   *  has none yet. */
+  key: string | null
   tone: 'good' | 'pending' | 'bad' | 'muted'
 }
+
+/** The words for where a witness's key came from. */
+export const WITNESS_KEY_CONFIGURED = 'key configured'
+export const WITNESS_KEY_PINNED = 'key pinned on first contact, not configured'
 
 export function witnessRows(card: JsonRecord | null | undefined): WitnessRow[] {
   const rows = Array.isArray(card?.witness_status) ? (card.witness_status as unknown[]) : []
@@ -478,14 +485,21 @@ export function witnessRows(card: JsonRecord | null | undefined): WitnessRow[] {
       const latest = row.latest_checked as JsonRecord | null | undefined
       const when =
         latest && typeof latest.timestamp === 'string' ? formatExchangeTimestamp(latest.timestamp) : null
+      const key =
+        row.key_source === 'configured'
+          ? WITNESS_KEY_CONFIGURED
+          : row.key_source === 'pinned_on_first_contact'
+            ? WITNESS_KEY_PINNED
+            : null
       const checkedText = `${checked} checkpoint${checked === 1 ? '' : 's'} held, receipt${checked === 1 ? '' : 's'} checked`
       switch (row.state) {
         case 'latest':
-          return { name, url, status: 'holds the latest checkpoint', detail: checkedText, tone: 'good' as const }
+          return { name, url, key, status: 'holds the latest checkpoint', detail: checkedText, tone: 'good' as const }
         case 'earlier':
           return {
             name,
             url,
+            key,
             status: 'holds an earlier checkpoint',
             detail: when ? `${checkedText} · latest held ${when}` : checkedText,
             tone: 'good' as const
@@ -494,6 +508,7 @@ export function witnessRows(card: JsonRecord | null | undefined): WitnessRow[] {
           return {
             name,
             url,
+            key,
             status: `${held} receipt${held === 1 ? '' : 's'} not checked`,
             detail: problem,
             tone: 'bad' as const
@@ -502,12 +517,13 @@ export function witnessRows(card: JsonRecord | null | undefined): WitnessRow[] {
           return {
             name,
             url,
+            key,
             status: 'no longer in your settings',
             detail: checked > 0 ? checkedText : null,
             tone: 'muted' as const
           }
         default:
-          return { name, url, status: 'none held yet', detail: problem, tone: 'pending' as const }
+          return { name, url, key, status: 'none held yet', detail: problem, tone: 'pending' as const }
       }
     })
 }

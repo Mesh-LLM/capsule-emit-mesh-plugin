@@ -18,9 +18,11 @@ needed.
   `--config <path>` must also have
   `MESH_LLM_CONFIG=<path>` in its environment, or the plugin reads `~/.mesh-llm/config.toml`.
 
-- **Several witnesses.** **Witnesses** in the console is a list of URLs (still none by default, and
-  no witness is contacted until you add one). The Evidence page shows what each witness holds, and
-  counts a witness only once its receipt checks against the witness's key.
+- **Several witnesses.** **Witnesses** in the console is a list: each witness's URL and, if you have
+  it, its public key (still none by default, and no witness is contacted until you add one). The
+  Evidence page shows what each witness holds, and counts a witness only once its receipt checks
+  against the witness's key. A key you don't give is fetched from the witness once and kept, and
+  the page says so.
 
 ## What's new in 0.1.2
 

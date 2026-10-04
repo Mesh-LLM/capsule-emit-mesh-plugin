@@ -21,8 +21,8 @@
 //! (off unless set) and `CAPSULES_STOP_ROUTING_WINDOW_DAYS`.
 
 use mesh_llm_plugin::{
-    config_array, config_enum, config_integer, config_schema, config_setting, config_url,
-    ManifestEntry,
+    config_array, config_enum, config_integer, config_object, config_object_property,
+    config_schema, config_setting, config_string, config_url, ManifestEntry,
 };
 
 pub const RECORD_AT_COMPLETION_KEY: &str = "share_record_at_completion";
@@ -152,13 +152,23 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
                 .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 2),
         )
         .setting(
-            config_setting(WITNESS_KEY, config_array(config_url()))
-                .description(
-                    "Witness services to offer this node's checkpoints to, one URL each. Empty is \
-                     off (the default): there is no default witness, and the plugin contacts none \
-                     until you add one. The Evidence page shows what each witness holds. Takes \
-                     effect when mesh-llm is restarted.",
-                )
+            config_setting(
+                WITNESS_KEY,
+                config_array(config_object([
+                    config_object_property("endpoint", config_url())
+                        .required(true)
+                        .description("The witness service's URL.")
+                        .into(),
+                    config_object_property("public_key", config_string())
+                        .description(
+                            "The witness's Ed25519 public key in hex, as its operator publishes it. Leave empty to have the plugin fetch it from the witness once and keep it; the Evidence page then says the key was pinned on first contact, not configured.",
+                        )
+                        .into(),
+                ])),
+            )
+            .description(
+                "Witness services to offer this node's checkpoints to: each one's URL, and its public key if you have it. Empty is off (the default): there is no default witness, and the plugin contacts none until you add one. The Evidence page shows what each witness holds. Takes effect when mesh-llm is restarted.",
+            )
                 .label("Witnesses")
                 .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 3),
         )
@@ -344,13 +354,17 @@ mod tests {
             .unwrap();
         assert_eq!(witness.default_json, None);
         assert!(!witness.required);
-        // A list of URLs: several witnesses, each named by the operator.
+        // A list of witnesses, each an endpoint and, optionally, its key.
         let value = witness.value_schema.as_ref().unwrap();
         assert_eq!(value.kind, proto::PluginConfigValueKind::Array as i32);
-        assert_eq!(
-            value.items.as_ref().unwrap().kind,
-            proto::PluginConfigValueKind::Url as i32
-        );
+        let row = value.items.as_ref().unwrap();
+        assert_eq!(row.kind, proto::PluginConfigValueKind::Object as i32);
+        let props: Vec<_> = row
+            .object_properties
+            .iter()
+            .map(|p| (p.key.as_str(), p.required))
+            .collect();
+        assert_eq!(props, [("endpoint", true), ("public_key", false)]);
     }
 
     #[test]
