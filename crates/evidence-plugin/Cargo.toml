@@ -58,6 +58,9 @@ ed25519-dalek = "2"
 # COSE_Sign1 bytes for its JSON carrier.
 base64 = "0.22"
 tracing = "0.1"
+# mesh keeps the console's plugin settings in its config file and does not
+# pass them to the plugin; the plugin reads them there (`settings`).
+toml = "0.9"
 # Record times and the stop-routing rule's window (`routing_rule`).
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

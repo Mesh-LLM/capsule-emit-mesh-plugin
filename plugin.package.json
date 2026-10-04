@@ -88,7 +88,7 @@
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Witness service URL to checkpoint against. Empty is off (the default) -- no default witness URL, no network call without an operator-supplied one.",
+        "description": "Witness service URL to checkpoint against. Empty is off (the default) -- no default witness URL, no network call without an operator-supplied one. Takes effect when mesh-llm is restarted.",
         "presentation": {
           "label": "Witness",
           "category_id": "share",

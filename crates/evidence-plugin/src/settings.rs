@@ -1,5 +1,17 @@
 //! The plugin's environment settings. Each is named `CAPSULE_EMIT_MESH_<NAME>`.
 //!
+//! A setting the environment does not set is read from the value the
+//! operator saved in mesh's console (Configuration > Plugins). mesh-llm keeps
+//! that value in its own config file, under this plugin's `[[plugin]]` entry
+//! (`[plugin.settings]`), and does not pass it to the plugin process, so the
+//! plugin reads it there itself: the file `MESH_LLM_CONFIG` names, or
+//! `~/.mesh-llm/config.toml`. The console key is the setting's name without
+//! the prefix, lower-cased (`CAPSULE_EMIT_MESH_SHARE_HISTORY_SEGMENTS` is
+//! `share_history_segments`), except the witness: the console's `witness` is
+//! `CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS`. The environment wins over the
+//! console. A setting read once at start (the witness, the checkpoint
+//! cadence) takes effect when mesh-llm is restarted.
+//!
 //! For one release the old name, `ADMISSION_POLICY_<NAME>`, is still read when
 //! the new one is unset, and a log line names the setting that was used. When
 //! both are set the new name wins and the log line says the old one was
@@ -68,8 +80,139 @@ fn log_once(name: &str, legacy: &str, source: Source) {
     }
 }
 
+/// This plugin's name in mesh's config file (`[[plugin]] name = ...`).
+pub const PLUGIN_NAME: &str = "capsule-emit-mesh";
+
+/// The console key a setting is saved under in mesh's config file.
+pub fn console_key(name: &str) -> Option<String> {
+    let rest = name.strip_prefix(PREFIX)?;
+    Some(match rest {
+        "CHECKPOINT_WITNESS_URLS" => "witness".to_string(),
+        other => other.to_ascii_lowercase(),
+    })
+}
+
+/// mesh's config file: the one `MESH_LLM_CONFIG` names, or the default.
+fn host_config_path() -> Option<std::path::PathBuf> {
+    if let Some(path) = std::env::var_os("MESH_LLM_CONFIG") {
+        return Some(path.into());
+    }
+    // Tests never read the developer's own mesh config.
+    if cfg!(test) {
+        return None;
+    }
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty())?;
+    Some(
+        std::path::Path::new(&home)
+            .join(".mesh-llm")
+            .join("config.toml"),
+    )
+}
+
+/// The settings saved in the console for this plugin, from mesh's config
+/// file. Read again whenever the file changes, so a setting read per use
+/// follows the console without a restart.
+fn console_settings() -> std::collections::BTreeMap<String, String> {
+    type Cached = (
+        std::path::PathBuf,
+        Option<std::time::SystemTime>,
+        u64,
+        std::collections::BTreeMap<String, String>,
+    );
+    static CACHE: OnceLock<Mutex<Option<Cached>>> = OnceLock::new();
+    let Some(path) = host_config_path() else {
+        return Default::default();
+    };
+    let meta = std::fs::metadata(&path).ok();
+    let stamp = (
+        meta.as_ref().and_then(|m| m.modified().ok()),
+        meta.as_ref().map_or(0, |m| m.len()),
+    );
+    let mut cache = CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((p, modified, len, values)) = cache.as_ref() {
+        if *p == path && (*modified, *len) == stamp {
+            return values.clone();
+        }
+    }
+    let values = std::fs::read_to_string(&path)
+        .ok()
+        .map(|raw| settings_from_config(&raw))
+        .unwrap_or_default();
+    *cache = Some((path, stamp.0, stamp.1, values.clone()));
+    values
+}
+
+/// This plugin's `[plugin.settings]` from a mesh config file, as strings. A
+/// file that does not parse yields nothing (the defaults stand).
+fn settings_from_config(raw: &str) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    let Ok(doc) = raw.parse::<toml::Table>() else {
+        tracing::warn!(
+            "mesh's config file did not parse; the console's plugin settings are not read"
+        );
+        return out;
+    };
+    let Some(plugins) = doc.get("plugin").and_then(|p| p.as_array()) else {
+        return out;
+    };
+    for entry in plugins {
+        if entry.get("name").and_then(|n| n.as_str()) != Some(PLUGIN_NAME) {
+            continue;
+        }
+        let Some(settings) = entry.get("settings").and_then(|s| s.as_table()) else {
+            continue;
+        };
+        for (key, value) in settings {
+            let text = match value {
+                toml::Value::String(s) => s.clone(),
+                toml::Value::Integer(n) => n.to_string(),
+                toml::Value::Boolean(b) => b.to_string(),
+                toml::Value::Float(f) => f.to_string(),
+                _ => continue,
+            };
+            out.insert(key.clone(), text);
+        }
+    }
+    out
+}
+
+/// The console's value for a setting, when the environment sets neither its
+/// name nor its old name.
+fn console_value(name: &str) -> Option<String> {
+    let key = console_key(name)?;
+    let value = console_settings().get(&key).cloned()?;
+    if value.trim().is_empty() {
+        return None;
+    }
+    static LOGGED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let mut logged = LOGGED
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if logged.insert(name.to_string()) {
+        tracing::info!(setting = name, console_key = %key, "read the setting from the console (mesh's config file)");
+    }
+    Some(value)
+}
+
+/// Where a setting's value comes from: "env", "console", or `None` (unset).
+pub fn origin(name: &str) -> Option<&'static str> {
+    let in_env = std::env::var_os(name).is_some()
+        || legacy_name(name).is_some_and(|l| std::env::var_os(l).is_some());
+    if in_env {
+        Some("env")
+    } else if console_value(name).is_some() {
+        Some("console")
+    } else {
+        None
+    }
+}
+
 /// `std::env::var` for a plugin setting: `name` is the setting's current
-/// name; its old name is read when `name` is unset.
+/// name; its old name is read when `name` is unset, then the console's value.
 pub fn var(name: &str) -> Result<String, VarError> {
     let Some(legacy) = legacy_name(name) else {
         return std::env::var(name);
@@ -89,7 +232,7 @@ pub fn var(name: &str) -> Result<String, VarError> {
             log_once(name, &legacy, source);
             value
         }
-        None => Err(VarError::NotPresent),
+        None => console_value(name).ok_or(VarError::NotPresent),
     }
 }
 
@@ -98,9 +241,13 @@ pub fn var_os(name: &str) -> Option<OsString> {
     let Some(legacy) = legacy_name(name) else {
         return std::env::var_os(name);
     };
-    let (value, source) = pick(std::env::var_os(name), std::env::var_os(&legacy))?;
-    log_once(name, &legacy, source);
-    Some(value)
+    match pick(std::env::var_os(name), std::env::var_os(&legacy)) {
+        Some((value, source)) => {
+            log_once(name, &legacy, source);
+            Some(value)
+        }
+        None => console_value(name).map(OsString::from),
+    }
 }
 
 #[cfg(test)]
@@ -157,5 +304,57 @@ mod tests {
         assert_eq!(pick(None, Some(2)), Some((2, Source::Legacy)));
         assert_eq!(pick(Some(1), Some(2)), Some((1, Source::CurrentOverLegacy)));
         assert_eq!(pick::<i32>(None, None), None);
+    }
+
+    #[test]
+    fn console_keys_are_the_lower_cased_suffix_and_the_witness() {
+        assert_eq!(
+            console_key("CAPSULE_EMIT_MESH_SHARE_HISTORY_SEGMENTS").as_deref(),
+            Some("share_history_segments")
+        );
+        assert_eq!(
+            console_key("CAPSULE_EMIT_MESH_REFEREE_BAR_DAYS").as_deref(),
+            Some("referee_bar_days")
+        );
+        assert_eq!(
+            console_key("CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS").as_deref(),
+            Some("witness")
+        );
+        assert_eq!(console_key("HOME"), None);
+    }
+
+    #[test]
+    fn only_this_plugins_settings_are_read_from_the_config_file() {
+        let raw = r#"
+[[plugin]]
+name = "other"
+[plugin.settings]
+witness = "https://other.example"
+
+[[plugin]]
+name = "capsule-emit-mesh"
+enabled = true
+[plugin.settings]
+witness = "https://witness.example"
+share_history_segments = "peers"
+referee_bar_days = 7
+adjudicate_differing_twins = "off"
+"#;
+        let s = settings_from_config(raw);
+        assert_eq!(
+            s.get("witness").map(String::as_str),
+            Some("https://witness.example")
+        );
+        assert_eq!(
+            s.get("share_history_segments").map(String::as_str),
+            Some("peers")
+        );
+        assert_eq!(s.get("referee_bar_days").map(String::as_str), Some("7"));
+        assert_eq!(
+            s.get("adjudicate_differing_twins").map(String::as_str),
+            Some("off")
+        );
+        assert!(settings_from_config("not [valid").is_empty());
+        assert!(settings_from_config("").is_empty());
     }
 }

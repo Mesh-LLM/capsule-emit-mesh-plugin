@@ -5,16 +5,15 @@
 //! Plugins with the host's own controls -- nothing here is a score, and
 //! nothing here ranks anyone.
 //!
-//! **Declarative only.** mesh-llm 0.76 gives a plugin its own declared
-//! `config_schema` but there is no live host-to-plugin config channel wired
-//! yet -- an operator sets the four `CAPSULE_EMIT_MESH_SHARE_*`
-//! / `CAPSULE_EMIT_MESH_WITNESS` env vars directly on the node today. This
-//! module's setting keys match those env var suffixes byte for byte
-//! (`share_record_at_completion` -> `CAPSULE_EMIT_MESH_SHARE_RECORD_AT_COMPLETION`,
-//! etc.) so wiring the host's resolved value into this process's env later
-//! is a direct 1:1 map, not a re-naming exercise. Adding this schema does
-//! not by itself flip any runtime behavior -- it only makes the four
-//! switches visible and editable in the console.
+//! **How a console value reaches the plugin.** mesh-llm saves what the
+//! operator sets in the console to its config file (this plugin's
+//! `[plugin.settings]`) and does not pass it to the plugin process (no env,
+//! no protocol message). `crate::settings::var` reads it there when the
+//! environment does not set the setting. Each key is its env var's suffix
+//! lower-cased (`share_record_at_completion` ->
+//! `CAPSULE_EMIT_MESH_SHARE_RECORD_AT_COMPLETION`), except `witness`, which
+//! is `CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS`. The witness is read when
+//! the plugin starts: restart mesh-llm after changing it.
 //!
 //! The same schema also declares the opt-in stop-routing rule's two settings
 //! (`routing_rule`), under their own "Routing rule" category, on the same
@@ -155,7 +154,8 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
             config_setting(WITNESS_KEY, config_url())
                 .description(
                     "Witness service URL to checkpoint against. Empty is off (the default) -- no \
-                     default witness URL, no network call without an operator-supplied one.",
+                     default witness URL, no network call without an operator-supplied one. \
+                     Takes effect when mesh-llm is restarted.",
                 )
                 .label("Witness")
                 .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 3),
@@ -272,7 +272,7 @@ mod tests {
             (RECORD_AT_COMPLETION_KEY, "SHARE_RECORD_AT_COMPLETION"),
             (HISTORY_SEGMENTS_KEY, "SHARE_HISTORY_SEGMENTS"),
             (ADJUDICATIONS_KEY, "SHARE_ADJUDICATIONS"),
-            (WITNESS_KEY, "WITNESS"),
+            (WITNESS_KEY, "CHECKPOINT_WITNESS_URLS"),
             (ADJUDICATE_DIFFERING_TWINS_KEY, "ADJUDICATE_DIFFERING_TWINS"),
             (REFEREE_BAR_DAYS_KEY, "REFEREE_BAR_DAYS"),
             (STOP_ROUTING_AFTER_KEY, "STOP_ROUTING_AFTER_CONTRADICTIONS"),
@@ -280,9 +280,9 @@ mod tests {
         ];
         for (key, suffix) in expected_env_suffix {
             assert_eq!(
-                key.to_uppercase(),
-                suffix,
-                "key {key} must upper-case to its env suffix"
+                crate::settings::console_key(&format!("CAPSULE_EMIT_MESH_{suffix}")).as_deref(),
+                Some(key),
+                "env suffix {suffix} must map to the console key {key}"
             );
         }
     }

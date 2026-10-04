@@ -630,7 +630,9 @@ fn switch(env: &str, default: Option<&str>) -> Value {
         .ok()
         .filter(|v| !v.trim().is_empty())
     {
-        Some(value) => json!({ "value": value, "source": "set" }),
+        Some(value) => {
+            json!({ "value": value, "source": crate::settings::origin(env).unwrap_or("set") })
+        }
         None => json!({ "value": default, "source": "default" }),
     }
 }
