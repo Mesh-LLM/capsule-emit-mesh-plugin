@@ -109,6 +109,7 @@ impl Harness {
         let request_id = self
             .send(Payload::InitializeRequest(proto::InitializeRequest {
                 host_protocol_version: PROTOCOL_VERSION,
+                host_capabilities: Vec::new(),
                 host_version: "interop-test".to_string(),
                 host_info_json: "{}".to_string(),
                 mesh_visibility: proto::MeshVisibility::Private as i32,

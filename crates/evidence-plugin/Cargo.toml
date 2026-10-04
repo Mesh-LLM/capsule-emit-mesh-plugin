@@ -43,7 +43,7 @@ mutant-referee-verdict-names-wrong-twin = []
 mutant-referee-hold-skips-asked-check = []
 
 [dependencies]
-mesh-llm-plugin = "0.77"
+mesh-llm-plugin = "0.78"
 tokio = { version = "1", features = ["full"] }
 axum = "0.7"
 serde = { version = "1", features = ["derive"] }

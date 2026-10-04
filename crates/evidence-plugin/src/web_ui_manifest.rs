@@ -93,7 +93,8 @@ mod tests {
                     "label": "Evidence",
                     "route": "evidence",
                     "bundle_id": "main",
-                    "entry_script": "register-mesh-plugin-ui.js"
+                    "entry_script": "register-mesh-plugin-ui.js",
+                    "placement": "auxiliary"
                 }],
                 "bundles": [{ "id": "main", "root_path": "bundle" }]
             })

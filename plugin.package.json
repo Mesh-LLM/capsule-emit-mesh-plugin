@@ -15,11 +15,11 @@
           "allow_additional_properties": false
         },
         "required": false,
-        "default_json": "\"counterparty\"",
+        "default_json": "\"off\"",
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Push this node's own sealed record of a completed exchange to the counterparty (counterparty), or don't (off). With checkpointing on, the push also carries a signed checkpoint of this node's log and the record's inclusion proof -- the checkpoint reveals the log's total size (records across all peers) and its time, never any other record's content. Symmetric: a node with this off also does not receive the other side's push -- fetch-on-request still works either way.",
+        "description": "Push this node's own sealed record of a completed exchange to the counterparty (counterparty), or don't (off, the default). With checkpointing on, the push also carries a signed checkpoint of this node's log and the record's inclusion proof -- the checkpoint reveals the log's total size (records across all peers) and its time, never any other record's content. Symmetric: a node with this off also does not receive the other side's push -- fetch-on-request still works either way.",
         "presentation": {
           "label": "Record at completion",
           "category_id": "share",
@@ -65,11 +65,11 @@
           "allow_additional_properties": false
         },
         "required": false,
-        "default_json": "\"deliver_to_subjects\"",
+        "default_json": "\"off\"",
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Deliver a sealed verdict to every node it judges (default), or don't. The subject acks or disputes on its own chain -- this is delivery, never a computed standing.",
+        "description": "Deliver a sealed verdict to every node it judges, or don't (off, the default). The subject acks or disputes on its own chain -- this is delivery, never a computed standing.",
         "presentation": {
           "label": "Adjudications",
           "category_id": "share",
@@ -132,11 +132,11 @@
           "allow_additional_properties": false
         },
         "required": false,
-        "default_json": "\"on\"",
+        "default_json": "\"off\"",
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Ask a referee when two twins of a pair the host marked answered the same request at temperature 0, on the same model and weights, and differ (on, the default), or never (off). At most one call per pair, never retried. A pair with no ruling reads \"Not adjudicated\" with the reason, and never counts against either twin.",
+        "description": "Ask a referee when two twins of a pair a client marked answered the same request at temperature 0, on the same model and weights, and differ (on), or never (off, the default). A referee answers with its own inference, so only you turn this on. At most one call per pair, never retried. A pair with no ruling reads \"Not adjudicated\" with the reason, and never counts against either twin.",
         "presentation": {
           "label": "Ask a referee when twins differ",
           "category_id": "referee",
@@ -175,7 +175,7 @@
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Stop routing to a peer after this many contradictions within the window below. Off when empty or 0 (the default). Only verdicts this node asked a referee for, and whose signature it checked, count, once per referee and pair of answers; with N of 2 or more, no single referee can reach N alone. When it fires, the host blocks the peer until you undo it, exactly like Stop routing, and the sealed record names this rule and cites the verdicts. Undo it the same way. No figure about a peer is computed, and nothing is sent.",
+        "description": "Stop routing to a peer after this many contradictions within the window below. Off when empty or 0 (the default). Only verdicts this node asked a referee for, and whose signature it checked, count, once per referee and pair of answers; with N of 2 or more, no single referee can reach N alone. When it fires, the plugin asks the host to stop routing to that peer until you undo it. The host does that only if you also set allow_peer_blocks = true for this plugin in mesh-llm's config; otherwise it refuses and nothing is blocked. The host records the block as this plugin's, and the plugin seals a record that names this rule and cites the verdicts. Undo it like any Stop routing. No figure about a peer is computed.",
         "presentation": {
           "label": "Stop routing after N contradictions",
           "category_id": "routing_rule",
@@ -213,7 +213,8 @@
         "label": "Evidence",
         "route": "evidence",
         "bundle_id": "main",
-        "entry_script": "register-mesh-plugin-ui.js"
+        "entry_script": "register-mesh-plugin-ui.js",
+        "placement": "auxiliary"
       }
     ],
     "bundles": [

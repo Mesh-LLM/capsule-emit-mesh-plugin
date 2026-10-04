@@ -138,6 +138,40 @@ pub fn due(
         .collect()
 }
 
+/// What the rule asks of the host for the firings of one evaluation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Planned {
+    /// This host has no plugin peer-block path: nothing is asked.
+    NoHostHook,
+    /// The peer is already blocked: nothing is asked, and its verdicts are
+    /// spent.
+    AlreadyBlocked(Firing),
+    /// Ask the host to block the peer.
+    Block(Firing),
+}
+
+/// The steps for `firings`, given whether the host already blocks a peer
+/// (`None`: the host has no peer-block path). Pure: the decision the parity
+/// corpus checks.
+pub fn plan(firings: &[Firing], blocked: Option<&dyn Fn(&str) -> bool>) -> Vec<Planned> {
+    if firings.is_empty() {
+        return Vec::new();
+    }
+    let Some(blocked) = blocked else {
+        return vec![Planned::NoHostHook];
+    };
+    firings
+        .iter()
+        .map(|firing| {
+            if blocked(&firing.peer_id) {
+                Planned::AlreadyBlocked(firing.clone())
+            } else {
+                Planned::Block(firing.clone())
+            }
+        })
+        .collect()
+}
+
 /// Every verdict id a rule block has cited.
 pub fn read_cited(ledger_dir: &Path) -> HashSet<String> {
     let Ok(text) = std::fs::read_to_string(ledger_dir.join(CITED_FILENAME)) else {
@@ -303,15 +337,24 @@ pub async fn evaluate<H: BlockHost>(
         }
     };
     let mut outcomes = Vec::new();
-    for firing in due(rule, &by_peer, &cited, now) {
-        if blocked.contains(&firing.peer_id) {
-            // Already blocked: these verdicts are spent, nothing is asked.
-            note_cited(capsules, None, None, &firing);
-            outcomes.push(Outcome::AlreadyBlocked {
-                peer_id: firing.peer_id,
-            });
-            continue;
-        }
+    let firings = due(rule, &by_peer, &cited, now);
+    let holds = |peer: &str| blocked.iter().any(|b| b == peer);
+    for planned in plan(&firings, Some(&holds)) {
+        let firing = match planned {
+            Planned::NoHostHook => {
+                outcomes.push(Outcome::NoHostPath);
+                break;
+            }
+            Planned::AlreadyBlocked(firing) => {
+                // Already blocked: these verdicts are spent, nothing is asked.
+                note_cited(capsules, None, None, &firing);
+                outcomes.push(Outcome::AlreadyBlocked {
+                    peer_id: firing.peer_id,
+                });
+                continue;
+            }
+            Planned::Block(firing) => firing,
+        };
         {
             let refused = refused_recently()
                 .lock()
