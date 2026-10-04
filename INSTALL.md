@@ -212,13 +212,14 @@ Until 0.1.3 the plugin was called `capsule-emit-mesh`. To upgrade, install
 capsule-emit-mesh` (this leaves its data directory alone). Then restart the
 node.
 
-- **Records and key.** At its first start, `capsules` moves the old default
-  directory (`$XDG_DATA_HOME/capsule-emit-mesh` or
-  `~/.local/share/capsule-emit-mesh`) to the new name with a single rename: one
-  copy, never two. It verifies the log before and after the move and logs the
-  entry count and the chain's head. If the log doesn't verify the same after the
-  move, the plugin moves it back and refuses to start. A directory you chose
-  with `CAPSULES_DATA_DIR` (or the old `CAPSULE_EMIT_MESH_DATA_DIR`) is not moved.
+- **Records and key.** `capsules` keeps using the old default directory
+  (`$XDG_DATA_HOME/capsule-emit-mesh` or `~/.local/share/capsule-emit-mesh`)
+  where it is, under its old name: nothing is moved or copied. A directory you
+  chose with `CAPSULES_DATA_DIR` (or the old `CAPSULE_EMIT_MESH_DATA_DIR`) is
+  used as it is.
+- **Stop the old plugin first.** On Linux the plugin refuses to start while
+  another process has the log open (capsule-emit-mesh before 0.1.3 takes no
+  lock), and says which process; two writers on one log would break its chain.
 - **Both directories present.** If the node has a key or a log under both
   names, the plugin refuses to start and names both. Keep the one that is this
   node's, move the other out of the way, and start again.

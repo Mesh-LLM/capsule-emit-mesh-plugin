@@ -14,7 +14,7 @@ Thanks for helping. This file covers how changes are made and what CI checks.
   or data directories. CI fails on key or token material (`scripts/no-keys.sh`).
 - **The plugin's id stays `capsules`.** Nodes key their data directory
   and installed plugin on it. (It was `capsule-emit-mesh` until 0.1.3; that
-  rename moves a node's data directory once, see `INSTALL.md`.)
+  rename keeps a node's existing data directory in place, see `INSTALL.md`.)
 
 ## Building and testing locally
 

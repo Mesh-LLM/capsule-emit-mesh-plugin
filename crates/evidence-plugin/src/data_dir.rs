@@ -11,10 +11,15 @@
 //! 3. else `$HOME/.local/share/capsules`.
 //!
 //! The plugin was called `capsule-emit-mesh` before 0.1.3, and its default
-//! directory carried that name. A node that has one is moved to the new name
-//! once (`move_old_default`): a single rename, with the ledger's chain verified
-//! before and after. A node with both directories refuses to start and says
-//! why, rather than pick one or merge them.
+//! directory carried that name. A node that has one keeps using it, in place,
+//! under its old name (`existing_old_default`): nothing is moved or copied, so
+//! an upgrade can never race a writer that is still running. A node with both
+//! directories refuses to start and says why, rather than pick one or merge
+//! them.
+//!
+//! Before using a directory whose ledger exists, the plugin refuses if another
+//! process has that ledger open (Linux, from `/proc`): a plugin from before
+//! 0.1.3 takes no lock, so the lock alone cannot keep it out.
 //!
 //! With none of these the plugin refuses to start. It also refuses to mint a
 //! key where one is expected: a ledger with records but no key, or a key left
@@ -104,50 +109,10 @@ fn holds_node(dir: &Path) -> bool {
     dir.join(NODE_KEY).exists() || dir.join(LEDGER).exists()
 }
 
-/// What a ledger's chain verifies to: its entry count and its head.
-#[derive(Debug, PartialEq, Eq)]
-struct ChainCheck {
-    entries: u64,
-    head: Option<String>,
-}
-
-/// Open the ledger under `dir`, which checks every record's id, its link to
-/// the record before it and its signed statement. `None` when `dir` has no
-/// ledger.
-fn verify_chain(dir: &Path) -> anyhow::Result<Option<ChainCheck>> {
-    if !dir.join(LEDGER).exists() {
-        return Ok(None);
-    }
-    let ledger_dir = dir
-        .join(LEDGER)
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_default();
-    let (ledger, _) = crate::producer::index::open_ledger(&ledger_dir)
-        .map_err(|e| anyhow::anyhow!("{e:?}"))
-        .with_context(|| format!("verify the ledger in {}", dir.display()))?;
-    Ok(Some(ChainCheck {
-        entries: ledger.entries(),
-        head: ledger.chain_head().map(str::to_string),
-    }))
-}
-
-/// A directory move this start made, for the log.
-#[derive(Debug)]
-struct Moved {
-    from: PathBuf,
-    chain: Option<ChainCheck>,
-}
-
-/// Move the default directory from the plugin's old name to `dir`, once.
-///
-/// Only the default directory moves: one the operator chose
-/// (`CAPSULES_DATA_DIR`, or the old setting name) is used where it is. The
-/// move is a single `rename` within one parent directory, so there is never a
-/// second copy of the key or the ledger. The ledger's chain is verified
-/// before the move and again after it; if the two disagree the move is undone
-/// and the plugin refuses to start.
-fn move_old_default(dir: &Path, chosen: bool) -> anyhow::Result<Option<Moved>> {
+/// The old default directory to keep using, when this node has one: only
+/// for the default location (a directory the operator chose is used as is),
+/// only when it holds a node, and never when the new one holds one too.
+fn existing_old_default(dir: &Path, chosen: bool) -> anyhow::Result<Option<PathBuf>> {
     if chosen {
         return Ok(None);
     }
@@ -166,46 +131,55 @@ fn move_old_default(dir: &Path, chosen: bool) -> anyhow::Result<Option<Moved>> {
             dir.display()
         );
     }
-    if dir.exists() {
-        // An empty directory is in the way of the rename; anything else is not
-        // ours to remove.
-        std::fs::remove_dir(dir).map_err(|_| {
-            anyhow::anyhow!(
-                "{} exists and is not empty, so {} cannot be moved there; \
-                 move {} out of the way and start again",
-                dir.display(),
-                old.display(),
-                dir.display()
-            )
-        })?;
+    Ok(Some(old))
+}
+
+/// The other processes that hold `path` open (Linux). Empty elsewhere, or
+/// when it cannot be told.
+fn other_holders(path: &Path) -> Vec<u32> {
+    if !cfg!(target_os = "linux") {
+        return Vec::new();
     }
-    // A second process doing the same move waits on this lock, then finds
-    // nothing left to move.
-    let held = lock(&old)?;
-    let before = verify_chain(&old)?;
-    std::fs::rename(&old, dir)
-        .with_context(|| format!("move {} to {}", old.display(), dir.display()))?;
-    drop(held);
-    let after = match verify_chain(dir) {
-        Ok(after) if after == before => after,
-        result => {
-            let undo = std::fs::rename(dir, &old);
-            bail!(
-                "moved {} to {}, but the ledger no longer verifies the same \
-                 (before {before:?}, after {result:?}); {}",
-                old.display(),
-                dir.display(),
-                match undo {
-                    Ok(()) => format!("moved it back to {}", old.display()),
-                    Err(e) => format!("could not move it back ({e}); it is at {}", dir.display()),
-                }
-            );
-        }
+    let Ok(target) = std::fs::canonicalize(path) else {
+        return Vec::new();
     };
-    Ok(Some(Moved {
-        from: old,
-        chain: after,
-    }))
+    let me = std::process::id();
+    let Ok(procs) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut holders = Vec::new();
+    for entry in procs.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
+            continue;
+        };
+        if pid == me {
+            continue;
+        }
+        let Ok(fds) = std::fs::read_dir(entry.path().join("fd")) else {
+            continue;
+        };
+        if fds
+            .flatten()
+            .any(|fd| std::fs::read_link(fd.path()).is_ok_and(|p| p == target))
+        {
+            holders.push(pid);
+        }
+    }
+    holders
+}
+
+/// Refuse a directory whose ledger another process has open: two writers on
+/// one hash chain break it, and a plugin from before 0.1.3 takes no lock.
+fn check_no_other_writer(dir: &Path) -> anyhow::Result<()> {
+    let holders = other_holders(&dir.join(LEDGER));
+    if let Some(pid) = holders.first() {
+        bail!(
+            "{} is open in another process (pid {pid}); refusing to write to a ledger another \
+             process is writing. Stop that process, or give this node its own {ENV_DATA_DIR}",
+            dir.join(LEDGER).display()
+        );
+    }
+    Ok(())
 }
 
 /// The plugin's data directory, absolute, checked.
@@ -217,16 +191,16 @@ pub fn data_dir() -> anyhow::Result<PathBuf> {
         std::env::var("HOME").ok().as_deref(),
         &cwd,
     )?;
-    if let Some(moved) = move_old_default(&dir, chosen)? {
-        let (entries, head) = moved.chain.map_or((0, None), |c| (c.entries, c.head));
-        tracing::warn!(
-            from = %moved.from.display(),
-            to = %dir.display(),
-            ledger_entries = entries,
-            chain_head = head.as_deref().unwrap_or("none"),
-            "moved the data directory to the plugin's new name; the ledger verified the same after the move"
-        );
-    }
+    let dir = match existing_old_default(&dir, chosen)? {
+        Some(old) => {
+            tracing::info!(
+                dir = %old.display(),
+                "using this node's existing data directory under the plugin's old name"
+            );
+            old
+        }
+        None => dir,
+    };
     check_no_second_key(&dir, chosen, &cwd)?;
     Ok(dir)
 }
@@ -259,6 +233,9 @@ pub fn lock(dir: &Path) -> anyhow::Result<DataDirLock> {
             file.set_len(0)
                 .and_then(|()| writeln!(file, "{}", std::process::id()))
                 .with_context(|| format!("write {}", path.display()))?;
+            // The lock keeps out another capsules process; a writer from
+            // before 0.1.3 takes no lock, so check the ledger itself too.
+            check_no_other_writer(dir)?;
             Ok(DataDirLock { _file: file })
         }
         Err(TryLockError::WouldBlock) => {
@@ -339,90 +316,64 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_node_moves_nothing() {
-        let parent = tmp("move-fresh");
-        assert!(move_old_default(&parent.join(APP_DIR), false)
-            .unwrap()
-            .is_none());
-        assert!(!parent.join(OLD_APP_DIR).exists());
+    fn a_fresh_node_uses_the_new_name() {
+        let parent = tmp("old-fresh");
+        assert!(existing_old_default(&parent.join(APP_DIR), false).unwrap().is_none());
     }
 
+    /// An upgraded node keeps its directory where it is: nothing moves, so a
+    /// writer still running there is never raced.
     #[test]
-    fn the_old_default_moves_whole_and_its_chain_verifies_the_same() {
-        let (old, new) = old_node("move-ledger", 3);
+    fn an_existing_node_keeps_its_old_directory_in_place() {
+        let (old, new) = old_node("old-in-place", 3);
         let key = std::fs::read(old.join(NODE_KEY)).unwrap();
-        let before = verify_chain(&old).unwrap().expect("a ledger");
-        assert_eq!(before.entries, 3);
-
-        let moved = move_old_default(&new, false).unwrap().expect("moved");
-        assert_eq!(moved.from, old);
-        assert_eq!(moved.chain.as_ref(), Some(&before));
-        assert!(!old.exists(), "one copy only: the old directory is gone");
-        assert_eq!(
-            std::fs::read(new.join(NODE_KEY)).unwrap(),
-            key,
-            "the same key"
-        );
-        assert_eq!(verify_chain(&new).unwrap(), Some(before));
-        // The next start finds nothing to move.
-        assert!(move_old_default(&new, false).unwrap().is_none());
+        let ledger = std::fs::read(old.join(LEDGER)).unwrap();
+        assert_eq!(existing_old_default(&new, false).unwrap(), Some(old.clone()));
+        assert!(!new.exists(), "nothing created under the new name");
+        assert_eq!(std::fs::read(old.join(NODE_KEY)).unwrap(), key);
+        assert_eq!(std::fs::read(old.join(LEDGER)).unwrap(), ledger);
     }
 
     #[test]
-    fn an_empty_new_directory_does_not_block_the_move() {
-        let (old, new) = old_node("move-empty-new", 1);
-        std::fs::create_dir_all(&new).unwrap();
-        move_old_default(&new, false).unwrap().expect("moved");
-        assert!(!old.exists());
-        assert!(new.join(NODE_KEY).exists());
-    }
-
-    #[test]
-    fn a_node_under_both_names_is_refused_and_neither_is_touched() {
-        let (old, new) = old_node("move-both", 1);
+    fn a_node_under_both_names_is_refused() {
+        let (old, new) = old_node("old-both", 1);
         crate::capsule_emit::CapsuleState::open(&new, "other").unwrap();
-        let old_key = std::fs::read(old.join(NODE_KEY)).unwrap();
-        let new_key = std::fs::read(new.join(NODE_KEY)).unwrap();
-        let message = move_old_default(&new, false).unwrap_err().to_string();
+        let message = existing_old_default(&new, false).unwrap_err().to_string();
         assert!(message.contains("both"), "{message}");
         assert!(message.contains(&old.display().to_string()), "{message}");
         assert!(message.contains(&new.display().to_string()), "{message}");
-        assert_eq!(std::fs::read(old.join(NODE_KEY)).unwrap(), old_key);
-        assert_eq!(std::fs::read(new.join(NODE_KEY)).unwrap(), new_key);
     }
 
     #[test]
-    fn a_new_directory_with_other_files_is_refused_and_nothing_moves() {
-        let (old, new) = old_node("move-busy-new", 1);
-        std::fs::create_dir_all(&new).unwrap();
-        std::fs::write(new.join("notes.txt"), "mine").unwrap();
-        let message = move_old_default(&new, false).unwrap_err().to_string();
-        assert!(message.contains("not empty"), "{message}");
-        assert!(old.join(NODE_KEY).exists());
-        assert!(new.join("notes.txt").exists());
+    fn a_directory_the_operator_chose_is_used_as_is() {
+        let (_old, new) = old_node("old-chosen", 1);
+        assert!(existing_old_default(&new, true).unwrap().is_none());
     }
 
+    /// A writer from before 0.1.3 takes no lock; one that has the ledger open
+    /// is found and refused.
+    #[cfg(target_os = "linux")]
     #[test]
-    fn a_directory_the_operator_chose_is_never_moved() {
-        let (old, new) = old_node("move-chosen", 1);
-        assert!(move_old_default(&new, true).unwrap().is_none());
-        assert!(old.join(NODE_KEY).exists());
-        assert!(!new.exists());
-    }
-
-    #[test]
-    fn a_broken_chain_is_refused_before_anything_moves() {
-        let (old, new) = old_node("move-broken", 2);
-        let ledger = old.join(LEDGER);
-        let text = std::fs::read_to_string(&ledger).unwrap();
-        let first_line_end = text.find('\n').unwrap() + 1;
-        std::fs::write(&ledger, &text[first_line_end..]).unwrap();
-        assert!(move_old_default(&new, false).is_err());
-        assert!(
-            old.join(NODE_KEY).exists(),
-            "the old directory stays where it was"
-        );
-        assert!(!new.exists());
+    fn a_ledger_another_process_has_open_is_refused() {
+        let (old, _new) = old_node("old-held", 1);
+        let mut holder = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("exec 3>>'{}'; exec sleep 30", old.join(LEDGER).display()))
+            .spawn()
+            .unwrap();
+        let mut refused = None;
+        for _ in 0..50 {
+            if let Err(error) = check_no_other_writer(&old) {
+                refused = Some(error.to_string());
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = holder.kill();
+        let _ = holder.wait();
+        let message = refused.expect("refused while another process held the ledger");
+        assert!(message.contains(&format!("pid {}", holder.id())), "{message}");
+        assert!(check_no_other_writer(&old).is_ok(), "free once it let go");
     }
 
     fn tmp(label: &str) -> PathBuf {

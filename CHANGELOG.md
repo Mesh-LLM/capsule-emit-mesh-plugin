@@ -20,9 +20,10 @@
   `capsules-<version>-<target>.tar.gz`, page `/plugins/capsules/evidence`). Settings are
   `CAPSULES_*`; the old `CAPSULE_EMIT_MESH_*` names are read for this release, with a warning. The
   `ADMISSION_POLICY_*` names are no longer read.
-- **The data directory moves once** from `capsule-emit-mesh` to `capsules`, as a single rename,
-  with the log verified before and after. A node with both directories refuses to start and says
-  why. Existing logs keep their log id.
+- **An upgraded node keeps its data directory in place** under the old name
+  (`capsule-emit-mesh`); nothing is moved, so an upgrade never races a writer that is still
+  running. A node with both directories refuses to start and says why. Existing logs keep their
+  log id. On Linux the plugin refuses a log another process has open.
 
 ### Added
 
