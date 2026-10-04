@@ -77,6 +77,17 @@ pub fn witness_urls() -> Vec<String> {
     config_from_env().witness_urls
 }
 
+/// The witness list from the setting's raw value: none when it is unset or
+/// holds no URL.
+fn witness_urls_from(raw: Option<&str>) -> Vec<String> {
+    raw.unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// The witness keys the operator gave, by witness URL (hex, lower-cased).
 /// A value that is not a 32-byte hex key is dropped with a warning, so that
 /// witness's receipts stay unchecked rather than checked under a guess.
@@ -137,14 +148,7 @@ fn config_from_env() -> CheckpointCadenceConfig {
             cfg.pad_bucket = n;
         }
     }
-    if let Ok(v) = crate::settings::var(ENV_WITNESS_URLS) {
-        cfg.witness_urls = v
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect();
-    }
+    cfg.witness_urls = witness_urls_from(crate::settings::var(ENV_WITNESS_URLS).ok().as_deref());
     cfg
 }
 
@@ -424,6 +428,24 @@ fn report_checkpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Nothing set means no witness at all, so nothing is ever registered
+    /// anywhere and no witness is contacted (`witness_status` contacts only a
+    /// named one, and registration walks the named ones only).
+    #[test]
+    fn unset_means_no_witness_and_no_outbound() {
+        assert!(witness_urls_from(None).is_empty());
+        assert!(witness_urls_from(Some("")).is_empty());
+        assert!(witness_urls_from(Some(" , ,")).is_empty());
+        assert_eq!(
+            witness_urls_from(Some("https://a.example, https://b.example")),
+            ["https://a.example", "https://b.example"]
+        );
+        assert!(CheckpointCadenceConfig::default().witness_urls.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        crate::witness_status::refresh_witnesses(dir.path(), &witness_urls_from(None), &Default::default());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "nothing contacted, nothing written");
+    }
 
     #[test]
     fn configured_witness_keys_are_hex_32_byte_keys_by_url() {
