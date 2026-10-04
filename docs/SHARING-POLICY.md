@@ -144,10 +144,11 @@ it did not answer in time, refused the connection, answered with an HTTP
 error, or presents a different key than the one configured or pinned. A
 witness that holds the latest checkpoint is not contacted for this.
 
-The plugin's own reads of a witness (its key, and what it holds of this
-log) follow no redirect and read at most 64 KiB. Registering a checkpoint
-goes through the capsule-emit library's client, which still follows a
-redirect.
+Every request to a witness goes to the URL the operator gave, host, port and
+path as written; no URL is mapped to another service. No request follows a
+redirect. The plugin's own reads of a witness (its key, and what it holds of
+this log) read at most 64 KiB; registering a checkpoint, through the
+capsule-emit library's client, reads at most 1 MiB.
 
 A witness holding a checkpoint means one thing: a later rewrite of this log is
 detectable by someone other than this node. It does not make the records true.

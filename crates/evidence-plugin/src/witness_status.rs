@@ -372,7 +372,8 @@ pub fn refresh_witnesses(
             }
             tries.insert(url.clone(), Instant::now());
         }
-        let base = crate::producer::anchor::dispatch_base_for(raw_url.trim()).to_string();
+        // The URL as the operator gave it: never rewritten to another host.
+        let base = raw_url.trim().to_string();
         let (outcome, reason) = match fetch_key(&base) {
             Ok((pubkey_hex, _)) if ed25519_pem(&pubkey_hex).is_none() => (
                 "not_a_witness",

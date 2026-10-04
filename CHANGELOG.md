@@ -52,6 +52,10 @@
 
 ### Fixed
 
+- **A witness is dialled at the URL given.** With capsule-emit 0.0.4, one public witness URL
+  (`https://witness.agentactioncapsule.org`) was sent to a different host
+  (`anchor.agentactioncapsule.org`). capsule-emit now dials every witness exactly as configured and
+  follows no redirect, and the plugin's own witness reads do the same.
 - **Settings saved in the console reach the plugin.** The plugin reads its `[plugin.settings]`
   from mesh-llm's config file (`MESH_LLM_CONFIG`, or `~/.mesh-llm/config.toml`); the environment
   still wins. The console's `witness` is the checkpoint witness, and the witness client uses it.

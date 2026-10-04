@@ -75,7 +75,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # with it too, and a bundle's inclusion proof with `cll`. Renamed because
 # this crate already has a `capsule_emit` module.
 # 0.0.4 carries `settlement` (draft-mih-agent-settlement-records-00 legs).
-capsule-emit-lib = { package = "capsule-emit", version = "0.0.4" }
+capsule-emit-lib = { package = "capsule-emit", version = "0.0.5" }
 cll = { package = "checkpointed-local-log", version = "0.2.1" }
 # Evidence requests are answered in-process (`evidence_answer`): parsing,
 # resolution, signed refusals and the artifact answer come from the protocol
@@ -110,8 +110,9 @@ rmcp = "1.8"
 # of function names.
 strip = true
 
-# capsule-emit at the commit that reaches each witness through its own client
-# (action-state-group/capsule-emit#269), until it is published as 0.0.5; then
-# this patch goes and the dependency above names 0.0.5.
+# capsule-emit at the commit that dials every witness at the URL it is given,
+# with no built-in service and no URL rewritten (action-state-group/capsule-emit#271,
+# on top of #269's one client per witness), until a release carries it; then
+# this patch goes and the dependency above names that release.
 [patch.crates-io]
-capsule-emit = { git = "https://github.com/action-state-group/capsule-emit", rev = "fd740085ef846b4ceb679daf22b38f5963dd5ff2" }
+capsule-emit = { git = "https://github.com/action-state-group/capsule-emit", rev = "9e2bddcce3f06291a8f92b3fe05adb1bcb7f8126" }
