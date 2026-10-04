@@ -103,3 +103,9 @@ rmcp = "1.8"
 # still prints its message and location; a backtrace shows addresses instead
 # of function names.
 strip = true
+
+# capsule-emit at the commit that reaches each witness through its own client
+# (action-state-group/capsule-emit#269), until it is published as 0.0.5; then
+# this patch goes and the dependency above names 0.0.5.
+[patch.crates-io]
+capsule-emit = { git = "https://github.com/action-state-group/capsule-emit", rev = "fd740085ef846b4ceb679daf22b38f5963dd5ff2" }
