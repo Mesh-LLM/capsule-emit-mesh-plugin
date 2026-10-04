@@ -77,6 +77,8 @@ use tokio::net::TcpListener;
 const PLUGIN_ID: &str = "capsule-emit-mesh";
 const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
 const ENDPOINT_ID: &str = "admission-policy-openai";
+/// Declared only alongside the admission endpoint (see `plugin_builder`).
+const ADMISSION_CAPABILITY: &str = "admission_policy.v1";
 
 /// The set of model names this plugin advertises via `/v1/models` — i.e. the
 /// set it will actually be routed requests for. mesh-llm's real model routing
@@ -95,25 +97,19 @@ fn blocked_models() -> Vec<String> {
     )
 }
 
-/// `none` (or `off`) advertises no blocked model at all: a node in a review
-/// or a real deployment must never offer a test model that "Mesh automatic"
-/// routing then picks. Unset keeps the test default.
+/// The blocked model names this node advertises: only those the operator (or
+/// a test) lists in `CAPSULE_EMIT_MESH_BLOCKED_MODELS`. Unset, empty, `none`
+/// or `off` advertises none. A real node must never offer a model that always
+/// answers 403: a client that takes the first listed model, or "Mesh
+/// automatic" routing, would pick it.
 fn blocked_models_for(raw: Option<&str>) -> Vec<String> {
     match raw.map(str::trim) {
-        Some("none") | Some("off") => Vec::new(),
-        Some(raw) => {
-            let models: Vec<String> = raw
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            if models.is_empty() {
-                vec!["blocked-test-model".to_string()]
-            } else {
-                models
-            }
-        }
-        None => vec!["blocked-test-model".to_string()],
+        None | Some("none") | Some("off") => Vec::new(),
+        Some(raw) => raw
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
     }
 }
 
@@ -1086,6 +1082,49 @@ fn with_owner_maintenance(
     builder
 }
 
+/// What the plugin declares to the host. By default: evidence only -- its
+/// mesh channels and events, the Evidence page, its config and HTTP routes
+/// (added by the caller). With `admission` (the address of the
+/// OpenAI-compatible admission endpoint, present only when
+/// `CAPSULE_EMIT_MESH_BLOCKED_MODELS` names models) it also registers that
+/// endpoint as an inference provider and declares `admission_policy.v1`.
+fn plugin_builder(admission: Option<&str>) -> DeclarativePluginBuilder {
+    let description = match admission {
+        None => "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page. It serves no models; its admission-policy test endpoint is opt-in (CAPSULE_EMIT_MESH_BLOCKED_MODELS).",
+        Some(_) => "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page. As configured (CAPSULE_EMIT_MESH_BLOCKED_MODELS), it also serves an OpenAI-compatible admission-policy endpoint that denies the listed models.",
+    };
+    let builder = DeclarativePluginBuilder::new(PluginMetadata::new(
+        PLUGIN_ID,
+        PLUGIN_VERSION,
+        plugin_server_info(
+            PLUGIN_ID,
+            PLUGIN_VERSION,
+            "Capsule evidence",
+            description,
+            None::<String>,
+        ),
+    ))
+    .config_item(share_policy::share_policy_config_schema(PLUGIN_ID))
+    .web_ui_item(web_ui_manifest::evidence_web_ui())
+    .mesh_item(mesh_channel(OPENAI_EXCHANGE_CHANNEL))
+    .mesh_item(mesh_channel(EVIDENCE_REQUEST_CHANNEL))
+    .mesh_item(mesh_channel(record_push_bridge::RECORD_PUSH_CHANNEL))
+    .mesh_item(mesh_channel(LEDGER_FETCH_CHANNEL))
+    .mesh_item(mesh_channel(settlement_channel::PAYMENT_LIFECYCLE_CHANNEL))
+    // Any mesh event carries this node's own peer id; the host sends these
+    // kinds as a snapshot right after the plugin loads (see `self_peer`).
+    .event_item(events::local_accepting())
+    .event_item(events::local_standby())
+    .event_item(events::mesh_id_updated())
+    .event_item(events::peer_up());
+    match admission {
+        Some(address) => builder
+            .provide(capability(ADMISSION_CAPABILITY))
+            .inference_item(inference::provider(ENDPOINT_ID, address)),
+        None => builder,
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Packaging time: print the `plugin-manifest.json` the installer reads
@@ -1108,10 +1147,17 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let port = listener.local_addr()?.port();
-    let address = format!("http://127.0.0.1:{port}");
+    // The OpenAI-compatible admission endpoint exists only when blocked
+    // models are named (see `plugin_builder`); by default there is no
+    // listener, no provider and no admission capability.
     let models = blocked_models();
+    let admission = if models.is_empty() {
+        None
+    } else {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = format!("http://127.0.0.1:{}", listener.local_addr()?.port());
+        Some((listener, address))
+    };
 
     // Absolute, never the working directory's; see `data_dir`.
     let data_dir = data_dir::data_dir()?;
@@ -1177,13 +1223,19 @@ async fn main() -> anyhow::Result<()> {
     // citing-record seal writes to the SAME single-writer ledger -- one
     // `CapsuleState`, shared by Arc, never a second writer.
     let capsules_for_stream = capsules.clone();
-    let app_state = AppState {
-        models: Arc::new(models),
-        capsules,
-        lifecycle_events: lifecycle_events.clone(),
-        checkpoint_head,
+    let admission_address = match admission {
+        Some((listener, address)) => {
+            let app_state = AppState {
+                models: Arc::new(models),
+                capsules,
+                lifecycle_events: lifecycle_events.clone(),
+                checkpoint_head,
+            };
+            tokio::spawn(serve_admission_http(listener, app_state));
+            Some(address)
+        }
+        None => None,
     };
-    tokio::spawn(serve_admission_http(listener, app_state));
 
     let lifecycle_events_for_handler = lifecycle_events.clone();
     let splits = Splits::new();
@@ -1197,32 +1249,7 @@ async fn main() -> anyhow::Result<()> {
         log_id.clone(),
     ));
 
-    let plugin = DeclarativePluginBuilder::new(PluginMetadata::new(
-        PLUGIN_ID,
-        PLUGIN_VERSION,
-        plugin_server_info(
-            PLUGIN_ID,
-            PLUGIN_VERSION,
-            "Capsule evidence",
-            "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page; denies OpenAI-compatible exchanges whose model matches a blocked prefix.",
-            None::<String>,
-        ),
-    ))
-    .provide(capability("admission_policy.v1"))
-    .config_item(share_policy::share_policy_config_schema(PLUGIN_ID))
-    .web_ui_item(web_ui_manifest::evidence_web_ui())
-    .mesh_item(mesh_channel(OPENAI_EXCHANGE_CHANNEL))
-    .mesh_item(mesh_channel(EVIDENCE_REQUEST_CHANNEL))
-    .mesh_item(mesh_channel(record_push_bridge::RECORD_PUSH_CHANNEL))
-    .mesh_item(mesh_channel(LEDGER_FETCH_CHANNEL))
-    .mesh_item(mesh_channel(settlement_channel::PAYMENT_LIFECYCLE_CHANNEL))
-    // Any mesh event carries this node's own peer id; the host sends these
-    // kinds as a snapshot right after the plugin loads (see `self_peer`).
-    .event_item(events::local_accepting())
-    .event_item(events::local_standby())
-    .event_item(events::mesh_id_updated())
-    .event_item(events::peer_up())
-    .inference_item(inference::provider(ENDPOINT_ID, address));
+    let plugin = plugin_builder(admission_address.as_deref());
     // The Evidence page's data: this plugin's own ledger, served at
     // `/api/plugins/<plugin>/http/...` (see `evidence_routes`).
     let plugin = evidence_routes::with_routes(
@@ -1382,15 +1409,94 @@ async fn main() -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
+mod manifest_tests {
+    use super::*;
+    use mesh_llm_plugin::Plugin;
+
+    fn manifest_for(admission: Option<&str>) -> mesh_llm_plugin::proto::PluginManifest {
+        plugin_builder(admission)
+            .build()
+            .manifest()
+            .expect("manifest")
+    }
+
+    fn has_inference_endpoint(manifest: &mesh_llm_plugin::proto::PluginManifest) -> bool {
+        manifest
+            .endpoints
+            .iter()
+            .any(|e| e.kind == mesh_llm_plugin::proto::EndpointKind::Inference as i32)
+    }
+
+    #[test]
+    fn the_default_manifest_has_no_inference_provider_and_no_admission_capability() {
+        let manifest = manifest_for(None);
+        assert!(
+            !has_inference_endpoint(&manifest),
+            "{:?}",
+            manifest.endpoints
+        );
+        assert!(
+            !manifest
+                .capabilities
+                .iter()
+                .any(|c| c == ADMISSION_CAPABILITY),
+            "{:?}",
+            manifest.capabilities
+        );
+        // Still the evidence plugin: its channels and page are declared.
+        assert!(manifest.web_ui.is_some());
+        assert!(!manifest.mesh_channels.is_empty());
+    }
+
+    #[test]
+    fn a_configured_manifest_has_both() {
+        let manifest = manifest_for(Some("http://127.0.0.1:9"));
+        assert!(has_inference_endpoint(&manifest));
+        assert!(manifest
+            .capabilities
+            .iter()
+            .any(|c| c == ADMISSION_CAPABILITY));
+    }
+
+    #[test]
+    fn unset_empty_none_and_off_all_give_the_default_manifest() {
+        let default = manifest_for(None);
+        for raw in [None, Some(""), Some(" , "), Some("none"), Some("off")] {
+            let models = blocked_models_for(raw);
+            assert!(models.is_empty(), "{raw:?}");
+            // main() asks for the admission endpoint only for a non-empty list.
+            let admission = (!models.is_empty()).then_some("http://127.0.0.1:9");
+            assert_eq!(manifest_for(admission), default, "{raw:?}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod blocked_models_tests {
     use super::blocked_models_for;
 
     #[test]
-    fn none_advertises_no_blocked_model_and_unset_keeps_the_test_default() {
+    fn unset_advertises_no_blocked_model() {
+        assert!(blocked_models_for(None).is_empty());
+    }
+
+    #[test]
+    fn empty_advertises_no_blocked_model() {
+        assert!(blocked_models_for(Some("")).is_empty());
+        assert!(blocked_models_for(Some("  ")).is_empty());
+        assert!(blocked_models_for(Some(" , ,")).is_empty());
+    }
+
+    #[test]
+    fn none_or_off_advertises_no_blocked_model() {
         assert!(blocked_models_for(Some("none")).is_empty());
         assert!(blocked_models_for(Some("off")).is_empty());
+    }
+
+    #[test]
+    fn an_explicit_list_advertises_exactly_its_names() {
         assert_eq!(
-            blocked_models_for(None),
+            blocked_models_for(Some("blocked-test-model")),
             vec!["blocked-test-model".to_string()]
         );
         assert_eq!(

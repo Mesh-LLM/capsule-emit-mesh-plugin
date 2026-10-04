@@ -35,6 +35,11 @@ struct Harness {
 
 impl Harness {
     async fn spawn(extra_env: &[(&str, &str)]) -> Self {
+        Self::spawn_without(extra_env, &[]).await
+    }
+
+    /// As `spawn`, with `unset` removed from the plugin's environment.
+    async fn spawn_without(extra_env: &[(&str, &str)], unset: &[&str]) -> Self {
         let socket_path =
             std::env::temp_dir().join(format!("capsule-emit-mesh-interop-{}.sock", nonce()));
         let _ = std::fs::remove_file(&socket_path);
@@ -51,6 +56,9 @@ impl Harness {
             .env("CAPSULE_EMIT_MESH_BLOCKED_MODELS", "blocked-test-model");
         for (key, value) in extra_env {
             cmd.env(key, value);
+        }
+        for key in unset {
+            cmd.env_remove(key);
         }
         let child = cmd.spawn().expect("spawn the capsule-emit-mesh plugin");
 
@@ -220,6 +228,44 @@ async fn v1_models_advertises_only_the_blocked_model() {
     assert_eq!(ids, vec!["blocked-test-model"]);
 
     harness.shutdown().await;
+}
+
+/// A node whose operator set nothing is an evidence plugin only: no
+/// OpenAI-compatible provider endpoint and no admission capability, so it
+/// never appears in the host's model list or provider routing. The same for
+/// an empty value, `none` and `off`. The admission test endpoint exists only
+/// when blocked models are named.
+#[tokio::test]
+async fn with_no_blocked_models_the_plugin_registers_no_provider_and_no_admission_capability() {
+    const KEY: &str = "CAPSULE_EMIT_MESH_BLOCKED_MODELS";
+    for value in [None, Some(""), Some("none"), Some("off")] {
+        let mut harness = match value {
+            None => Harness::spawn_without(&[], &[KEY]).await,
+            Some(value) => Harness::spawn(&[(KEY, value)]).await,
+        };
+        let manifest = harness
+            .initialize()
+            .await
+            .manifest
+            .expect("plugin declares a manifest");
+        assert!(
+            !manifest
+                .endpoints
+                .iter()
+                .any(|e| e.kind == proto::EndpointKind::Inference as i32),
+            "{value:?}: no inference endpoint, got {:?}",
+            manifest.endpoints
+        );
+        assert!(
+            !manifest
+                .capabilities
+                .iter()
+                .any(|c| c == "admission_policy.v1"),
+            "{value:?}: no admission capability, got {:?}",
+            manifest.capabilities
+        );
+        harness.shutdown().await;
+    }
 }
 
 /// (C) Deny: a real HTTP POST for the blocked model is denied with a
