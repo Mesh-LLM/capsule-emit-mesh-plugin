@@ -214,7 +214,8 @@
         "route": "evidence",
         "bundle_id": "main",
         "entry_script": "register-mesh-plugin-ui.js",
-        "placement": "primary"
+        "placement": "primary",
+        "host_header": false
       }
     ],
     "bundles": [

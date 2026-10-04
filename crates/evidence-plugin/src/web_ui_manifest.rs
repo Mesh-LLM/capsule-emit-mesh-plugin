@@ -41,7 +41,10 @@ pub fn evidence_web_ui() -> ManifestEntry {
                 WEB_UI_ENTRY_SCRIPT,
             )
             .bundle_id(WEB_UI_BUNDLE_ID)
-            .primary_placement(),
+            .primary_placement()
+            // The page draws its own "Evidence" header and banner; the host's
+            // generic page header above it only repeated the name.
+            .host_header(false),
         )
         .into()
 }
@@ -97,7 +100,8 @@ mod tests {
                     "route": "evidence",
                     "bundle_id": "main",
                     "entry_script": "register-mesh-plugin-ui.js",
-                    "placement": "primary"
+                    "placement": "primary",
+                    "host_header": false
                 }],
                 "bundles": [{ "id": "main", "root_path": "bundle" }]
             })
