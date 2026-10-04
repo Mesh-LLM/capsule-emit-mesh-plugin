@@ -268,6 +268,53 @@ async fn with_no_blocked_models_the_plugin_registers_no_provider_and_no_admissio
     }
 }
 
+/// One plugin process per data directory: a second process on the same
+/// directory refuses to start with one line naming the directory and the
+/// holder's pid, before it touches the ledger. Once the holder exits, cleanly
+/// or killed, the next process starts on the same directory.
+#[tokio::test]
+async fn a_second_process_on_the_same_data_dir_refuses_and_the_dir_frees_on_exit() {
+    let dir = std::env::temp_dir().join(format!("capsule-emit-mesh-lock-{}", nonce()));
+    let dir_env = dir.to_str().expect("utf-8 temp dir").to_string();
+    let first = Harness::spawn(&[("CAPSULE_EMIT_MESH_DATA_DIR", &dir_env)]).await;
+    let holder = first.child.id().expect("first plugin pid");
+
+    // The second never reaches the host: it must refuse before connecting.
+    let second = timeout(
+        TEST_TIMEOUT,
+        Command::new(PLUGIN_BIN)
+            .env("MESH_LLM_PLUGIN_ENDPOINT", dir.join("no-host.sock"))
+            .env("MESH_LLM_PLUGIN_TRANSPORT", "unix")
+            .env("CAPSULE_EMIT_MESH_DATA_DIR", &dir_env)
+            .env("CAPSULE_EMIT_MESH_BLOCKED_MODELS", "blocked-test-model")
+            .output(),
+    )
+    .await
+    .expect("second process exited before timeout")
+    .expect("run the second process");
+    assert!(!second.status.success(), "the second process must refuse");
+    let stderr = String::from_utf8_lossy(&second.stderr);
+    assert!(
+        stderr.contains("is in use by another capsule-emit-mesh process"),
+        "{stderr}"
+    );
+    assert!(stderr.contains(&dir_env), "{stderr}");
+    assert!(stderr.contains(&format!("pid {holder}")), "{stderr}");
+
+    // Clean exit frees the directory.
+    first.shutdown().await;
+    let mut killed = Harness::spawn(&[("CAPSULE_EMIT_MESH_DATA_DIR", &dir_env)]).await;
+    assert!(killed.initialize().await.manifest.is_some());
+
+    // A crash frees it too: the lock file stays behind, the lock does not.
+    killed.child.kill().await.expect("kill the plugin");
+    let _ = killed.child.wait().await;
+    assert!(dir.join("capsule-emit-mesh.lock").exists());
+    let mut after_crash = Harness::spawn(&[("CAPSULE_EMIT_MESH_DATA_DIR", &dir_env)]).await;
+    assert!(after_crash.initialize().await.manifest.is_some());
+    after_crash.shutdown().await;
+}
+
 /// (C) Deny: a real HTTP POST for the blocked model is denied with a
 /// deny-reason, over the endpoint the host would actually dispatch to.
 #[tokio::test]

@@ -14,7 +14,13 @@
 //! key where one is expected: a ledger with records but no key, or a key left
 //! in the old default (`./admission-policy-data`) while the new directory has
 //! none.
+//!
+//! One process per directory (`lock`): the ledger is a hash chain with a
+//! single writer, so a second plugin process on the same directory refuses to
+//! start rather than interleave appends and break the chain.
 
+use std::fs::{File, OpenOptions, TryLockError};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
@@ -26,6 +32,9 @@ const APP_DIR: &str = "capsule-emit-mesh";
 const LEGACY_RELATIVE_DIR: &str = "admission-policy-data";
 const NODE_KEY: &str = "keys/node-key.pem";
 const LEDGER: &str = "ledger/capsules.jsonl";
+/// Holds the advisory lock; its contents (the holder's pid) are only for the
+/// refusal message.
+const LOCK_FILE: &str = "capsule-emit-mesh.lock";
 
 /// The data directory for these inputs, and whether the operator chose it.
 fn resolve(
@@ -95,9 +104,88 @@ pub fn data_dir() -> anyhow::Result<PathBuf> {
     Ok(dir)
 }
 
+/// This process's exclusive hold on the data directory, for its lifetime.
+#[must_use = "the directory is locked only while this is held"]
+pub struct DataDirLock {
+    _file: File,
+}
+
+/// Take the data directory for this process alone.
+///
+/// An advisory OS lock (`flock` on Unix, `LockFileEx` on Windows) on
+/// `<dir>/capsule-emit-mesh.lock`. The OS releases it when the process exits
+/// or crashes, so a lock file a crash left behind never blocks the next start;
+/// it is not a pid file. A second process on the same directory gets one plain
+/// line naming the directory and the holder's pid.
+pub fn lock(dir: &Path) -> anyhow::Result<DataDirLock> {
+    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+    let path = dir.join(LOCK_FILE);
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .with_context(|| format!("open {}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => {
+            file.set_len(0)
+                .and_then(|()| writeln!(file, "{}", std::process::id()))
+                .with_context(|| format!("write {}", path.display()))?;
+            Ok(DataDirLock { _file: file })
+        }
+        Err(TryLockError::WouldBlock) => {
+            let mut holder = String::new();
+            let _ = file.read_to_string(&mut holder);
+            let holder = match holder.trim() {
+                "" => "unknown",
+                pid => pid,
+            };
+            bail!(
+                "data directory {} is in use by another capsule-emit-mesh process (pid {holder}); give each node its own {ENV_DATA_DIR}",
+                dir.display()
+            )
+        }
+        Err(TryLockError::Error(error)) => {
+            Err(error).with_context(|| format!("lock {}", path.display()))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_second_lock_on_the_same_directory_is_refused_naming_it_and_the_holder() {
+        let dir = tmp("lock-second");
+        let _held = lock(&dir).expect("first lock");
+        let message = lock(&dir).err().expect("second lock refused").to_string();
+        assert!(message.contains(&dir.display().to_string()), "{message}");
+        assert!(
+            message.contains(&format!("pid {}", std::process::id())),
+            "{message}"
+        );
+        assert!(!message.contains('\n'), "one line: {message}");
+    }
+
+    #[test]
+    fn the_directory_is_free_again_once_the_holder_lets_go() {
+        let dir = tmp("lock-release");
+        drop(lock(&dir).expect("first lock"));
+        let _again = lock(&dir).expect("a new holder after the first let go");
+    }
+
+    #[test]
+    fn a_lock_file_left_by_a_crash_does_not_block() {
+        let dir = tmp("lock-stale");
+        std::fs::write(dir.join(LOCK_FILE), "999999\n").unwrap();
+        let _held = lock(&dir).expect("a stale lock file is not a lock");
+        assert_eq!(
+            std::fs::read_to_string(dir.join(LOCK_FILE)).unwrap(),
+            format!("{}\n", std::process::id())
+        );
+    }
 
     fn tmp(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("data-dir-{label}-{}", std::process::id()));

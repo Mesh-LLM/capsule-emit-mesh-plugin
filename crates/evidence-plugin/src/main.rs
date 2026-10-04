@@ -1161,6 +1161,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Absolute, never the working directory's; see `data_dir`.
     let data_dir = data_dir::data_dir()?;
+    // One process per data directory, held until exit: before the key, the
+    // ledger or the checkpoint cadence opens anything in it.
+    let _data_dir_lock = data_dir::lock(&data_dir)?;
     tracing::info!(data_dir = %data_dir.display(), "plugin data directory");
     // The log id is node-unique by default (the node's signing key id), and a
     // new history the owner asked for last run starts HERE, before the
