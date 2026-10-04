@@ -44,9 +44,9 @@ pub const PUSH_COALESCE_WINDOW: Duration = Duration::from_millis(100);
 /// On by default: the plugin runs its OWN checkpoint cadence unless the
 /// operator sets `CAPSULES_CHECKPOINT_CADENCE=off` to opt out (e.g.
 /// because a standalone process is already checkpointing this `ledger_dir`
-/// -- see the module doc's race note). Any other value, including
-/// unset, leaves it on.
-const ENV_ENABLE: &str = "CAPSULES_CHECKPOINT_CADENCE";
+/// -- see the module doc's race note). Unset, empty or `on` leaves it on;
+/// any other value is read as `off` and listed as a setting problem.
+pub(crate) const ENV_ENABLE: &str = "CAPSULES_CHECKPOINT_CADENCE";
 /// Age-clock override, seconds. Defaults to `CheckpointCadenceConfig`'s own
 /// 300s mesh default.
 const ENV_INTERVAL_SECONDS: &str = "CAPSULES_CHECKPOINT_CADENCE_SECONDS";
@@ -196,8 +196,16 @@ pub fn is_enabled() -> bool {
 /// `None` when unset) directly so the on-by-default / explicit-opt-out
 /// behavior is unit-testable without mutating process-global env state
 /// (`std::env::set_var` races across parallel `cargo test` threads).
+///
+/// Read as the sharing settings are: trimmed and in any case, empty is
+/// unset. `on` (or unset) keeps checkpoints on; `off`, or a value that is
+/// neither, turns them off, so a typo never keeps a configured witness
+/// contacted (the Evidence page lists the value it did not recognise).
 fn is_enabled_for(raw: Option<&str>) -> bool {
-    raw != Some("off")
+    matches!(
+        crate::share_policy::normalized(raw).as_deref(),
+        None | Some("on")
+    )
 }
 
 fn config_from_env() -> CheckpointCadenceConfig {
@@ -574,10 +582,13 @@ mod tests {
     }
 
     #[test]
-    fn any_other_value_stays_on() {
+    fn on_or_empty_stays_on_and_any_spelling_of_off_or_a_typo_is_off() {
         assert!(is_enabled_for(Some("on")));
-        assert!(is_enabled_for(Some("")));
-        assert!(is_enabled_for(Some("OFF"))); // case-sensitive: only lowercase "off" opts out
+        assert!(is_enabled_for(Some(" On ")));
+        assert!(is_enabled_for(Some("")), "empty is unset");
+        for off in ["OFF", "Off", "off ", " off", "of", "disabled"] {
+            assert!(!is_enabled_for(Some(off)), "{off:?}");
+        }
     }
 
     #[test]

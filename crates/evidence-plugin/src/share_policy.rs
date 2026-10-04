@@ -64,7 +64,7 @@ fn record_at_completion_is_off_for(raw: Option<&str>) -> bool {
 
 /// A switch's value as the operator meant it: trimmed and lower-cased;
 /// empty is no value.
-fn normalized(raw: Option<&str>) -> Option<String> {
+pub(crate) fn normalized(raw: Option<&str>) -> Option<String> {
     raw.map(|r| r.trim().to_ascii_lowercase())
         .filter(|r| !r.is_empty())
 }
@@ -73,8 +73,8 @@ fn normalized(raw: Option<&str>) -> Option<String> {
 pub const ENV_HISTORY_SEGMENTS: &str = "CAPSULES_SHARE_HISTORY_SEGMENTS";
 
 /// Who may read one of this node's records back: `off`, `counterparties`,
-/// `prospective` or `peers`. Unset or unknown is the documented default,
-/// `prospective`.
+/// `prospective` or `peers`. Unset is the documented default, `prospective`;
+/// an unknown value is `off`, never wider.
 pub fn history_segments() -> &'static str {
     history_segments_for(crate::settings::var(ENV_HISTORY_SEGMENTS).ok().as_deref())
 }
@@ -93,7 +93,7 @@ fn history_segments_for(raw: Option<&str>) -> &'static str {
 /// The sharing switches set to a value this plugin does not know, each read
 /// as off: for the page, so a typo is seen rather than silently obeyed.
 pub fn setting_problems() -> Vec<String> {
-    let known: [(&str, &[&str]); 4] = [
+    let known: [(&str, &[&str]); 5] = [
         (ENV_RECORD_AT_COMPLETION, &["counterparty", "off"]),
         (
             ENV_HISTORY_SEGMENTS,
@@ -104,6 +104,7 @@ pub fn setting_problems() -> Vec<String> {
             crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS,
             &["on", "off", "1", "0", "true", "false", "yes", "no"],
         ),
+        (crate::checkpoint_cadence::ENV_ENABLE, &["on", "off"]),
     ];
     known
         .iter()
