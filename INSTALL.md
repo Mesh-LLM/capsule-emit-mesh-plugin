@@ -7,6 +7,19 @@ each exchange, and whether this node's log still verifies. It installs and
 runs on an unmodified mesh-llm release (0.77 or newer). No other runtime is
 needed.
 
+## What's new in 0.1.1
+
+- **Settlement-record legs for paid exchanges** (draft-mih-agent-settlement-records-00): both
+  sides seal their own legs for each invoice. The provider's leg needs a mesh-llm host whose
+  settlement events carry the wallet's credited amount and fee (Mesh-LLM/mesh-llm#2169).
+- **A node-unique log id** by default, so a witness accepts every node's checkpoints (see
+  [The log's id](#the-logs-id)).
+- **A served half is found by its digests** when the host forwarded no nonce. Both nodes need
+  0.1.1 for this.
+- **The witness indicator** says "off" only when no witness is set.
+
+Details in [CHANGELOG.md](https://github.com/Mesh-LLM/capsule-emit-mesh-plugin/blob/main/CHANGELOG.md).
+
 ## What it sends, and where it listens
 
 Records are kept on this node. With the default settings:
@@ -35,7 +48,7 @@ glibc 2.35 or newer (x86_64 or arm64).
 and set `VERSION` to the release (without the leading `v`):
 
 ```bash
-VERSION=0.1.0
+VERSION=0.1.1
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64)  TARGET=aarch64-apple-darwin ;;
   Linux-x86_64)  TARGET=x86_64-unknown-linux-gnu ;;
