@@ -86,6 +86,8 @@ capsule-emit-evidence-request = "0.0.2"
 # The witness's own record of this log (`witness_status`): one blocking GET,
 # no redirects, a capped body. Already in the tree through capsule-emit.
 ureq = { version = "2", features = ["json"] }
+# O_NOFOLLOW for the lock files (`data_dir`). Already in the tree.
+libc = "0.2"
 scitt-cose-receipt = { git = "https://github.com/action-state-group/scitt-cose", rev = "8833281c11d33e3c1e289cf74f11d25ee7f3c6dc" }
 
 [dev-dependencies]

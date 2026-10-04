@@ -378,6 +378,9 @@ impl LearnedSelfNodeId {
 /// guarded state stays consistent across a mid-seal panic: `Ledger::append`
 /// orders its writes (statement fsync before the jsonl line) exactly so a
 /// torn stop is recoverable, and reload re-validates everything on open.
+/// Beside the ledger: one line per cut of a torn last line.
+const REPAIRS_FILE: &str = "repairs.jsonl";
+
 pub struct CapsuleState {
     keys: KeyPair,
     ledger: Mutex<Ledger>,
@@ -475,6 +478,20 @@ impl CapsuleState {
                 offset,
                 "the ledger's last line was torn (a write cut short); it was cut back to the last whole record"
             );
+            // Kept beside the ledger, so the page still says so after the
+            // next restart.
+            let line = serde_json::json!({
+                "at": crate::producer::timestamp::utc_now_iso8601(),
+                "torn_write_cut_at": offset,
+            });
+            if let Err(error) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(ledger_dir.join(REPAIRS_FILE))
+                .and_then(|mut f| std::io::Write::write_all(&mut f, format!("{line}\n").as_bytes()))
+            {
+                tracing::warn!(%error, "the ledger repair was not noted");
+            }
         }
         let sequence_counters = SequenceCounterStore::open(data_dir.join("sequence_counters.json"));
         let learned_self_node_id =
@@ -496,6 +513,16 @@ impl CapsuleState {
     /// was torn.
     pub fn torn_write_cut_at(&self) -> Option<u64> {
         self.torn_write_cut_at
+    }
+
+    /// Every cut of a torn last line this ledger has had, oldest first:
+    /// `{at, torn_write_cut_at}`.
+    pub fn ledger_repairs(&self) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(self.ledger_dir.join(REPAIRS_FILE))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect()
     }
 
     /// This node's settlement-records state ([`crate::settlement_legs`]).

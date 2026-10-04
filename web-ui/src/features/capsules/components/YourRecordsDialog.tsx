@@ -93,9 +93,9 @@ export function YourRecordsDialog({
             </p>
           ) : null}
 
-          {typeof status?.torn_write_cut_at === 'number' ? (
+          {(status?.ledger_repairs ?? []).length > 0 ? (
             <p className="text-[var(--color-bad-text)]" data-testid="torn-write" role="status">
-              {`When this node last started, the last line of its log was cut short (a write that did not finish) and was removed, back to the last whole record (byte ${status.torn_write_cut_at}). Every record before it still checks.`}
+              {`This log's last line was cut short (a write that did not finish) ${status?.ledger_repairs?.length === 1 ? 'once' : `${status?.ledger_repairs?.length} times`}, most recently at ${status?.ledger_repairs?.[status.ledger_repairs.length - 1]?.at}; each time it was removed back to the last whole record, and every record before it still checks.`}
             </p>
           ) : null}
 

@@ -270,9 +270,10 @@ fn read_checkpoint_card(ledger_dir: &Path) -> Value {
     let mut card = read_checkpoint_card_with(
         ledger_dir,
         &active,
-        &crate::checkpoint_cadence::witness_keys(),
+        &crate::checkpoint_cadence::active_witness_keys(),
     );
     card["witness_restart_needed"] = json!(restart_needed);
+    card["witness_key_problems"] = json!(crate::checkpoint_cadence::witness_keys_problems());
     card
 }
 

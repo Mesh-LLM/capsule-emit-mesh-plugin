@@ -103,6 +103,16 @@ fn witness_urls_from(raw: Option<&str>) -> Vec<String> {
 /// The witness list the checkpoint cadence took when it started: the one it
 /// registers with until mesh-llm restarts.
 static ACTIVE_WITNESSES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+/// The witness keys taken at the same moment, so a list and its keys never
+/// come from two different reads of the settings.
+static ACTIVE_KEYS: std::sync::OnceLock<std::collections::BTreeMap<String, String>> =
+    std::sync::OnceLock::new();
+
+/// The witness keys in force: those the cadence took at start, or the
+/// setting as it is before then.
+pub fn active_witness_keys() -> std::collections::BTreeMap<String, String> {
+    ACTIVE_KEYS.get().cloned().unwrap_or_else(witness_keys)
+}
 
 /// The witnesses checkpoints actually go to, and whether the saved setting
 /// now names different ones (they take effect at the next restart). Before
@@ -129,31 +139,53 @@ pub fn active_witness_urls() -> (Vec<String>, bool) {
 /// A value that is not a 32-byte hex key is dropped with a warning, so that
 /// witness's receipts stay unchecked rather than checked under a guess.
 pub fn witness_keys() -> std::collections::BTreeMap<String, String> {
-    witness_keys_from(crate::settings::var(ENV_WITNESS_KEYS).ok().as_deref())
+    witness_keys_checked(crate::settings::var(ENV_WITNESS_KEYS).ok().as_deref()).0
 }
 
+/// What is wrong with the configured witness keys, for the page: with a
+/// key that is not used, its witness's key would be pinned on first contact
+/// (https only), so the operator should see it.
+pub fn witness_keys_problems() -> Vec<String> {
+    witness_keys_checked(crate::settings::var(ENV_WITNESS_KEYS).ok().as_deref()).1
+}
+
+#[cfg(test)]
 fn witness_keys_from(raw: Option<&str>) -> std::collections::BTreeMap<String, String> {
+    witness_keys_checked(raw).0
+}
+
+fn witness_keys_checked(
+    raw: Option<&str>,
+) -> (std::collections::BTreeMap<String, String>, Vec<String>) {
     let Some(raw) = raw.map(str::trim).filter(|r| !r.is_empty()) else {
         return Default::default();
     };
     let Ok(map) = serde_json::from_str::<std::collections::BTreeMap<String, String>>(raw) else {
-        tracing::warn!(
-            setting = ENV_WITNESS_KEYS,
-            "not a JSON object of witness URL to key; no witness keys are configured"
+        let problem = format!(
+            "{ENV_WITNESS_KEYS} is not a JSON object of witness URL to key, so no witness key is configured"
         );
-        return Default::default();
+        tracing::warn!("{problem}");
+        return (Default::default(), vec![problem]);
     };
-    map.into_iter()
+    let mut problems = Vec::new();
+    let keys = map
+        .into_iter()
         .filter_map(|(url, key)| {
             let key = key.trim().to_ascii_lowercase();
             if key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()) {
                 Some((url.trim().to_string(), key))
             } else {
-                tracing::warn!(witness = %crate::witness_status::display_url(&url), "the configured witness key is not a 32-byte key in hex; it is not used");
+                let problem = format!(
+                    "the key configured for {} is not a 32-byte key in hex; it is not used",
+                    crate::witness_status::display_url(&url)
+                );
+                tracing::warn!("{problem}");
+                problems.push(problem);
                 None
             }
         })
-        .collect()
+        .collect();
+    (keys, problems)
 }
 
 pub fn is_enabled() -> bool {
@@ -344,6 +376,7 @@ pub fn spawn(
     let cfg = config_from_env();
     let witness_urls = cfg.witness_urls.clone();
     let _ = ACTIVE_WITNESSES.set(witness_urls.clone());
+    let _ = ACTIVE_KEYS.set(witness_keys());
     let log_id_for_witnesses = log_id.clone();
     let keys_dir = ledger_dir.clone();
     let interval = Duration::from_secs(cfg.cadence_seconds);
@@ -408,7 +441,7 @@ pub fn spawn(
                     // Only the named witnesses, and only when one is named.
                     if !witness_urls.is_empty() {
                         let (dir, urls) = (keys_dir.clone(), witness_urls.clone());
-                        let configured = witness_keys();
+                        let configured = active_witness_keys();
                         let log_id = log_id_for_witnesses.clone();
                         let _ = tokio::task::spawn_blocking(move || {
                             crate::witness_status::refresh_witnesses(&dir, &urls, &configured, Some(&log_id))
@@ -505,6 +538,17 @@ mod tests {
             witness_urls_from(Some("https://w.example/, https://x.example/log")),
             ["https://w.example/", "https://x.example/log"]
         );
+    }
+
+    #[test]
+    fn a_malformed_key_setting_is_a_problem_to_show() {
+        let (keys, problems) = witness_keys_checked(Some("not json"));
+        assert!(keys.is_empty());
+        assert!(problems[0].contains("not a JSON object"));
+        let (keys, problems) = witness_keys_checked(Some(r#"{"https://w.example": "short"}"#));
+        assert!(keys.is_empty());
+        assert!(problems[0].contains("w.example"));
+        assert!(witness_keys_checked(None).1.is_empty());
     }
 
     #[test]

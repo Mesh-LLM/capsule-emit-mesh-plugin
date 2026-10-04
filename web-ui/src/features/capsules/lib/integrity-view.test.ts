@@ -14,6 +14,7 @@ import {
   identityFact,
   INTEGRITY_TILE_INFO,
   RETENTION_FACT,
+  witnessKeyProblems,
   witnessRestartNote,
   witnessRows,
   witnessTileNote
@@ -461,5 +462,12 @@ describe('the witness list says when saved changes are not in force yet', () => 
     expect(witnessRestartNote({ witness_restart_needed: true })).toMatch(/takes effect when mesh-llm restarts/)
     expect(witnessRestartNote({ witness_restart_needed: false })).toBeNull()
     expect(witnessRestartNote({})).toBeNull()
+  })
+})
+
+describe('configured witness key problems are shown', () => {
+  it('lists each problem string, and nothing without any', () => {
+    expect(witnessKeyProblems({ witness_key_problems: ['bad key'] })).toEqual(['bad key'])
+    expect(witnessKeyProblems({})).toEqual([])
   })
 })

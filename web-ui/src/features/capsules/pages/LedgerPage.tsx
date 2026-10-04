@@ -99,6 +99,7 @@ import {
   sealedBreakdownText,
   INTEGRITY_TILE_INFO,
   RETENTION_FACT,
+  witnessKeyProblems,
   witnessRestartNote,
   witnessRows,
   witnessTileNote,
@@ -1360,7 +1361,11 @@ function IntegritySection() {
           />
         </div>
 
-        <WitnessList note={witnessRestartNote(card ?? null)} rows={witnessRows(card ?? null)} />
+        <WitnessList
+          note={witnessRestartNote(card ?? null)}
+          problems={witnessKeyProblems(card ?? null)}
+          rows={witnessRows(card ?? null)}
+        />
 
         <CloseCard counts={closeCounts} payments={paneCQuery.data?.payments} unjoined={unjoinedPayments} />
 

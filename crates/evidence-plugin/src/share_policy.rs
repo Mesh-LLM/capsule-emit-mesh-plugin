@@ -34,7 +34,7 @@ pub const WITNESS_KEY: &str = "witness";
 pub const STOP_ROUTING_AFTER_KEY: &str = "stop_routing_after_contradictions";
 pub const STOP_ROUTING_WINDOW_KEY: &str = "stop_routing_window_days";
 /// The referee (`crate::referee`): whether a differing twin pair asks one
-/// (on unless set to off), and the bar window after a contradiction, in days.
+/// (off unless set to on), and the bar window after a contradiction, in days.
 /// Same env-suffix convention (`CAPSULES_ADJUDICATE_DIFFERING_TWINS`,
 /// `CAPSULES_REFEREE_BAR_DAYS`).
 pub const ADJUDICATE_DIFFERING_TWINS_KEY: &str = "adjudicate_differing_twins";

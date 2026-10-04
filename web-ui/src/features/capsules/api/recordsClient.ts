@@ -25,6 +25,8 @@ export type RecordsStatus = {
   /** Set when the ledger's last line was torn (a write cut short) and was
    *  cut back to the last whole record when the plugin opened it. */
   torn_write_cut_at?: number | null
+  /** Every cut of a torn last line this log has had, kept across restarts. */
+  ledger_repairs?: Array<{ at: string; torn_write_cut_at: number }>
   /** Why mesh's config file is not being read as written: the sharing
    *  switches are then its last values that parsed, or all off. */
   config_problem?: string | null

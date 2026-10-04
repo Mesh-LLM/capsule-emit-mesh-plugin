@@ -535,3 +535,10 @@ export const WITNESS_RESTART_NOTE = 'Your saved witness list takes effect when m
 export function witnessRestartNote(card: JsonRecord | null | undefined): string | null {
   return card?.witness_restart_needed === true ? WITNESS_RESTART_NOTE : null
 }
+
+/** What is wrong with the configured witness keys (a key not used means its
+ *  witness's key would be pinned on first contact instead). */
+export function witnessKeyProblems(card: JsonRecord | null | undefined): string[] {
+  const problems = card?.witness_key_problems
+  return Array.isArray(problems) ? problems.filter((p): p is string => typeof p === 'string') : []
+}

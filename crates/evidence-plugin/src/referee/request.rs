@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 
 use super::verdict::compare_transcripts;
 
-/// The operator's switch. Unset: on.
+/// The operator's switch. Unset: off.
 pub const ENV_ADJUDICATE_DIFFERING_TWINS: &str = "CAPSULES_ADJUDICATE_DIFFERING_TWINS";
 
 /// Decided: a pair that found no eligible referee is not retried on its own;

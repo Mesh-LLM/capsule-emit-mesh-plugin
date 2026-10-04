@@ -241,11 +241,12 @@ fn take(path: &Path, label: &str) -> anyhow::Result<Result<File, String>> {
             path.display()
         );
     }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    // Never through a link, even one made between the check above and here.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NOFOLLOW);
+    let mut file = options
         .open(path)
         .with_context(|| format!("open {}", path.display()))?;
     match file.try_lock() {
@@ -299,10 +300,20 @@ pub fn lock(dir: &Path) -> anyhow::Result<DataDirLock> {
         &format!("ledger {}", real_ledger.display()),
     )?
     .map_err(anyhow::Error::msg)?;
+    let mut files = vec![dir_lock, ledger_lock];
+    // The log of requests made of this node can live elsewhere
+    // (CAPSULES_RECEIVED_LOG_DIR); two nodes must not share it either.
+    if let Ok(received) = crate::settings::var(crate::evidence_routes::ENV_RECEIVED_LOG_DIR) {
+        let received = PathBuf::from(received.trim());
+        std::fs::create_dir_all(&received).with_context(|| format!("create {}", received.display()))?;
+        let real = std::fs::canonicalize(&received).with_context(|| format!("resolve {}", received.display()))?;
+        files.push(
+            take(&real.join(LEDGER_LOCK_FILE), &format!("received-request log {}", real.display()))?
+                .map_err(anyhow::Error::msg)?,
+        );
+    }
     check_no_other_writer(dir)?;
-    Ok(DataDirLock {
-        _files: vec![dir_lock, ledger_lock],
-    })
+    Ok(DataDirLock { _files: files })
 }
 
 #[cfg(test)]
