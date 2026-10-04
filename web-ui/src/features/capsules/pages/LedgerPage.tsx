@@ -132,7 +132,7 @@ import {
   SAVE_EVIDENCE_FILE_TOOLTIP,
   SETUP_STEPS_LABEL,
   SETUP_STEPS_TOOLTIP,
-  TRUST_MAP_URL,
+  DOCS_URL,
   HERO_TOOLTIPS,
   EXCHANGE_TEXT_DELETE_NOW,
   CLOSE_CARD_COUNTS_TOOLTIP,
@@ -559,10 +559,6 @@ function ExchangesSection({
   // from the row before it", and index 0 always differs from "no previous
   // row").
   const dayHeaderAt = useMemo(() => dayHeaderIndices(currentPageRows), [currentPageRows])
-  // item 3 -- the LIVE configured rate for the
-  // bracket's disclosure sentence; `null` (never a hardcoded 50) until a
-  // sidecar actually emits it.
-  const twinSampleRateDenominator = query.data?.twin_sample_rate_denominator ?? null
   // No twin bracket on any row: the host does not mark twins, so no pair is
   // ever adjudicated (nothing is guessed from timing). Said once, here.
   const twinsUnmarkedLine =
@@ -1045,7 +1041,6 @@ function ExchangesSection({
                       bracketId={bracketId}
                       key={group.groupKey}
                       rows={group.rows}
-                      twinSampleRateDenominator={twinSampleRateDenominator}
                     >
                       {rowElements}
                     </TwinBracket>
@@ -1491,7 +1486,7 @@ export function LedgerPageContent({ focusExchangeKey }: { focusExchangeKey?: str
               {HERO_DESCRIPTION_BEFORE_LINK}
               <a
                 className="underline underline-offset-2 hover:text-foreground"
-                href={TRUST_MAP_URL}
+                href={DOCS_URL}
                 rel="noreferrer"
                 target="_blank"
               >

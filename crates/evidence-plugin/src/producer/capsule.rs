@@ -163,7 +163,7 @@ pub struct ServingProvenance {
     /// is `None`. Graded self-attested/peer-asserted, never promoted to a
     /// verified or signed claim by this field's mere presence.
     pub peer_capsule_id_provenance: Option<String>,
-    /// The id shared by BOTH halves of an ambient twin comparison, forwarded
+    /// The id shared by BOTH halves of a client-marked twin pair, forwarded
     /// verbatim from the terminal `openai.exchange.v1` envelope's own
     /// `twin_bracket_id` (host-minted; this plugin never mints or derives
     /// one). `None` -- and then ABSENT from the sealed capsule, never a

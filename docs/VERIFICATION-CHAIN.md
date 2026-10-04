@@ -1,8 +1,8 @@
 # The verification chain: what each link proves, and how
 
-*A technical companion. The plain-language version is
-[Can you trust a stranger to run your prompt?](https://github.com/action-state-group/capsule-emit-mesh/blob/main/docs/CAN-YOU-TRUST-A-STRANGER.md); the full
-threat model is [TRUST-MODEL.md](TRUST-MODEL.md). This document is the middle layer:
+*A technical companion: what this plugin's records and the Evidence page can and cannot
+show. A plain-language version and the full threat model are linked from
+[THREAT-MODEL.md](THREAT-MODEL.md). This document is the middle layer:
 the actual cryptographic chain, link by link — for each link, **what it proves**, **the
 mechanism (and RFC)**, **how a verifier checks it**, and **what it does *not* prove.***
 
@@ -133,9 +133,11 @@ Standards this builds on: **RFC 8785** (JCS canonical JSON), **RFC 9052/9053** (
   outside it, and it cannot show different histories to different parties without the
   disagreement being detectable.
 - **Mechanism:** the checkpoint is `POST`ed (`application/cll-checkpoint+cbor`) to a
-  **SCITT Transparency Service** (RFC 9943) — the default is the neutral
-  `witness.agentactioncapsule.org` (`DEFAULT_TS_URL`, but *an* instance, never
-  hardcoded-only). The service returns a **COSE Receipt** (RFC 9942) whose inclusion
+  **SCITT Transparency Service** (RFC 9943) that the operator named. There is **no
+  default witness**: with none named, no checkpoint is registered anywhere and no
+  witness is contacted. Any service that implements the protocol can be named;
+  `witness.agentactioncapsule.org` is one public instance an operator may choose, like
+  any other. The service returns a **COSE Receipt** (RFC 9942) whose inclusion
   proof uses the **RFC 9162 SHA-256** verifiable data structure.
 - **How you check it:** verify the receipt offline with `scitt-cose` (RFC 9942 receipt,
   RFC 9162 SHA-256 inclusion) against the witness's public key — no access to the
@@ -199,4 +201,4 @@ tamper-evident.** It does **not**, by itself, make the account **true**:
 
 Saying each of these plainly is what makes the parts that *are* proven usable as
 evidence. For the per-role version of "what each party wants answered, and the evidence
-that addresses it," see [TRUST-MODEL.md](TRUST-MODEL.md) §2.2–2.5.
+that addresses it," see the threat model ([THREAT-MODEL.md](THREAT-MODEL.md)) §2.2–2.5.

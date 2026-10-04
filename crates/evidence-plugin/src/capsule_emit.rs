@@ -720,7 +720,7 @@ impl CapsuleState {
                     peer_capsule_id_provenance: None,
                     // This path is admitted directly by this plugin's own
                     // `/v1` handler -- there is no mesh terminal envelope to
-                    // read an ambient twin bracket off of, so this is never
+                    // read a twin bracket off of, so this is never
                     // twinned on this path.
                     twin_bracket_id: None,
                     response_text_digest: None,
@@ -896,7 +896,7 @@ pub struct ObservedHostExchange<'a> {
     /// `peer_capsule_id` (`lifecycle_channel::capsule_id_provenance_wire_value`)
     /// -- `None` exactly when `peer_capsule_id` is `None`.
     pub peer_capsule_id_provenance: Option<&'a str>,
-    /// The id shared by BOTH halves of an ambient twin comparison, forwarded
+    /// The id shared by BOTH halves of a client-marked twin pair, forwarded
     /// verbatim off the terminal envelope's own `twin_bracket_id` -- this
     /// plugin never mints or derives one, only relays what the host already
     /// minted. `None` on every exchange the envelope reports as not twinned

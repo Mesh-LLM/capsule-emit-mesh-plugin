@@ -46,10 +46,10 @@ pub const REFEREE_BAR_DAYS_KEY: &str = "referee_bar_days";
 /// node.
 pub const ENV_RECORD_AT_COMPLETION: &str = "CAPSULES_SHARE_RECORD_AT_COMPLETION";
 
-/// This process's runtime `share_record_at_completion` value: `true` only
-/// when explicitly set to `"off"`; unset or any other value resolves to the
-/// documented default (`"counterparty"`, i.e. NOT off).
-/// Seam A1.
+/// This process's runtime `share_record_at_completion` value: off unless
+/// the operator set it to `"counterparty"`. Unset, `off` or any other value
+/// is the default, off: a node pushes nothing to a peer unless its operator
+/// turned this on.
 pub fn record_at_completion_is_off() -> bool {
     record_at_completion_is_off_for(
         crate::settings::var(ENV_RECORD_AT_COMPLETION)
@@ -59,7 +59,7 @@ pub fn record_at_completion_is_off() -> bool {
 }
 
 fn record_at_completion_is_off_for(raw: Option<&str>) -> bool {
-    raw == Some("off")
+    raw.map(str::trim) != Some("counterparty")
 }
 
 /// This process's own env var for `share_history_segments`.
@@ -84,10 +84,14 @@ fn history_segments_for(raw: Option<&str>) -> &'static str {
 /// This process's own env var for `share_adjudications`.
 pub const ENV_ADJUDICATIONS: &str = "CAPSULES_SHARE_ADJUDICATIONS";
 
-/// Deliver a verdict to the nodes it judges: unless `share_adjudications` is
-/// explicitly `off` (the default is `deliver_to_subjects`).
+/// Deliver a verdict to the nodes it judges: only when the operator set
+/// `share_adjudications` to `deliver_to_subjects`. The default is off.
 pub fn adjudications_delivered() -> bool {
-    crate::settings::var(ENV_ADJUDICATIONS).ok().as_deref() != Some("off")
+    adjudications_delivered_for(crate::settings::var(ENV_ADJUDICATIONS).ok().as_deref())
+}
+
+fn adjudications_delivered_for(raw: Option<&str>) -> bool {
+    raw.map(str::trim) == Some("deliver_to_subjects")
 }
 
 const CATEGORY_ID: &str = "share";
@@ -113,10 +117,10 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
     config_schema(plugin_id)
         .setting(
             config_setting(RECORD_AT_COMPLETION_KEY, config_enum(["counterparty", "off"]))
-                .default_value(&"counterparty")
+                .default_value(&"off")
                 .description(
                     "Push this node's own sealed record of a completed exchange to the \
-                     counterparty (counterparty), or don't (off). With checkpointing on, the \
+                     counterparty (counterparty), or don't (off, the default). With checkpointing on, the \
                      push also carries a signed checkpoint of this node's log and the record's \
                      inclusion proof -- the checkpoint reveals the log's total size (records \
                      across all peers) and its time, never any other record's content. \
@@ -135,16 +139,16 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
             .description(
                 "Who this node answers a chain-segment/record/correlation request from: past \
                  counterparties only, counterparties plus prospective ones (default), any peer, \
-                 or nobody. A refusal is structural (not_authorized), never a score.",
+                 or nobody. A refusal is structural (not_authorized): it says nothing about the peer.",
             )
             .label("History segments")
             .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 1),
         )
         .setting(
             config_setting(ADJUDICATIONS_KEY, config_enum(["deliver_to_subjects", "off"]))
-                .default_value(&"deliver_to_subjects")
+                .default_value(&"off")
                 .description(
-                    "Deliver a sealed verdict to every node it judges (default), or don't. The \
+                    "Deliver a sealed verdict to every node it judges, or don't (off, the default). The \
                      subject acks or disputes on its own chain -- this is delivery, never a \
                      computed standing.",
                 )
@@ -174,11 +178,12 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
         )
         .setting(
             config_setting(ADJUDICATE_DIFFERING_TWINS_KEY, config_enum(["on", "off"]))
-                .default_value(&"on")
+                .default_value(&"off")
                 .description(
-                    "Ask a referee when two twins of a pair the host marked answered the same \
-                     request at temperature 0, on the same model and weights, and differ (on, the \
-                     default), or never (off). At most one call per pair, never retried. A pair \
+                    "Ask a referee when two twins of a pair a client marked answered the same \
+                     request at temperature 0, on the same model and weights, and differ (on), or \
+                     never (off, the default). A referee answers with its own inference, so only \
+                     you turn this on. At most one call per pair, never retried. A pair \
                      with no ruling reads \"Not adjudicated\" with the reason, and never counts \
                      against either twin.",
                 )
@@ -202,9 +207,13 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
                     "Stop routing to a peer after this many contradictions within the window below. \
                      Off when empty or 0 (the default). Only verdicts this node asked a referee \
                      for, and whose signature it checked, count, once per referee and pair of \
-                     answers; with N of 2 or more, no single referee can reach N alone. When it fires, the host blocks the peer until you undo \
-                     it, exactly like Stop routing, and the sealed record names this rule and \
-                     cites the verdicts. Undo it the same way. No figure about a peer is computed, and nothing is sent.",
+                     answers; with N of 2 or more, no single referee can reach N alone. When it \
+                     fires, the plugin asks the host to stop routing to that peer until you undo \
+                     it. The host does that only if you also set allow_peer_blocks = true for \
+                     this plugin in mesh-llm's config; otherwise it refuses and nothing is \
+                     blocked. The host records the block as this plugin's, and the plugin seals a \
+                     record that names this rule and cites the verdicts. Undo it like any Stop \
+                     routing. No figure about a peer is computed.",
                 )
                 .label("Stop routing after N contradictions")
                 .category(RULE_CATEGORY_ID, RULE_CATEGORY_LABEL, RULE_CATEGORY_SUMMARY, 0),
@@ -297,12 +306,12 @@ mod tests {
     }
 
     #[test]
-    fn record_at_completion_and_adjudications_default_to_the_documented_on_state() {
+    fn nothing_that_reaches_a_peer_on_its_own_is_on_by_default() {
         let schema = as_config_schema(share_policy_config_schema("capsules"));
         let by_key = |k: &str| schema.settings.iter().find(|s| s.key == k).unwrap();
         assert_eq!(
             by_key(RECORD_AT_COMPLETION_KEY).default_json.as_deref(),
-            Some("\"counterparty\"")
+            Some("\"off\"")
         );
         assert_eq!(
             by_key(HISTORY_SEGMENTS_KEY).default_json.as_deref(),
@@ -310,8 +319,16 @@ mod tests {
         );
         assert_eq!(
             by_key(ADJUDICATIONS_KEY).default_json.as_deref(),
-            Some("\"deliver_to_subjects\"")
+            Some("\"off\"")
         );
+        assert_eq!(
+            by_key(ADJUDICATE_DIFFERING_TWINS_KEY).default_json.as_deref(),
+            Some("\"off\"")
+        );
+        // Answering a request for a record is unchanged.
+        assert_eq!(history_segments_for(None), "prospective");
+        assert!(!adjudications_delivered_for(None));
+        assert!(!crate::referee::request::adjudicate_differing_twins_from(None));
     }
 
     #[test]
@@ -365,18 +382,19 @@ mod tests {
     }
 
     #[test]
-    fn record_at_completion_is_off_only_for_the_explicit_off_value() {
-        assert!(record_at_completion_is_off_for(Some("off")));
-    }
-
-    #[test]
-    fn record_at_completion_defaults_on_when_unset() {
-        assert!(!record_at_completion_is_off_for(None));
-    }
-
-    #[test]
-    fn record_at_completion_defaults_on_for_any_other_value() {
+    fn record_at_completion_is_on_only_for_counterparty() {
         assert!(!record_at_completion_is_off_for(Some("counterparty")));
-        assert!(!record_at_completion_is_off_for(Some("garbage")));
+        assert!(!record_at_completion_is_off_for(Some(" counterparty ")));
+        assert!(record_at_completion_is_off_for(None));
+        assert!(record_at_completion_is_off_for(Some("off")));
+        assert!(record_at_completion_is_off_for(Some("garbage")));
+    }
+
+    #[test]
+    fn verdict_delivery_is_on_only_for_deliver_to_subjects() {
+        assert!(adjudications_delivered_for(Some("deliver_to_subjects")));
+        assert!(!adjudications_delivered_for(None));
+        assert!(!adjudications_delivered_for(Some("off")));
+        assert!(!adjudications_delivered_for(Some("garbage")));
     }
 }

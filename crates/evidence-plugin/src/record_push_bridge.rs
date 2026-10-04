@@ -319,7 +319,7 @@ async fn bridge_inbound_record_push(
             Some(held) if reply.get("status").and_then(|s| s.as_str()) == Some("received") => {
                 match seal_received_verdict(&capsules, held) {
                     Ok(()) => {
-                        crate::routing_rule::spawn_evaluate(capsules.clone());
+                        crate::routing_rule::mark_due();
                         serde_json::to_vec(&reply)?
                     }
                     Err(error) => {

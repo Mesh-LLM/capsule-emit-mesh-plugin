@@ -51,7 +51,7 @@ export const HARNESS_PANE_A_PAYLOAD: PaneAJson = {
         },
         adjudications_received: { value: 8, source: 'self_held', note: 'verdicts received about served exchanges' },
         no_requester_identifiers: 'this summary reads and reports no requester-identity field',
-        not_a_score: 'An account of facts, with a witness handle to verify them.'
+        what_this_is: 'An account of facts, with a witness handle to verify them. It recommends nothing about routing.'
       }
     }
   }
@@ -212,12 +212,8 @@ function buildFillerExchangeRows(count: number): PaneCRow[] {
 // show rather than the '—' fallback.
 // two adjacent curated rows sharing a real
 // `twin_bracket_id`, sorted newest-first ahead of everything else, so the
-// ambient-twin bracket + disclosure sentence + Compare diff + "Twins only"
-// filter are all reachable in harness mode without waiting on live 1-in-N
-// sampling to actually land one. `twin_sample_rate_denominator` at the list
-// level is the default rate (1 in 50), not a fixture-only number, so the
-// disclosure sentence this fixture drives says exactly what production would.
-export const HARNESS_TWIN_SAMPLE_RATE_DENOMINATOR = 50
+// twin bracket + its sentence + Compare diff + "Twins only" filter are all
+// reachable in harness mode, as a client-marked pair would make them.
 
 export const HARNESS_PANE_C_PAYLOAD: PaneCListJson = {
   row_count: 10 + HARNESS_LEDGER_FILLER_ROW_COUNT,
@@ -225,7 +221,6 @@ export const HARNESS_PANE_C_PAYLOAD: PaneCListJson = {
   filters: [],
   next_after_seq: null,
   archived_segments: [],
-  twin_sample_rate_denominator: HARNESS_TWIN_SAMPLE_RATE_DENOMINATOR,
   rows: [
     {
       exchange_key: 'exch-twin-a-00',

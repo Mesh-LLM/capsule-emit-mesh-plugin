@@ -13,21 +13,11 @@
 import type { ExchangeLedgerRow } from '@/features/capsules/lib/exchange-ledger'
 import { parseVerdict, type ParsedVerdict } from '@/features/capsules/lib/adjudication-view'
 
-/**
- * "This comparison ran automatically — 1 in N exchanges is sent to a second
- * peer." (v3 §5 "Ambient twins are unannounced, and the ledger says so.")
- * `oneInN` must come from the LIVE configured rate (today: the sidecar's
- * `twin_sample_rate_denominator`, ultimately sourced from the Rust host's
- * `twin_sample::configured_twin_sample_rate`) -- this function has no
- * built-in default and will not silently print "50" when the caller didn't
- * supply one; `null` degrades to a rate-free disclosure sentence instead.
- */
-export function twinDisclosureSentence(oneInN: number | null): string {
-  if (oneInN === null) {
-    return 'This comparison ran automatically — sent to a second peer.'
-  }
-  return `This comparison ran automatically — 1 in ${oneInN} exchanges is sent to a second peer.`
-}
+/** The bracket's one statement of how the pair came to be: a client marked
+ *  the two requests as one pair with the `x-mesh-twin-bracket` header. The
+ *  host never sends a second copy of a request by itself, so nothing here
+ *  says the comparison "ran automatically" or names a sampling rate. */
+export const TWIN_PAIR_SENTENCE = 'A client marked these two requests as one pair (x-mesh-twin-bracket).'
 
 /**
  * The COMPARISON block's parameters line -- "temp 0 · seed 1 · model

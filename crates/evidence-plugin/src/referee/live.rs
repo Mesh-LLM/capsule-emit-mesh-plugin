@@ -226,27 +226,10 @@ fn recorded_verdicts(ledger_dir: &Path) -> Vec<Recorded> {
         .collect()
 }
 
-/// The host's current blocks; none when it has no stop-routing hook.
-async fn host_blocks() -> Vec<String> {
-    let host = crate::settings::var(crate::routing_rule::ENV_HOST_API)
-        .ok()
-        .filter(|u| !u.trim().is_empty())
-        .unwrap_or_else(|| crate::routing_rule::DEFAULT_HOST_API.to_string());
-    let Ok(response) = reqwest::Client::new()
-        .get(format!("{}/api/peer-blocks", host.trim_end_matches('/')))
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await
-    else {
-        return Vec::new();
-    };
-    let Ok(body) = response.json::<Value>().await else {
-        return Vec::new();
-    };
-    body.get("blocks")
-        .and_then(Value::as_object)
-        .map(|b| b.keys().cloned().collect())
-        .unwrap_or_default()
+/// The peers this node's host has stopped routing to, as the host published
+/// them (`crate::peer_blocks_seen`); never read from the host's operator routes.
+fn host_blocks(ledger_dir: &Path) -> Vec<String> {
+    crate::peer_blocks_seen::blocked_now(ledger_dir)
 }
 
 /// The re-answer request: the twins' own request, greedy, far enough to pass
@@ -427,7 +410,7 @@ pub async fn consider(
         Some(done) => done,
         None => {
             let [a, _] = &live.pair.twins;
-            let blocked = host_blocks().await;
+            let blocked = host_blocks(&ledger_dir);
             let pool = select(
                 SystemClock.now(),
                 super::bar::bar_days(),
@@ -505,7 +488,7 @@ async fn hold_and_deliver(
     }
     if !crate::share_policy::adjudications_delivered() {
         tracing::info!("share_adjudications is off: the verdict is held here and not delivered");
-        crate::routing_rule::spawn_evaluate(capsules.clone());
+        crate::routing_rule::mark_due();
         return;
     }
     for twin in &live.twins {
@@ -521,7 +504,7 @@ async fn hold_and_deliver(
             tracing::warn!(%error, peer = %twin.twin.node_id, "a verdict was not delivered");
         }
     }
-    crate::routing_rule::spawn_evaluate(capsules.clone());
+    crate::routing_rule::mark_due();
 }
 
 /// The operator's "ask again" tool.

@@ -18,6 +18,13 @@ needed.
   `--config <path>` must also have
   `MESH_LLM_CONFIG=<path>` in its environment, or the plugin reads `~/.mesh-llm/config.toml`.
 
+- **Quiet by default.** Pushing this node's record to the counterparty, delivering verdicts, and
+  asking a referee are now **off by default**; turn each on under Configuration › Plugins (see
+  [What it sends](#what-it-sends-and-where-it-listens)). Answering a peer that asks for a record is
+  unchanged.
+- **Stop routing after N goes through the host's plugin path.** The rule now asks mesh-llm to block
+  the peer as this plugin's request, which the host refuses unless you set `allow_peer_blocks =
+  true` for this plugin. The plugin no longer calls the console's own route.
 - **Several witnesses.** **Witnesses** in the console is a list: each witness's URL and, if you have
   it, its public key (still none by default, and no witness is contacted until you add one). The
   Evidence page shows what each witness holds, and counts a witness only once its receipt checks
@@ -46,16 +53,27 @@ Details in [CHANGELOG.md](https://github.com/Mesh-LLM/capsules/blob/main/CHANGEL
 
 ## What it sends, and where it listens
 
-Records are kept on this node. With the default settings:
+Records are kept on this node. **With the default settings the plugin sends
+nothing to any peer on its own**, idle or serving: it only answers a peer that
+asks it for one of its records. Everything else that reaches a peer is off
+until you turn it on:
 
-| What | To whom | Default | Turn it off |
+| What | To whom | Default | To turn it on (or off) |
 | --- | --- | --- | --- |
-| This node's own sealed record of a completed exchange | the peer in that exchange | on | `share_record_at_completion = "off"` |
-| One of this node's records, when asked for it by id | the peer that record names as the other side | on | `share_history_segments = "off"` |
-| A signed checkpoint of the log | a witness service | **off**: only if you set `witness` | leave `witness` empty |
+| This node's own sealed record of a completed exchange (a push) | the peer in that exchange | **off** | `share_record_at_completion = "counterparty"` |
+| A verdict a referee signed, delivered to the nodes it judges | those nodes | **off** | `share_adjudications = "deliver_to_subjects"` |
+| Asking a referee when two twins of a client-marked pair answered differently. **This sends the twins' request (the prompt's `messages`) to the referee peer**, which answers it with its own inference | one eligible peer | **off** | `adjudicate_differing_twins = "on"` |
+| Stopping routing to a peer after N contradictions | (a request to your own host) | **off** | set `stop_routing_after_contradictions`, and `allow_peer_blocks = true` for this plugin in mesh-llm's config |
+| One of this node's records, when a peer asks for it by id | the peer that record names as the other side (or one about to be) | on: an answer, never a push | `share_history_segments = "off"` |
+| A signed checkpoint of the log | the witness services you name | **off**: none by default | add witnesses under **Witnesses** |
+
+The referee also needs exchange text kept on this node, which is its own
+setting (`CAPSULES_KEEP_EXCHANGE_TEXT`, off) and which stock mesh-llm cannot
+fill today (it passes no exchange text to plugins); turning the referee on is
+the decision to send a prompt to a third node.
 
 All peer traffic uses mesh-llm's own peer connections. Nothing goes to any
-third party unless you set a witness. The switches are under Configuration ›
+third party unless you name a witness. The switches are under Configuration ›
 Plugins › Sharing policy, and [`docs/SHARING-POLICY.md`](docs/SHARING-POLICY.md)
 explains each one. The plugin reads what you save there from mesh-llm's
 config file: `~/.mesh-llm/config.toml`, or the file `MESH_LLM_CONFIG` names.

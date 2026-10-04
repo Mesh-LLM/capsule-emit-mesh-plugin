@@ -234,7 +234,7 @@ pub struct OpenAiExchangeEnvelope {
     /// never fabricated.
     #[serde(default)]
     pub reasoning_digest: Option<String>,
-    /// The id shared by BOTH halves of an ambient twin comparison, minted
+    /// The id shared by BOTH halves of a client-marked twin pair, minted
     /// host-side (`mesh-llm-host-runtime`'s
     /// `runtime::twin_sample::mint_twin_bracket_id`). `#[serde(default)]` for
     /// forward-compat with a host that predates the field (it then stays
@@ -706,7 +706,7 @@ mod tests {
     }
 
     /// A terminal event that carries the host-minted `twin_bracket_id`
-    /// (ambient twin comparison) survives the deserialize; an ordinary
+    /// (a client-marked twin pair) survives the deserialize; an ordinary
     /// terminal event that omits the field (the overwhelming majority)
     /// parses with it `None` -- never a fabricated bracket.
     #[test]

@@ -64,8 +64,9 @@ toml = "0.9"
 # Record times and the stop-routing rule's window (`routing_rule`).
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# The stop-routing rule asks the host's local operator API to block a peer
-# (`routing_rule`); the interop tests also drive the plugin's routes with it.
+# The referee's re-answer goes through the host's own OpenAI-compatible API
+# (`referee::live`, only when the operator turned the referee on); the interop
+# tests also drive the plugin's routes with it.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # The capsule producer: every record this plugin seals, its ledger,
 # checkpoints and offline verification come from the capsule-emit crate; the
@@ -109,3 +110,9 @@ strip = true
 # this patch goes and the dependency above names 0.0.5.
 [patch.crates-io]
 capsule-emit = { git = "https://github.com/action-state-group/capsule-emit", rev = "fd740085ef846b4ceb679daf22b38f5963dd5ff2" }
+# mesh-llm-plugin at mesh-llm main, for the host's plugin peer-block path
+# (`PeerBlockRequest`, Mesh-LLM/mesh-llm#2142) until it is published as 0.78;
+# then this patch goes and the dependency above names 0.78. Same plugin
+# protocol version as 0.77, so the plugin still loads on a 0.77 host (which
+# has no peer-block path: the rule then asks nothing).
+mesh-llm-plugin = { git = "https://github.com/Mesh-LLM/mesh-llm", rev = "adf85a8142cc2fc27d038e6500c5b4a53d755b71" }

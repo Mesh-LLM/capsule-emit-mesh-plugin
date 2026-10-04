@@ -22,7 +22,7 @@ import { setPluginHost } from '@/plugin-host/host'
 import { createStandaloneHost } from '@/plugin-host/standalone-host'
 import { CHAIN_BAR_INFO, INTEGRITY_TILE_INFO } from '@/features/capsules/lib/integrity-view'
 import { formatExchangeTimestamp } from '@/features/capsules/lib/local-time'
-import { HERO_DESCRIPTION, TRUST_MAP_URL } from '@/features/capsules/lib/tooltip-copy'
+import { HERO_DESCRIPTION, DOCS_URL } from '@/features/capsules/lib/tooltip-copy'
 
 // ---------------------------------------------------------------------------
 // Mock all network fetchers — tests must never hit the real network.
@@ -162,9 +162,9 @@ describe('LedgerPageContent', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('shows the premise line, with "docs" linking the trust map', () => {
+  it('shows the premise line, with "docs" linking what the page can and cannot show', () => {
     render(<LedgerPageContent />, { wrapper: makeWrapper() })
-    expect(screen.getByRole('link', { name: 'docs' })).toHaveAttribute('href', TRUST_MAP_URL)
+    expect(screen.getByRole('link', { name: 'docs' })).toHaveAttribute('href', DOCS_URL)
     expect(screen.queryByText(/Everything here is checked on this machine/)).not.toBeInTheDocument()
 
     expect(
@@ -1763,7 +1763,7 @@ describe('LedgerPageContent — real twin bracket + Twins-only filter', () => {
 
   it('brackets two adjacent rows sharing a real twin_bracket_id with a TWIN header, and renders the disclosure sentence', async () => {
     const { fetchPaneCList } = await import('@/features/capsules/api/sidecarClient')
-    vi.mocked(fetchPaneCList).mockResolvedValue({ ...twinBracketPayload(), twin_sample_rate_denominator: 50 })
+    vi.mocked(fetchPaneCList).mockResolvedValue(twinBracketPayload())
 
     const user = userEvent.setup()
     render(<LedgerPageContent />, { wrapper: makeWrapper() })
@@ -1773,7 +1773,7 @@ describe('LedgerPageContent — real twin bracket + Twins-only filter', () => {
     expect(screen.getByRole('group', { name: 'Exchange twin-exch-0' })).toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Exchange twin-exch-1' })).toBeInTheDocument()
     expect(
-      screen.getByText('This comparison ran automatically — 1 in 50 exchanges is sent to a second peer.')
+      screen.getByText('A client marked these two requests as one pair (x-mesh-twin-bracket).')
     ).toBeInTheDocument()
     // Never a computed verdict.
     expect(screen.getByText('not adjudicated')).toBeInTheDocument()
@@ -1793,23 +1793,9 @@ describe('LedgerPageContent — real twin bracket + Twins-only filter', () => {
     expect(screen.queryByText(/Side-by-side check/)).not.toBeInTheDocument()
   })
 
-  it('the disclosure sentence uses the LIVE configured rate from the payload, not a hardcoded 1 in 50', async () => {
-    const { fetchPaneCList } = await import('@/features/capsules/api/sidecarClient')
-    vi.mocked(fetchPaneCList).mockResolvedValue({ ...twinBracketPayload(), twin_sample_rate_denominator: 2 })
-
-    const user = userEvent.setup()
-    render(<LedgerPageContent />, { wrapper: makeWrapper() })
-    await user.click(screen.getByRole('tab', { name: /exchanges/i }))
-
-    expect(
-      await screen.findByText('This comparison ran automatically — 1 in 2 exchanges is sent to a second peer.')
-    ).toBeInTheDocument()
-    expect(screen.queryByText(/1 in 50/)).not.toBeInTheDocument()
-  })
-
   it('"Twins only" actually filters to bracket rows now that a real bracket id exists', async () => {
     const { fetchPaneCList } = await import('@/features/capsules/api/sidecarClient')
-    vi.mocked(fetchPaneCList).mockResolvedValue({ ...twinBracketPayload(), twin_sample_rate_denominator: 50 })
+    vi.mocked(fetchPaneCList).mockResolvedValue(twinBracketPayload())
 
     const user = userEvent.setup()
     render(<LedgerPageContent />, { wrapper: makeWrapper() })

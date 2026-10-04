@@ -675,9 +675,10 @@ fn witness_switch() -> Value {
 
 fn sharing_status() -> Value {
     json!({
-        "record_at_completion": switch(crate::share_policy::ENV_RECORD_AT_COMPLETION, Some("counterparty")),
+        "record_at_completion": switch(crate::share_policy::ENV_RECORD_AT_COMPLETION, Some("off")),
         "history_segments": switch("CAPSULES_SHARE_HISTORY_SEGMENTS", Some("prospective")),
-        "adjudications": switch("CAPSULES_SHARE_ADJUDICATIONS", Some("deliver_to_subjects")),
+        "adjudications": switch("CAPSULES_SHARE_ADJUDICATIONS", Some("off")),
+        "adjudicate_differing_twins": switch(crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS, Some("off")),
         "witness": witness_switch(),
     })
 }

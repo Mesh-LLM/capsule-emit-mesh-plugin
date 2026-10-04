@@ -55,12 +55,13 @@ pub const BECAUSE_MODEL_HASH_UNKNOWN: &str = "model_hash_unknown";
 pub const BECAUSE_WEIGHTS_UNKNOWN: &str = "weights_unknown";
 pub const BECAUSE_WEIGHTS_DIFFER: &str = "weights_differ";
 
-/// The switch's value: off only when the operator says so (`0`, `off`,
-/// `false`, `no`); anything else, or unset, is on.
+/// The switch's value: on only when the operator says so (`1`, `on`,
+/// `true`, `yes`); anything else, or unset, is off. A referee answers with
+/// a third node's inference, so a client's pair marking alone never starts one.
 pub fn adjudicate_differing_twins_from(raw: Option<&str>) -> bool {
-    !matches!(
+    matches!(
         raw.map(|r| r.trim().to_ascii_lowercase()).as_deref(),
-        Some("0" | "off" | "false" | "no")
+        Some("1" | "on" | "true" | "yes")
     )
 }
 
@@ -590,10 +591,12 @@ mod tests {
     }
 
     #[test]
-    fn the_switch_is_on_unless_turned_off() {
-        assert!(adjudicate_differing_twins_from(None));
-        assert!(adjudicate_differing_twins_from(Some("1")));
-        for off in ["0", "off", "false", "No"] {
+    fn the_switch_is_off_unless_turned_on() {
+        assert!(!adjudicate_differing_twins_from(None));
+        for on in ["1", "on", "true", "Yes", " on "] {
+            assert!(adjudicate_differing_twins_from(Some(on)), "{on}");
+        }
+        for off in ["0", "off", "false", "No", "", "garbage"] {
             assert!(!adjudicate_differing_twins_from(Some(off)), "{off}");
         }
     }

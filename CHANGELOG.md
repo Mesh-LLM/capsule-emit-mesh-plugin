@@ -4,6 +4,18 @@
 
 ### Changed
 
+- **Nothing reaches a peer on its own by default.** `share_record_at_completion` (push this node's
+  record to the counterparty), `share_adjudications` (deliver verdicts) and
+  `adjudicate_differing_twins` (ask a referee, which sends the twins' request to a third node) are
+  **off by default**; each turns on only on its explicit value. Answering a peer that asks for a
+  record (`share_history_segments`) is unchanged.
+- **The stop-routing rule asks the host through the plugin protocol** (`PeerBlockRequest`), so the
+  host records the block as this plugin's and refuses it unless the operator set
+  `allow_peer_blocks = true` for this plugin. The plugin no longer calls the console's
+  `/api/peer-blocks` route (as the operator) for this or for choosing a referee; it learns blocks
+  from the host's `routing.choice.v1` publications, and seals its own record of a rule block.
+- **The twin pair says what happened:** "A client marked these two requests as one pair", not that
+  a comparison ran automatically.
 - **Renamed to `capsules`** (plugin id, repository `Mesh-LLM/capsules`, release assets
   `capsules-<version>-<target>.tar.gz`, page `/plugins/capsules/evidence`). Settings are
   `CAPSULES_*`; the old `CAPSULE_EMIT_MESH_*` names are read for this release, with a warning. The

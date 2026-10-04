@@ -252,7 +252,8 @@ async fn answer_in_process(
     })
     .await;
     if adjudicate {
-        crate::routing_rule::spawn_evaluate(for_rule);
+        drop(for_rule);
+        crate::routing_rule::mark_due();
     }
     answered.ok().flatten()
 }

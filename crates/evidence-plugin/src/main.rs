@@ -48,6 +48,7 @@ mod two_node_e2e;
 mod verdict_counts;
 mod web_ui_manifest;
 mod witness_status;
+mod peer_blocks_seen;
 
 use crate::producer::capsule::TokenUsage;
 use axum::{
@@ -1116,6 +1117,9 @@ fn plugin_builder(admission: Option<&str>) -> DeclarativePluginBuilder {
     .mesh_item(mesh_channel(record_push_bridge::RECORD_PUSH_CHANNEL))
     .mesh_item(mesh_channel(LEDGER_FETCH_CHANNEL))
     .mesh_item(mesh_channel(settlement_channel::PAYMENT_LIFECYCLE_CHANNEL))
+    // The host's routing choices (blocks and unblocks), so a blocked peer is
+    // never chosen as a referee or asked to be blocked again.
+    .mesh_item(mesh_channel(peer_blocks_seen::ROUTING_CHOICE_CHANNEL))
     // Any mesh event carries this node's own peer id; the host sends these
     // kinds as a snapshot right after the plugin loads (see `self_peer`).
     .event_item(events::local_accepting())
@@ -1193,7 +1197,6 @@ async fn main() -> anyhow::Result<()> {
     );
     // The opt-in stop-routing rule (off unless its N is set) also runs once
     // at start, for verdicts recorded while it was off.
-    routing_rule::spawn_evaluate(capsules.clone());
     let lifecycle_events = Arc::new(ObservedLifecycleEvents::open(&data_dir)?);
     let self_peer = self_peer::SelfPeer::new(&data_dir);
     let self_peer_for_events = self_peer.clone();
@@ -1323,6 +1326,21 @@ async fn main() -> anyhow::Result<()> {
                             referee::live::consider(context, &capsules, bracket, &self_id, false).await;
                         }
                     }
+                } else if message.channel == peer_blocks_seen::ROUTING_CHOICE_CHANNEL {
+                    // The host's own routing choices only; a frame relayed
+                    // from a peer is refused like a payment event.
+                    if settlement_channel::is_local_host_broadcast(
+                        &message.source_peer_id,
+                        &message.target_peer_id,
+                    ) {
+                        if let Err(error) =
+                            peer_blocks_seen::record(capsules.ledger_dir(), &message.body)
+                        {
+                            tracing::warn!(%error, "a routing choice from the host was not kept");
+                        }
+                    } else {
+                        tracing::warn!("refused routing.choice.v1 message not from the local host");
+                    }
                 } else if message.channel == settlement_channel::PAYMENT_LIFECYCLE_CHANNEL
                     && !settlement_channel::is_local_host_broadcast(
                         &message.source_peer_id,
@@ -1369,6 +1387,9 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
+                // The stop-routing rule, when it is on and a verdict landed:
+                // it asks the host through this handler's context.
+                routing_rule::evaluate_if_due(context, &capsules).await;
                 Ok(())
             })
         })
@@ -1389,15 +1410,19 @@ async fn main() -> anyhow::Result<()> {
                 // doc), so the single `on_open_stream` slot dispatches on
                 // `content_type`, the one field both carriers set to a
                 // distinct, stable value for exactly this purpose.
-                if request.content_type.as_deref() == Some(record_push_bridge::RECORD_PUSH_CONTENT_TYPE) {
-                    record_push_bridge::handle_open_stream(request, context, capsules, collector).await
+                let answered = if request.content_type.as_deref() == Some(record_push_bridge::RECORD_PUSH_CONTENT_TYPE) {
+                    record_push_bridge::handle_open_stream(request, context, capsules.clone(), collector).await
                 } else if ledger_fetch_bridge::is_ledger_fetch_request(&request) {
                     // See `ledger_fetch_bridge`'s module doc for why
                     // `metadata_json` is its dispatch key.
-                    ledger_fetch_bridge::handle_open_stream(request, context, capsules).await
+                    ledger_fetch_bridge::handle_open_stream(request, context, capsules.clone()).await
                 } else {
-                    mesh_evidence_bridge::handle_open_stream(request, context, capsules).await
-                }
+                    mesh_evidence_bridge::handle_open_stream(request, context, capsules.clone()).await
+                };
+                // A verdict delivered over a stream lands here: the rule
+                // (when on) is evaluated with this handler's context.
+                routing_rule::evaluate_if_due(context, &capsules).await;
+                answered
             })
         })
     })

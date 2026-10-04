@@ -36,7 +36,7 @@ export type ExchangeLedgerRow = {
    *  carries no session for -- never invented. */
   sessionId: string | null
   /** `null` for every row that isn't one half
-   *  of an ambient twin comparison (the overwhelming majority today). See
+   *  of a client-marked twin pair (the overwhelming majority today). See
    *  `twin-bracket.ts` for how two rows sharing a non-null id become one
    *  bracket. */
   twinBracketId: string | null

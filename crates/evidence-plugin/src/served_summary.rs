@@ -297,8 +297,8 @@ pub fn summary_value(
         "no_requester_identifiers": "this summary reads and reports no requester-identity field \
              (cross_party.initiator_ref, serving_provenance.requesting_party/counterparty_ref) \
              -- it answers WHAT was served, never WHO asked",
-        "not_a_score": "An account of facts + a witness handle to verify them, not a score or routing \
-             recommendation.",
+        "what_this_is": "An account of facts, with a witness handle to verify them. It recommends \
+             nothing about routing.",
     })
 }
 

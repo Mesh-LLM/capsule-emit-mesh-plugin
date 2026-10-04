@@ -42,7 +42,7 @@ describe('TwinBracket — v3 §5, OBSERVE-ONLY', () => {
   it('renders the TWIN header naming the bracket id, and its two children', () => {
     const rows = [twinRow('a'), twinRow('b')]
     render(
-      <TwinBracket bracketId="twin-xyz" rows={rows} twinSampleRateDenominator={50}>
+      <TwinBracket bracketId="twin-xyz" rows={rows}>
         <p>row a</p>
         <p>row b</p>
       </TwinBracket>
@@ -59,7 +59,7 @@ describe('TwinBracket — v3 §5, OBSERVE-ONLY', () => {
       twinRow('b', { mine: { state: 'present', capsule_id: null, text: 'same text' } })
     ]
     render(
-      <TwinBracket bracketId="twin-xyz" rows={rows} twinSampleRateDenominator={50}>
+      <TwinBracket bracketId="twin-xyz" rows={rows}>
         <p>row a</p>
         <p>row b</p>
       </TwinBracket>
@@ -72,23 +72,23 @@ describe('TwinBracket — v3 §5, OBSERVE-ONLY', () => {
     expect(screen.queryByText(/\bdiffers\b/i)).not.toBeInTheDocument()
   })
 
-  it('the disclosure sentence uses the LIVE rate prop, not a hardcoded 50', () => {
+  it('says a client marked the pair', () => {
     const rows = [twinRow('a'), twinRow('b')]
     render(
-      <TwinBracket bracketId="twin-xyz" rows={rows} twinSampleRateDenominator={2}>
+      <TwinBracket bracketId="twin-xyz" rows={rows}>
         <p>row a</p>
         <p>row b</p>
       </TwinBracket>
     )
     expect(
-      screen.getByText('This comparison ran automatically — 1 in 2 exchanges is sent to a second peer.')
+      screen.getByText('A client marked these two requests as one pair (x-mesh-twin-bracket).')
     ).toBeInTheDocument()
   })
 
   it('Compare is disabled when neither side has response text, and never renders as clickable-but-empty', () => {
     const rows = [twinRow('a'), twinRow('b')]
     render(
-      <TwinBracket bracketId="twin-xyz" rows={rows} twinSampleRateDenominator={50}>
+      <TwinBracket bracketId="twin-xyz" rows={rows}>
         <p>row a</p>
         <p>row b</p>
       </TwinBracket>
@@ -103,7 +103,7 @@ describe('TwinBracket — v3 §5, OBSERVE-ONLY', () => {
       twinRow('b', { mine: { state: 'present', capsule_id: null, text: 'hello from B' } })
     ]
     render(
-      <TwinBracket bracketId="twin-xyz" rows={rows} twinSampleRateDenominator={50}>
+      <TwinBracket bracketId="twin-xyz" rows={rows}>
         <p>row a</p>
         <p>row b</p>
       </TwinBracket>
@@ -118,7 +118,7 @@ describe('TwinBracket — v3 §5, OBSERVE-ONLY', () => {
   it('says "same answer" / "different answers" from the pane twin facts, and keeps "not adjudicated" until a referee signs one', () => {
     const facts = (same: boolean | null) => ({ bracket_id: 'twin-xyz', same_answer: same, other_row: null })
     const { unmount } = render(
-      <TwinBracket bracketId="twin-xyz" rows={[twinRow('a', { twin: facts(true) }), twinRow('b', { twin: facts(true) })]} twinSampleRateDenominator={1}>
+      <TwinBracket bracketId="twin-xyz" rows={[twinRow('a', { twin: facts(true) }), twinRow('b', { twin: facts(true) })]}>
         <p>row a</p>
       </TwinBracket>
     )
@@ -126,14 +126,14 @@ describe('TwinBracket — v3 §5, OBSERVE-ONLY', () => {
     expect(screen.getByText('not adjudicated')).toBeInTheDocument()
     unmount()
     const second = render(
-      <TwinBracket bracketId="twin-xyz" rows={[twinRow('a', { twin: facts(false) }), twinRow('b', { twin: facts(false) })]} twinSampleRateDenominator={1}>
+      <TwinBracket bracketId="twin-xyz" rows={[twinRow('a', { twin: facts(false) }), twinRow('b', { twin: facts(false) })]}>
         <p>row a</p>
       </TwinBracket>
     )
     expect(screen.getByText('different answers')).toBeInTheDocument()
     second.unmount()
     render(
-      <TwinBracket bracketId="twin-xyz" rows={[twinRow('a', { twin: facts(null) }), twinRow('b')]} twinSampleRateDenominator={1}>
+      <TwinBracket bracketId="twin-xyz" rows={[twinRow('a', { twin: facts(null) }), twinRow('b')]}>
         <p>row a</p>
       </TwinBracket>
     )
@@ -149,7 +149,7 @@ describe('TwinBracket — v3 §5, OBSERVE-ONLY', () => {
       verdict_capsule_id: 'a9a0ca66822384be1f73188ca010620f'
     }
     render(
-      <TwinBracket bracketId="twin-xyz" rows={[twinRow('a', { twin: withVerdict }), twinRow('b')]} twinSampleRateDenominator={1}>
+      <TwinBracket bracketId="twin-xyz" rows={[twinRow('a', { twin: withVerdict }), twinRow('b')]}>
         <p>row a</p>
       </TwinBracket>
     )
@@ -168,7 +168,7 @@ describe('TwinBracket — v3 §5, OBSERVE-ONLY', () => {
       <TwinBracket
         bracketId="twin-xyz"
         rows={[twinRow('a', { twin: { bracket_id: 'twin-xyz', same_answer: false, other_row: null, verdict: 'not_comparable', verdict_capsule_id: 'v'.repeat(32) } }), twinRow('b')]}
-        twinSampleRateDenominator={1}
+       
       >
         <p>row a</p>
       </TwinBracket>
@@ -180,7 +180,7 @@ describe('TwinBracket — v3 §5, OBSERVE-ONLY', () => {
 
   it('offers no verdict to open while no referee has signed one', () => {
     render(
-      <TwinBracket bracketId="twin-xyz" rows={[twinRow('a'), twinRow('b')]} twinSampleRateDenominator={1}>
+      <TwinBracket bracketId="twin-xyz" rows={[twinRow('a'), twinRow('b')]}>
         <p>row a</p>
       </TwinBracket>
     )

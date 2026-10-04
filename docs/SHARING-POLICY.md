@@ -7,11 +7,16 @@ other node), never on proximity, latency, or any computed standing. Nothing
 here is a score, and nothing here ranks anyone.
 
 ```
-share_record_at_completion: counterparty | off                           # default: counterparty
+share_record_at_completion: counterparty | off                           # default: off
 share_history_segments:     counterparties | prospective | peers | off   # default: prospective
-share_adjudications:        deliver_to_subjects | off                    # default: on
+share_adjudications:        deliver_to_subjects | off                    # default: off
 witness:                    [] | [{endpoint, public_key?}, ...]          # default: [] (off)
 ```
+
+With these defaults a node sends nothing to a peer on its own: it pushes no
+record and delivers no verdict, and it only answers a peer that asks for one
+of its records (`share_history_segments`). The referee
+(`adjudicate_differing_twins`) is off by default too.
 
 The plugin declares the four switches in its `config_schema`
 (`crates/evidence-plugin/src/share_policy.rs`), so the console shows them under
@@ -27,8 +32,9 @@ in hex). An unset or unknown value means the default.
 
 ## The record at completion (`share_record_at_completion`)
 
-When an exchange ends, each side sends its own **sealed record** to the other
-side over the plugin's `record-push/1` mesh stream: the provider's record to
+Off by default. When it is on (`counterparty`) and an exchange ends, each side
+sends its own **sealed record** to the other side over the plugin's
+`record-push/1` mesh stream: the provider's record to
 the requester, and the requester's to the provider. With the checkpoint
 cadence on (the default), the record goes out as a **bundle**: the record, a
 signed checkpoint of the sender's log, and the record's inclusion proof under
@@ -89,13 +95,24 @@ record bodies and are answered under every tier. The golden answers are in
 
 ## Verdicts (`share_adjudications`)
 
-When a referee's verdict about an exchange exists, it is delivered to every
-node it concerns, and each seals its own record citing it. A node holds a
+Off by default. When it is on (`deliver_to_subjects`) and a referee's verdict
+about an exchange exists, it is delivered to every node it concerns, and each
+seals its own record citing it. A node holds a
 delivered verdict only when the referee it names signed it with its announced
 key and the verdict concerns that node (it asked for it, or it judges one of
 that node's own records). With `share_adjudications: off` the node that asked
 still holds the verdict, and delivers it to no one. How a referee is chosen:
 [TWIN-REFEREE-SELECTION.md](TWIN-REFEREE-SELECTION.md).
+
+**Asking a referee sends a prompt to a third node.** With
+`adjudicate_differing_twins` on (off by default), when two twins of a pair a
+client marked (`x-mesh-twin-bracket`) answered differently, this node sends the
+twins' own request, including the prompt's `messages`, to one eligible peer
+(`x-mesh-target`), which answers it with its own inference; that answer and
+both twins' halves then go to it to adjudicate. It needs the exchange text
+kept on this node, a separate setting (`CAPSULES_KEEP_EXCHANGE_TEXT`, off)
+that keeping text locally does not imply the other way round: keeping text
+never sends it to a peer. The operator's "Ask again" is the same switch.
 
 ## Witness
 
@@ -139,7 +156,7 @@ wire, other implementations should not target them, and they may change
 between releases. Neither stores and forwards a record, and neither promises
 delivery.
 
-## Three rules that keep this from becoming a score
+## Three rules every switch follows
 
 1. **Filter, never rank.** Every switch answers or refuses; none orders or
    weights a peer.

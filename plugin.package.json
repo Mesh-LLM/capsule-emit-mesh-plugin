@@ -45,7 +45,7 @@
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Who this node answers a chain-segment/record/correlation request from: past counterparties only, counterparties plus prospective ones (default), any peer, or nobody. A refusal is structural (not_authorized), never a score.",
+        "description": "Who this node answers a chain-segment/record/correlation request from: past counterparties only, counterparties plus prospective ones (default), any peer, or nobody. A refusal is structural (not_authorized): it says nothing about the peer.",
         "presentation": {
           "label": "History segments",
           "category_id": "share",

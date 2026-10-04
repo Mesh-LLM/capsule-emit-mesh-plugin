@@ -562,15 +562,6 @@ export type PaneCListJson = {
   rows: PaneCRow[]
   next_after_seq: number | null
   archived_segments: unknown[]
-  /** item 3 — the LIVE configured ambient-twin
-   *  sample rate expressed as "1 in N", for the disclosure sentence
-   *  ("This comparison ran automatically — 1 in N exchanges is sent to a
-   *  second peer."). Optional/forward-looking: no sidecar emits it yet
-   *  (the Rust host's `twin_sample::configured_twin_sample_rate` isn't
-   *  wired to a live status endpoint this session) -- a bracket still
-   *  renders without it, just without a specific N in the sentence, never
-   *  a hardcoded "50". */
-  twin_sample_rate_denominator?: number | null
   /** The independent check's state for this list: whether it is on, and
    *  whether the host marks twins at all (no twin bracket on any row: "Not
    *  adjudicated: this host does not mark twins"). */
