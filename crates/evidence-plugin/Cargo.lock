@@ -1224,7 +1224,8 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 [[package]]
 name = "mesh-llm-plugin"
 version = "0.78.0"
-source = "git+https://github.com/Mesh-LLM/mesh-llm?rev=adf85a8142cc2fc27d038e6500c5b4a53d755b71#adf85a8142cc2fc27d038e6500c5b4a53d755b71"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7eca10f69f4a245b5e2794ba9c07c9a1f1b3533d474c0e1ef65e920cfd961ff7"
 dependencies = [
  "anyhow",
  "async-trait",
