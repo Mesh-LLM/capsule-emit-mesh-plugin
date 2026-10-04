@@ -16,8 +16,8 @@ fi
 
 status=0
 for feature in "${features[@]}"; do
-  cargo test --locked --bin capsule-emit-mesh --features "$feature" --no-run -q
-  if out=$(cargo test --locked --bin capsule-emit-mesh --features "$feature" -- referee::parity::the_referee_answers_the_corpus_as_expected 2>&1); then
+  cargo test --locked --bin capsules --features "$feature" --no-run -q
+  if out=$(cargo test --locked --bin capsules --features "$feature" -- referee::parity::the_referee_answers_the_corpus_as_expected 2>&1); then
     echo "::error::the referee parity run passed a build with $feature"
     status=1
     continue

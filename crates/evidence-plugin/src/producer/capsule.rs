@@ -1764,7 +1764,7 @@ mod tests {
 
     /// The inline `key_id` is the RAW 32-byte Ed25519 public key, hex (64
     /// chars) -- exactly `capsule_emit.seal()`'s `capsule["key_id"]` and what
-    /// the announced-key registry (`CAPSULE_EMIT_MESH_PEER_KEYS`) keys off. NOT this crate's own short
+    /// the announced-key registry (`CAPSULES_PEER_KEYS`) keys off. NOT this crate's own short
     /// SHA-256-based `keys::key_id` (16 chars).
     #[test]
     fn attached_key_id_is_the_raw_public_key_hex_not_the_short_key_id() {

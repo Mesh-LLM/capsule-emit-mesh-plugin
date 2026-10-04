@@ -1,4 +1,4 @@
-# capsule-emit-mesh-plugin
+# capsules
 
 A [mesh-llm](https://github.com/Mesh-LLM/mesh-llm) plugin that keeps a signed,
 hash-chained record of every exchange a node serves or asks for, on that
@@ -10,19 +10,17 @@ Records follow the Agent Action Capsule format: JCS-canonical JSON, Ed25519
 COSE_Sign1 signatures, and a checkpointed Merkle log. The plugin is Rust; the
 page is a TypeScript bundle the plugin serves through mesh-llm's plugin web UI.
 
-## The plugin's id vs. this repository's name
+## The plugin's id
 
-The plugin's id is **`capsule-emit-mesh`**: the name it installs under, its
-data directory, and its page route (`/plugins/capsule-emit-mesh/evidence`).
-Nodes already running it keep their records across upgrades because the id
-does not change. This repository is `capsule-emit-mesh-plugin`.
+The plugin's id is **`capsules`**: the name it installs under, its data
+directory, its settings' prefix (`CAPSULES_*`) and its page route
+(`/plugins/capsules/evidence`). The repository has the same name, so
+`mesh-llm plugins install Mesh-LLM/capsules` finds its release assets
+(`capsules-<version>-<target>.tar.gz`) with no `--name`.
 
-The two differ, and that matters for one install form. `mesh-llm plugins
-install <owner>/<repo>` takes the plugin name from the repository name, so it
-would look for `capsule-emit-mesh-plugin-…` release assets, which don't exist.
-Install from the archive with `--name capsule-emit-mesh`, as
-[`INSTALL.md`](INSTALL.md) shows, or from a plugin catalog entry named
-`capsule-emit-mesh`.
+Until 0.1.3 the plugin was called `capsule-emit-mesh`. A node upgrading from
+it keeps its key and records: see "Upgrading from capsule-emit-mesh" in
+[`INSTALL.md`](INSTALL.md).
 
 ## Install
 

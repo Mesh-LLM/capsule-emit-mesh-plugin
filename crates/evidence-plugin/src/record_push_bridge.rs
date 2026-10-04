@@ -141,7 +141,7 @@ pub const RECORD_PUSH_CHANNEL: &str = "record-push/1";
 pub const RECORD_PUSH_CONTENT_TYPE: &str = "application/x-admission-policy-record-push+json";
 
 fn requester_idle_timeout_ms() -> u64 {
-    env_millis("CAPSULE_EMIT_MESH_MESH_REQUEST_TIMEOUT_MS", 8_000).as_millis() as u64
+    env_millis("CAPSULES_MESH_REQUEST_TIMEOUT_MS", 8_000).as_millis() as u64
 }
 
 fn env_millis(var: &str, default_ms: u64) -> Duration {

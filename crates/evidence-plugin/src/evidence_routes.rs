@@ -34,7 +34,7 @@ use crate::peer_keys::{announced_key_in, ENV_PEER_KEYS};
 /// The directory this node's log of requests made of it
 /// (`received_log.jsonl`, written by `received_log`) lives in: the drill's
 /// "Asked of you".
-pub const ENV_RECEIVED_LOG_DIR: &str = "CAPSULE_EMIT_MESH_RECEIVED_LOG_DIR";
+pub const ENV_RECEIVED_LOG_DIR: &str = "CAPSULES_RECEIVED_LOG_DIR";
 /// Where that log is read from when [`ENV_RECEIVED_LOG_DIR`] is unset:
 /// `<data dir>/received-log`.
 pub const DEFAULT_RECEIVED_LOG_SUBDIR: &str = "received-log";
@@ -289,7 +289,7 @@ pub fn with_routes(
         http::get("/peer-key")
             .binding_id("evidence_peer_key")
             .description(
-                "The key the operator announced for one peer (CAPSULE_EMIT_MESH_PEER_KEYS), or null.",
+                "The key the operator announced for one peer (CAPSULES_PEER_KEYS), or null.",
             )
             .input::<PeerKeyArgs>()
             .handle(move |args, _context| {
@@ -444,9 +444,9 @@ mod tests {
         use mesh_llm_plugin::{plugin_server_info, Plugin, PluginMetadata};
         let dir = tempfile::tempdir().unwrap();
         let builder = DeclarativePluginBuilder::new(PluginMetadata::new(
-            "capsule-emit-mesh",
+            "capsules",
             "0.0.0",
-            plugin_server_info("capsule-emit-mesh", "0.0.0", "t", "t", None::<String>),
+            plugin_server_info("capsules", "0.0.0", "t", "t", None::<String>),
         ));
         let plugin = with_routes(
             builder,

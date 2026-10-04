@@ -104,15 +104,15 @@ jobs:
       - name: Build the plugin and the scenario checks
         working-directory: crates/evidence-plugin
         run: |
-          cargo build --locked --bin capsule-emit-mesh
-          cargo test --locked --bin capsule-emit-mesh --no-run
+          cargo build --locked --bin capsules
+          cargo test --locked --bin capsules --no-run
 
       - name: Two nodes, three exchanges, then the scenario checks
         env:
           E2E_OUT: ${{ runner.temp }}/e2e
         run: |
           scripts/e2e-two-node.sh "$MESH_LLM_BIN" \
-            crates/evidence-plugin/target/debug/capsule-emit-mesh \
+            crates/evidence-plugin/target/debug/capsules \
             "$HOME/e2e-inputs/$MODEL_FILE" "$E2E_OUT"
 
       # The same checks over the same run, against a receiver built without
@@ -126,8 +126,8 @@ jobs:
           E2E_PROVIDER_DIR: ${{ runner.temp }}/e2e/data/provider
           E2E_EXCHANGES: "3"
         run: |
-          cargo test --locked --bin capsule-emit-mesh --features mutant-record-push-skips-claims --no-run
-          if out=$(cargo test --locked --bin capsule-emit-mesh --features mutant-record-push-skips-claims \
+          cargo test --locked --bin capsules --features mutant-record-push-skips-claims --no-run
+          if out=$(cargo test --locked --bin capsules --features mutant-record-push-skips-claims \
               -- --ignored --test-threads=1 two_node_e2e::attack_ 2>&1); then
             echo "::error::the attack checks passed a receiver that skips the claim checks"
             exit 1

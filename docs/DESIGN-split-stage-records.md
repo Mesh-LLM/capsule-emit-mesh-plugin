@@ -604,7 +604,7 @@ The decisions in §10 are built as recommended.
   that terminal event instead of sealing it. A terminal event that arrives first is sealed as an
   ordinary exchange, and the late stage-0 event is refused and counted. This goes to the host
   issue alongside Q-H1 to Q-H5.
-- **Deadline.** `CAPSULE_EMIT_MESH_SPLIT_STAGE_DEADLINE_MS`, 2000 ms by default, counted from
+- **Deadline.** `CAPSULES_SPLIT_STAGE_DEADLINE_MS`, 2000 ms by default, counted from
   stage 0's event and recorded in the receipt. A background tick seals released splits. The push
   to the requester waits for the next handler that has a host context, because pushing needs one.
 - **A received stage record is cited twice.** Its ordinary `counterparty_half` citing record is

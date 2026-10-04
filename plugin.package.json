@@ -1,6 +1,6 @@
 {
   "config_schema": {
-    "plugin_name": "capsule-emit-mesh",
+    "plugin_name": "capsules",
     "schema_version": 1,
     "allow_unvalidated_config": false,
     "settings": [

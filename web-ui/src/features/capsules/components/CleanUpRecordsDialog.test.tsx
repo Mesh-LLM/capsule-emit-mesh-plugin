@@ -8,7 +8,7 @@ import type { RecordsStatus } from '@/features/capsules/api/recordsClient'
 import { CleanUpRecordsDialog } from '@/features/capsules/components/CleanUpRecordsDialog'
 
 // The network layer only: every test goes through the real client and the
-// real tool route shape (`POST /api/plugins/capsule-emit-mesh/tools/<op>`).
+// real tool route shape (`POST /api/plugins/capsules/tools/<op>`).
 function stubTool(status: number, body: unknown) {
   const fetchSpy = vi.fn(
     async (_url: string, _init?: RequestInit) =>
@@ -22,7 +22,7 @@ const STATUS: RecordsStatus = {
   records_path: '/data/ledger',
   record_count: 8,
   head: null,
-  log_id: 'capsule-emit-mesh',
+  log_id: 'capsules',
   stored_text_count: 3,
   new_history_pending: null,
   sharing: {
@@ -126,7 +126,7 @@ describe('CleanUpRecordsDialog', () => {
     expect(line).toHaveTextContent('the records on disk end at x')
     expect(line.className).toMatch(/text-bad/)
     expect(String(fetchSpy.mock.calls[0][0])).toMatch(
-      /\/api\/plugins\/capsule-emit-mesh\/tools\/evidence_rebuild_index$/
+      /\/api\/plugins\/capsules\/tools\/evidence_rebuild_index$/
     )
   })
 })

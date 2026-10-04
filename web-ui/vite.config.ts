@@ -24,9 +24,9 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
  * tokenizer the viewer imports eagerly) is left alone.
  */
 function noSyntaxGrammars(): PluginOption {
-  const STUB = '\0capsule-emit-mesh:no-syntax-grammar'
+  const STUB = '\0capsules:no-syntax-grammar'
   return {
-    name: 'capsule-emit-mesh:no-syntax-grammars',
+    name: 'capsules:no-syntax-grammars',
     enforce: 'pre',
     resolveId(source) {
       return /^refractor\/(?!core$)[a-z0-9-]+$/.test(source) ? STUB : null

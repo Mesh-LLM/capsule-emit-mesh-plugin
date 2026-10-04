@@ -1,7 +1,7 @@
 // The plugin page's React root: the providers the console app used to supply
 // around the fork's `/capsules` route, then the Evidence tab itself.
 //
-// The console routes `/plugins/capsule-emit-mesh/evidence` to this page; the
+// The console routes `/plugins/capsules/evidence` to this page; the
 // per-row deep link that used to be `/capsules/exchange/<key>` is now
 // `?focusExchangeKey=<key>` on that route, read once at mount.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'

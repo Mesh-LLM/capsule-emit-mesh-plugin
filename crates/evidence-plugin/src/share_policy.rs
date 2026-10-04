@@ -11,14 +11,14 @@
 //! no protocol message). `crate::settings::var` reads it there when the
 //! environment does not set the setting. Each key is its env var's suffix
 //! lower-cased (`share_record_at_completion` ->
-//! `CAPSULE_EMIT_MESH_SHARE_RECORD_AT_COMPLETION`), except `witness`, which
-//! is `CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS`. The witness is read when
+//! `CAPSULES_SHARE_RECORD_AT_COMPLETION`), except `witness`, which
+//! is `CAPSULES_CHECKPOINT_WITNESS_URLS`. The witness is read when
 //! the plugin starts: restart mesh-llm after changing it.
 //!
 //! The same schema also declares the opt-in stop-routing rule's two settings
 //! (`routing_rule`), under their own "Routing rule" category, on the same
-//! env-var convention: `CAPSULE_EMIT_MESH_STOP_ROUTING_AFTER_CONTRADICTIONS`
-//! (off unless set) and `CAPSULE_EMIT_MESH_STOP_ROUTING_WINDOW_DAYS`.
+//! env-var convention: `CAPSULES_STOP_ROUTING_AFTER_CONTRADICTIONS`
+//! (off unless set) and `CAPSULES_STOP_ROUTING_WINDOW_DAYS`.
 
 use mesh_llm_plugin::{
     config_enum, config_integer, config_schema, config_setting, config_url, ManifestEntry,
@@ -29,13 +29,13 @@ pub const HISTORY_SEGMENTS_KEY: &str = "share_history_segments";
 pub const ADJUDICATIONS_KEY: &str = "share_adjudications";
 pub const WITNESS_KEY: &str = "witness";
 /// The opt-in stop-routing rule (`routing_rule`): N, and D in days. Same
-/// env-suffix convention (`CAPSULE_EMIT_MESH_STOP_ROUTING_*`).
+/// env-suffix convention (`CAPSULES_STOP_ROUTING_*`).
 pub const STOP_ROUTING_AFTER_KEY: &str = "stop_routing_after_contradictions";
 pub const STOP_ROUTING_WINDOW_KEY: &str = "stop_routing_window_days";
 /// The referee (`crate::referee`): whether a differing twin pair asks one
 /// (on unless set to off), and the bar window after a contradiction, in days.
-/// Same env-suffix convention (`CAPSULE_EMIT_MESH_ADJUDICATE_DIFFERING_TWINS`,
-/// `CAPSULE_EMIT_MESH_REFEREE_BAR_DAYS`).
+/// Same env-suffix convention (`CAPSULES_ADJUDICATE_DIFFERING_TWINS`,
+/// `CAPSULES_REFEREE_BAR_DAYS`).
 pub const ADJUDICATE_DIFFERING_TWINS_KEY: &str = "adjudicate_differing_twins";
 pub const REFEREE_BAR_DAYS_KEY: &str = "referee_bar_days";
 
@@ -43,7 +43,7 @@ pub const REFEREE_BAR_DAYS_KEY: &str = "referee_bar_days";
 /// see the module doc's "declarative only" note: no live host->plugin
 /// config channel exists yet, so an operator sets this directly on the
 /// node.
-pub const ENV_RECORD_AT_COMPLETION: &str = "CAPSULE_EMIT_MESH_SHARE_RECORD_AT_COMPLETION";
+pub const ENV_RECORD_AT_COMPLETION: &str = "CAPSULES_SHARE_RECORD_AT_COMPLETION";
 
 /// This process's runtime `share_record_at_completion` value: `true` only
 /// when explicitly set to `"off"`; unset or any other value resolves to the
@@ -62,7 +62,7 @@ fn record_at_completion_is_off_for(raw: Option<&str>) -> bool {
 }
 
 /// This process's own env var for `share_history_segments`.
-pub const ENV_HISTORY_SEGMENTS: &str = "CAPSULE_EMIT_MESH_SHARE_HISTORY_SEGMENTS";
+pub const ENV_HISTORY_SEGMENTS: &str = "CAPSULES_SHARE_HISTORY_SEGMENTS";
 
 /// Who may read one of this node's records back: `off`, `counterparties`,
 /// `prospective` or `peers`. Unset or unknown is the documented default,
@@ -81,7 +81,7 @@ fn history_segments_for(raw: Option<&str>) -> &'static str {
 }
 
 /// This process's own env var for `share_adjudications`.
-pub const ENV_ADJUDICATIONS: &str = "CAPSULE_EMIT_MESH_SHARE_ADJUDICATIONS";
+pub const ENV_ADJUDICATIONS: &str = "CAPSULES_SHARE_ADJUDICATIONS";
 
 /// Deliver a verdict to the nodes it judges: unless `share_adjudications` is
 /// explicitly `off` (the default is `deliver_to_subjects`).
@@ -221,8 +221,8 @@ mod tests {
 
     #[test]
     fn declares_all_four_switches_under_the_plugin_id() {
-        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
-        assert_eq!(schema.plugin_name, "capsule-emit-mesh");
+        let schema = as_config_schema(share_policy_config_schema("capsules"));
+        assert_eq!(schema.plugin_name, "capsules");
         let keys: Vec<&str> = schema.settings.iter().map(|s| s.key.as_str()).collect();
         assert_eq!(
             keys,
@@ -243,13 +243,13 @@ mod tests {
     fn the_referee_settings_are_the_env_names_the_referee_reads() {
         assert_eq!(
             format!(
-                "CAPSULE_EMIT_MESH_{}",
+                "CAPSULES_{}",
                 ADJUDICATE_DIFFERING_TWINS_KEY.to_uppercase()
             ),
             crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS
         );
         assert_eq!(
-            format!("CAPSULE_EMIT_MESH_{}", REFEREE_BAR_DAYS_KEY.to_uppercase()),
+            format!("CAPSULES_{}", REFEREE_BAR_DAYS_KEY.to_uppercase()),
             crate::referee::bar::ENV_REFEREE_BAR_DAYS
         );
     }
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn setting_keys_match_the_python_env_var_suffix_convention() {
         // Each env var is the setting key with the shared
-        // CAPSULE_EMIT_MESH_ prefix -- this module's whole "no
+        // CAPSULES_ prefix -- this module's whole "no
         // re-naming exercise later" claim rests on this correspondence.
         let expected_env_suffix = [
             (RECORD_AT_COMPLETION_KEY, "SHARE_RECORD_AT_COMPLETION"),
@@ -280,7 +280,7 @@ mod tests {
         ];
         for (key, suffix) in expected_env_suffix {
             assert_eq!(
-                crate::settings::console_key(&format!("CAPSULE_EMIT_MESH_{suffix}")).as_deref(),
+                crate::settings::console_key(&format!("CAPSULES_{suffix}")).as_deref(),
                 Some(key),
                 "env suffix {suffix} must map to the console key {key}"
             );
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn record_at_completion_and_adjudications_default_to_the_documented_on_state() {
-        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
+        let schema = as_config_schema(share_policy_config_schema("capsules"));
         let by_key = |k: &str| schema.settings.iter().find(|s| s.key == k).unwrap();
         assert_eq!(
             by_key(RECORD_AT_COMPLETION_KEY).default_json.as_deref(),
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn the_stop_routing_rule_is_off_by_default() {
-        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
+        let schema = as_config_schema(share_policy_config_schema("capsules"));
         let after = schema
             .settings
             .iter()
@@ -316,14 +316,14 @@ mod tests {
         assert_eq!(after.default_json, None, "no N by default: the rule is off");
         assert_eq!(
             format!(
-                "CAPSULE_EMIT_MESH_{}",
+                "CAPSULES_{}",
                 STOP_ROUTING_AFTER_KEY.to_uppercase()
             ),
             crate::routing_rule::ENV_AFTER
         );
         assert_eq!(
             format!(
-                "CAPSULE_EMIT_MESH_{}",
+                "CAPSULES_{}",
                 STOP_ROUTING_WINDOW_KEY.to_uppercase()
             ),
             crate::routing_rule::ENV_WINDOW_DAYS
@@ -334,7 +334,7 @@ mod tests {
     fn witness_has_no_default_url_and_is_not_required() {
         // Design note S1: "witness: off | <url> # default: off" -- off IS
         // the absence of a default, never a magic sentinel string.
-        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
+        let schema = as_config_schema(share_policy_config_schema("capsules"));
         let witness = schema
             .settings
             .iter()
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_optional_shipping_this_schema_flips_no_runtime_behavior() {
-        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
+        let schema = as_config_schema(share_policy_config_schema("capsules"));
         assert!(schema.settings.iter().all(|s| !s.required));
     }
 

@@ -74,7 +74,11 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::TcpListener;
 
-const PLUGIN_ID: &str = "capsule-emit-mesh";
+const PLUGIN_ID: &str = "capsules";
+/// The plugin's name before it was renamed `capsules`, and the log id every
+/// node shared before log ids were node-unique. A log checkpointed under it
+/// keeps it (see `owner_maintenance::resolve_log_id`).
+const OLD_SHARED_LOG_ID: &str = "capsule-emit-mesh";
 const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
 const ENDPOINT_ID: &str = "admission-policy-openai";
 /// Declared only alongside the admission endpoint (see `plugin_builder`).
@@ -91,14 +95,14 @@ const ADMISSION_CAPABILITY: &str = "admission_policy.v1";
 /// for why that's a real architectural difference from the private spike).
 fn blocked_models() -> Vec<String> {
     blocked_models_for(
-        crate::settings::var("CAPSULE_EMIT_MESH_BLOCKED_MODELS")
+        crate::settings::var("CAPSULES_BLOCKED_MODELS")
             .ok()
             .as_deref(),
     )
 }
 
 /// The blocked model names this node advertises: only those the operator (or
-/// a test) lists in `CAPSULE_EMIT_MESH_BLOCKED_MODELS`. Unset, empty, `none`
+/// a test) lists in `CAPSULES_BLOCKED_MODELS`. Unset, empty, `none`
 /// or `off` advertises none. A real node must never offer a model that always
 /// answers 403: a client that takes the first listed model, or "Mesh
 /// automatic" routing, would pick it.
@@ -149,7 +153,7 @@ struct AppState {
     /// cadence task is enabled (`checkpoint_cadence::is_enabled`) --
     /// the checkpoint-head source's sending half reads this to feed
     /// `PeerAnnouncement.checkpoint`. On by default; `None` when the
-    /// operator has opted out (`CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE=off`)
+    /// operator has opted out (`CAPSULES_CHECKPOINT_CADENCE=off`)
     /// or hasn't produced a checkpoint since startup.
     #[allow(dead_code)]
     checkpoint_head: Option<checkpoint_cadence::LatestHead>,
@@ -530,7 +534,7 @@ async fn push_at_completion_if_configured(
     {
         tracing::warn!(
             %peer_id,
-            "record-push at completion skipped: this node's own peer id is unknown (the host has not reported it on a mesh event yet and CAPSULE_EMIT_MESH_SELF_PEER_ID is unset)"
+            "record-push at completion skipped: this node's own peer id is unknown (the host has not reported it on a mesh event yet and CAPSULES_SELF_PEER_ID is unset)"
         );
         return;
     }
@@ -918,7 +922,7 @@ fn with_evidence_operations(
     builder = builder.mcp_item(
         mcp::tool(EVIDENCE_REQUEST_OPERATION)
             .description(
-                "Ask a mesh peer's capsule-emit-mesh plugin for evidence (a \
+                "Ask a mesh peer's capsules plugin for evidence (a \
                  draft-mih-agent-evidence-request-00 request map) over the plugin mesh stream. \
                  Returns the peer's own artifact or signed refusal unchanged, beside its \
                  verification against the peer's announced key (verify: false returns it alone).",
@@ -993,7 +997,7 @@ fn with_evidence_operations(
     builder = builder.mcp_item(
         mcp::tool(LEDGER_FETCH_OPERATION)
             .description(
-                "Ask a mesh peer's capsule-emit-mesh plugin for one of ITS sealed ledger entries by \
+                "Ask a mesh peer's capsules plugin for one of ITS sealed ledger entries by \
                  capsule_id -- the witness-level fetch half of the two-sided ledger. Returns the raw \
                  unsigned {capsule, signed_statement_b64, node_pub_key_pem} for independent recompute; \
                  never a second attestation.",
@@ -1086,12 +1090,12 @@ fn with_owner_maintenance(
 /// mesh channels and events, the Evidence page, its config and HTTP routes
 /// (added by the caller). With `admission` (the address of the
 /// OpenAI-compatible admission endpoint, present only when
-/// `CAPSULE_EMIT_MESH_BLOCKED_MODELS` names models) it also registers that
+/// `CAPSULES_BLOCKED_MODELS` names models) it also registers that
 /// endpoint as an inference provider and declares `admission_policy.v1`.
 fn plugin_builder(admission: Option<&str>) -> DeclarativePluginBuilder {
     let description = match admission {
-        None => "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page. It serves no models; its admission-policy test endpoint is opt-in (CAPSULE_EMIT_MESH_BLOCKED_MODELS).",
-        Some(_) => "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page. As configured (CAPSULE_EMIT_MESH_BLOCKED_MODELS), it also serves an OpenAI-compatible admission-policy endpoint that denies the listed models.",
+        None => "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page. It serves no models; its admission-policy test endpoint is opt-in (CAPSULES_BLOCKED_MODELS).",
+        Some(_) => "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page. As configured (CAPSULES_BLOCKED_MODELS), it also serves an OpenAI-compatible admission-policy endpoint that denies the listed models.",
     };
     let builder = DeclarativePluginBuilder::new(PluginMetadata::new(
         PLUGIN_ID,
@@ -1172,6 +1176,7 @@ async fn main() -> anyhow::Result<()> {
     let log_id = owner_maintenance::resolve_log_id(
         &data_dir,
         PLUGIN_ID,
+        OLD_SHARED_LOG_ID,
         &node_key_id,
         settings::var(owner_maintenance::LOG_ID_SETTING)
             .ok()

@@ -44,7 +44,7 @@ describe('askForRecord', () => {
     const reply = await askForRecord(PEER, BY_NONCE)
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
-    expect(String(url)).toBe('/api/plugins/capsule-emit-mesh/tools/mesh_evidence_request')
+    expect(String(url)).toBe('/api/plugins/capsules/tools/mesh_evidence_request')
     expect(init.method).toBe('POST')
     const sent = JSON.parse(String(init.body)) as Record<string, unknown>
     expect(sent).toEqual({
@@ -52,7 +52,7 @@ describe('askForRecord', () => {
       request: { coverage: { min_freshness: 1 }, subject: { correlation: 'nonce-1' } }
     })
     expect('verify' in sent).toBe(false)
-    expect(String(fetchMock.mock.calls[1][0])).toBe(`/api/plugins/capsule-emit-mesh/http/peer-key?peer=${PEER}`)
+    expect(String(fetchMock.mock.calls[1][0])).toBe(`/api/plugins/capsules/http/peer-key?peer=${PEER}`)
     expect(reply).toEqual({
       kind: 'answer',
       answer: { reason: 'no_such_subject', request_digest: DIGEST },

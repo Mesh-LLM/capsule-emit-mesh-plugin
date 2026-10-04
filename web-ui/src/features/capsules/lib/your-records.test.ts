@@ -20,7 +20,7 @@ function status(overrides: Partial<RecordsStatus> = {}): RecordsStatus {
     records_path: '/data/ledger',
     record_count: 8,
     head: 'a'.repeat(64),
-    log_id: 'capsule-emit-mesh',
+    log_id: 'capsules',
     stored_text_count: 0,
     new_history_pending: null,
     sharing: {

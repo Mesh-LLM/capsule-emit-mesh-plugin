@@ -42,25 +42,25 @@ use std::time::{Duration, Instant};
 pub const PUSH_COALESCE_WINDOW: Duration = Duration::from_millis(100);
 
 /// On by default: the plugin runs its OWN checkpoint cadence unless the
-/// operator sets `CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE=off` to opt out (e.g.
+/// operator sets `CAPSULES_CHECKPOINT_CADENCE=off` to opt out (e.g.
 /// because a standalone process is already checkpointing this `ledger_dir`
 /// -- see the module doc's race note). Any other value, including
 /// unset, leaves it on.
-const ENV_ENABLE: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE";
+const ENV_ENABLE: &str = "CAPSULES_CHECKPOINT_CADENCE";
 /// Age-clock override, seconds. Defaults to `CheckpointCadenceConfig`'s own
 /// 300s mesh default.
-const ENV_INTERVAL_SECONDS: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE_SECONDS";
+const ENV_INTERVAL_SECONDS: &str = "CAPSULES_CHECKPOINT_CADENCE_SECONDS";
 /// Entry-count cadence override. Defaults to 100 (upstream `capsule_emit`'s
 /// own default).
-const ENV_CADENCE_ENTRIES: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE_ENTRIES";
+const ENV_CADENCE_ENTRIES: &str = "CAPSULES_CHECKPOINT_CADENCE_ENTRIES";
 /// Comma-separated witness URLs to register checkpoints with. Anchoring is
 /// OPT-IN, always (this repo's posture) -- empty/unset means
 /// self-checkpointed only, no network.
-const ENV_WITNESS_URLS: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS";
+const ENV_WITNESS_URLS: &str = "CAPSULES_CHECKPOINT_WITNESS_URLS";
 /// `checkpoint_pad_bucket`: pad every checkpoint's leaf count up to a
 /// multiple of this (Evidence Layer -00 §12.1). Defaults to
 /// `DEFAULT_PAD_BUCKET` (32); `0` turns padding off.
-const ENV_PAD_BUCKET: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_PAD_BUCKET";
+const ENV_PAD_BUCKET: &str = "CAPSULES_CHECKPOINT_PAD_BUCKET";
 
 /// Whether a witness URL is configured: checkpoints are offered to a witness.
 /// The same setting [`spawn`] registers checkpoints with.

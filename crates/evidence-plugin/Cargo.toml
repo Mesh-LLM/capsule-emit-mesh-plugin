@@ -3,11 +3,11 @@ name = "evidence-plugin"
 version = "0.1.2"
 edition = "2021"
 license = "Apache-2.0"
-description = "The capsule-emit-mesh mesh-llm plugin: a signed, hash-chained record of every exchange and the Evidence page."
+description = "The capsules mesh-llm plugin: a signed, hash-chained record of every exchange and the Evidence page."
 publish = false
 
 [[bin]]
-name = "capsule-emit-mesh"
+name = "capsules"
 path = "src/main.rs"
 
 [features]

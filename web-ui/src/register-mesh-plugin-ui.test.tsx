@@ -14,7 +14,7 @@ vi.mock('@/features/capsules/pages/EvidencePage', async (importOriginal) => {
   }
 })
 
-const STYLE_ID = 'capsule-emit-mesh-evidence-styles'
+const STYLE_ID = 'capsules-evidence-styles'
 
 afterEach(() => {
   // Every other test runs with the setup file's standalone host mounted.
@@ -65,7 +65,7 @@ describe('registerMeshPluginUi', () => {
   })
 
   it('reads the per-row deep link from the page URL (`?focusExchangeKey=`)', async () => {
-    window.history.replaceState(null, '', '/plugins/capsule-emit-mesh/evidence?focusExchangeKey=exch-1')
+    window.history.replaceState(null, '', '/plugins/capsules/evidence?focusExchangeKey=exch-1')
     const host = createStandaloneHost()
     const element = document.createElement('div')
     const registration = await registerMeshPluginUi(host)

@@ -35,7 +35,7 @@ use crate::capsule_emit::CapsuleState;
 
 /// The host's OpenAI-compatible API, through which a re-answer is routed to
 /// the chosen referee. Unset: [`DEFAULT_OPENAI_API`].
-pub const ENV_OPENAI_API: &str = "CAPSULE_EMIT_MESH_OPENAI_API_URL";
+pub const ENV_OPENAI_API: &str = "CAPSULES_OPENAI_API_URL";
 pub const DEFAULT_OPENAI_API: &str = "http://127.0.0.1:9337";
 /// Routes a request to one named node.
 pub const MESH_TARGET_HEADER: &str = "x-mesh-target";

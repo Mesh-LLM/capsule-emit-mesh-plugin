@@ -987,7 +987,7 @@ fn peer_fetch_join_key(record: &Value) -> Option<(&str, &str)> {
 /// -- not `absent` -- the moment a real peer-asserted join key exists: the
 /// peer half is KNOWN to be fetchable (`ledger-fetch/1`, piece 2's
 /// `mesh_ledger_fetch` plugin tool, already reachable at
-/// `POST /api/plugins/capsule-emit-mesh/tools/mesh_ledger_fetch`), only
+/// `POST /api/plugins/capsules/tools/mesh_ledger_fetch`), only
 /// unverified until the browser's own recompute actually runs one -- this
 /// route never fetches, verifies, or fabricates a verdict itself.
 fn theirs_cell(record: &Value) -> Value {

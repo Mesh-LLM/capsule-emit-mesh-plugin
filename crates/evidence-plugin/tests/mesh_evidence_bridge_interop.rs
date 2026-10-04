@@ -25,7 +25,7 @@ use tokio::net::{TcpListener, UnixListener};
 use tokio::process::Command;
 use tokio::time::timeout;
 
-const PLUGIN_BIN: &str = env!("CARGO_BIN_EXE_capsule-emit-mesh");
+const PLUGIN_BIN: &str = env!("CARGO_BIN_EXE_capsules");
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 const EVIDENCE_REQUEST_CHANNEL: &str = "evidence-request/1";
 
@@ -51,9 +51,9 @@ impl Harness {
         cmd.env("MESH_LLM_PLUGIN_ENDPOINT", &socket_path)
             .env("MESH_LLM_PLUGIN_TRANSPORT", "unix")
             // An isolated data dir per run: never the operator's own.
-            .env("CAPSULE_EMIT_MESH_DATA_DIR", &data_dir)
-            .env("CAPSULE_EMIT_MESH_BLOCKED_MODELS", "blocked-test-model")
-            .env("CAPSULE_EMIT_MESH_MESH_REQUEST_TIMEOUT_MS", "1500")
+            .env("CAPSULES_DATA_DIR", &data_dir)
+            .env("CAPSULES_BLOCKED_MODELS", "blocked-test-model")
+            .env("CAPSULES_MESH_REQUEST_TIMEOUT_MS", "1500")
             // `bind_side_stream` (mesh-llm-plugin's own `io.rs`) derives the
             // evidence-stream's local socket path from `std::env::temp_dir()`
             // with no override of its own -- on macOS that resolves to a long
@@ -66,7 +66,7 @@ impl Harness {
         for (key, value) in extra_env {
             cmd.env(key, value);
         }
-        let child = cmd.spawn().expect("spawn the capsule-emit-mesh plugin");
+        let child = cmd.spawn().expect("spawn the capsules plugin");
 
         let stream = timeout(
             TEST_TIMEOUT,
@@ -96,7 +96,7 @@ impl Harness {
             &mut self.stream,
             &proto::Envelope {
                 protocol_version: PROTOCOL_VERSION,
-                plugin_id: "capsule-emit-mesh".to_string(),
+                plugin_id: "capsules".to_string(),
                 request_id,
                 payload: Some(payload),
             },
@@ -215,7 +215,7 @@ impl Harness {
             &mut self.stream,
             &proto::Envelope {
                 protocol_version: PROTOCOL_VERSION,
-                plugin_id: "capsule-emit-mesh".to_string(),
+                plugin_id: "capsules".to_string(),
                 request_id: mesh_stream_envelope.request_id,
                 payload: Some(Payload::OpenMeshStreamResponse(mesh_stream_response)),
             },
@@ -254,7 +254,7 @@ async fn accept_one_remote_peer_connection() -> (UnixListener, std::path::PathBu
     (listener, path)
 }
 
-/// A local HTTP listener set as `CAPSULE_EMIT_MESH_EVIDENCE_SERVER_URL`, the
+/// A local HTTP listener set as `CAPSULES_EVIDENCE_SERVER_URL`, the
 /// evidence-server setting older builds read (this build reads no such
 /// setting): it records every request it receives and answers with a canned
 /// body. No external evidence server is contacted, so a test asserts it
@@ -324,7 +324,7 @@ async fn ask_over_stream(stream: LocalStream, request_bytes: &[u8]) -> Vec<u8> {
 async fn responder_answers_an_evidence_request_in_process() {
     let (evidence_server_url, received) = spawn_fake_evidence_server(b"{}").await;
     let mut harness = Harness::spawn(&[(
-        "CAPSULE_EMIT_MESH_EVIDENCE_SERVER_URL",
+        "CAPSULES_EVIDENCE_SERVER_URL",
         &evidence_server_url,
     )])
     .await;
@@ -367,7 +367,7 @@ async fn responder_answers_an_evidence_request_in_process() {
 #[tokio::test]
 async fn responder_refuses_an_adjudicate_request_signed_and_contacts_no_evidence_server() {
     let (door_url, received) = spawn_fake_evidence_server(b"{}").await;
-    let mut harness = Harness::spawn(&[("CAPSULE_EMIT_MESH_EVIDENCE_SERVER_URL", &door_url)]).await;
+    let mut harness = Harness::spawn(&[("CAPSULES_EVIDENCE_SERVER_URL", &door_url)]).await;
     harness.initialize().await;
 
     let stream = harness.open_evidence_stream().await;
@@ -543,7 +543,7 @@ async fn requester_verifies_by_default() {
 /// (`handle_plugin_mesh_stream` returns `Ok(())` without touching `send`/
 /// `recv` -- see module docs) -- simulated here by the fake host accepting
 /// the mesh-stream open but never dialing/writing anything back. Bounded by
-/// `CAPSULE_EMIT_MESH_MESH_REQUEST_TIMEOUT_MS` (set to 1500ms for this test
+/// `CAPSULES_MESH_REQUEST_TIMEOUT_MS` (set to 1500ms for this test
 /// harness, see `Harness::spawn`), so this test proves the bound, not merely
 /// that failure is possible.
 #[tokio::test]

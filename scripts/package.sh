@@ -3,9 +3,9 @@
 # Build one platform's plugin package, following mesh-llm's plugin package
 # contract (docs/plugins/README.md in Mesh-LLM/mesh-llm):
 #
-#   capsule-emit-mesh-<version>-<target>.tar.gz
-#     capsule-emit-mesh/
-#       capsule-emit-mesh                   the executable
+#   capsules-<version>-<target>.tar.gz
+#     capsules/
+#       capsules                   the executable
 #       plugin.toml
 #       plugin-manifest.json                printed by the executable itself
 #       bundle/register-mesh-plugin-ui.js   the Evidence page
@@ -23,7 +23,7 @@
 # Only .tar.gz: mesh-llm's .zip extractor does not keep the executable bit.
 set -eu
 
-PLUGIN=capsule-emit-mesh
+PLUGIN=capsules
 [ $# -ge 4 ] || { echo "usage: $0 VERSION TARGET BINARY OUT_DIR [MANIFEST_JSON]" >&2; exit 2; }
 version=$1 target=$2 binary=$3 out=$4 manifest_in=${5:-}
 root=$(cd "$(dirname "$0")/.." && pwd)

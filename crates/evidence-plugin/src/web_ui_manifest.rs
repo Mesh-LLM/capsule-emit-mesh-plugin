@@ -2,7 +2,7 @@
 //! Contract", `docs/plugins/README.md` in Mesh-LLM/mesh-llm): ONE page,
 //! labelled `Evidence`, served from ONE bundle rooted at `bundle/` in the
 //! installed package. The console mounts it at
-//! `/plugins/capsule-emit-mesh/evidence`, and because it is the plugin's only
+//! `/plugins/capsules/evidence`, and because it is the plugin's only
 //! page the console gives it a direct navigation item rather than a
 //! `Plugins` menu entry.
 //!
@@ -71,7 +71,7 @@ mod tests {
     use serde_json::{json, Value};
     use std::path::Path;
 
-    const PLUGIN_ID: &str = "capsule-emit-mesh";
+    const PLUGIN_ID: &str = "capsules";
 
     fn packaged() -> Value {
         let text = package_manifest_json_for(

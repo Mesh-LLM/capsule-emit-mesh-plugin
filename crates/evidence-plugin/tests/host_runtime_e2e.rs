@@ -1,4 +1,4 @@
-//! Real-host end-to-end test: drives the compiled `capsule-emit-mesh`
+//! Real-host end-to-end test: drives the compiled `capsules`
 //! binary through an ACTUAL running `mesh-llm-host-runtime` process (the
 //! `mesh-llm serve` binary), not the faithful-but-fake-host stand-in in
 //! `tests/interop.rs`. This closes the gap `tests/interop.rs` documents at
@@ -36,7 +36,7 @@ use std::time::Duration;
 use tokio::process::{Child, Command};
 use tokio::time::{sleep, timeout};
 
-const PLUGIN_BIN: &str = env!("CARGO_BIN_EXE_capsule-emit-mesh");
+const PLUGIN_BIN: &str = env!("CARGO_BIN_EXE_capsules");
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -79,7 +79,7 @@ impl RealHost {
             r#"version = 1
 
 [[plugin]]
-name = "capsule-emit-mesh"
+name = "capsules"
 enabled = true
 command = "{PLUGIN_BIN}"
 args = []
@@ -93,7 +93,7 @@ args = []
         // Isolated per-run plugin state (signing key + durable
         // ledger + observed-lifecycle-events log) -- inherited by the
         // plugin subprocess the host spawns, same as
-        // `CAPSULE_EMIT_MESH_BLOCKED_MODELS` already is below.
+        // `CAPSULES_BLOCKED_MODELS` already is below.
         let capsule_data_dir = home_dir.join("capsule-data");
 
         let child = Command::new(&host_bin)
@@ -112,10 +112,10 @@ args = []
             ])
             .env("HOME", &home_dir)
             .env(
-                "CAPSULE_EMIT_MESH_BLOCKED_MODELS",
+                "CAPSULES_BLOCKED_MODELS",
                 "blocked-test-model,allowed-test-model",
             )
-            .env("CAPSULE_EMIT_MESH_DATA_DIR", &capsule_data_dir)
+            .env("CAPSULES_DATA_DIR", &capsule_data_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::from(log_file.try_clone().expect("clone log fd")))
             .stderr(Stdio::from(log_file))

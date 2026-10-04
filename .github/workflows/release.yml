@@ -14,7 +14,7 @@
 #     plugin.package.json), bundle/ (the Evidence page), README.md
 #     (INSTALL.md), LICENSE. Nothing else: never keys, ledgers or
 #     demo data.
-# `<plugin-name>` is `capsule-emit-mesh` throughout (the plugin's id, and the
+# `<plugin-name>` is `capsules` throughout (the plugin's id, and the
 # name `mesh-llm plugins install --name` takes).
 #
 # Unix targets ship .tar.gz only: mesh-llm's .zip extractor does not restore
@@ -50,7 +50,7 @@ on:
 permissions: {}
 
 env:
-  PLUGIN_NAME: capsule-emit-mesh
+  PLUGIN_NAME: capsules
   RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
   RUST_TOOLCHAIN: "1.97.1"
   MACOSX_DEPLOYMENT_TARGET: "11.0"

@@ -267,7 +267,7 @@ fn output_sub_digests(response_bytes: &[u8]) -> (Option<String>, Option<String>)
 /// Operator opt-in for sealing the serving host's name. The sealed body is
 /// pushed at completion to every counterparty, so the machine name is
 /// withheld unless the operator sets this to `1`, `true` or `on`.
-pub const ENV_SEAL_HOSTNAME: &str = "CAPSULE_EMIT_MESH_SEAL_HOSTNAME";
+pub const ENV_SEAL_HOSTNAME: &str = "CAPSULES_SEAL_HOSTNAME";
 
 fn hostname_opt_in() -> bool {
     hostname_opt_in_for(crate::settings::var(ENV_SEAL_HOSTNAME).ok().as_deref())
@@ -300,7 +300,7 @@ static CAPSULE_CONTENT_TYPE: LazyLock<String> = LazyLock::new(|| {
 /// domain fix), beside the ledger at `<data_dir>/learned_self_node_id.json`
 /// (same restart-safe, best-effort convention as `SequenceCounterStore`).
 ///
-/// `PLUGIN_ID` (`"capsule-emit-mesh"`) is a compile-time plugin-TYPE label,
+/// `PLUGIN_ID` (`"capsules"`) is a compile-time plugin-TYPE label,
 /// not a mesh node id, and this plugin has no other source for its own real
 /// mesh identity -- the host never sends one directly. But the host DOES
 /// tell us, on every locally-served terminal event

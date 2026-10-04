@@ -107,10 +107,10 @@ about a node's future answers.
 
 | Setting | Environment variable | Default |
 | --- | --- | --- |
-| `adjudicate_differing_twins` | `CAPSULE_EMIT_MESH_ADJUDICATE_DIFFERING_TWINS` | on |
-| `referee_bar_days` | `CAPSULE_EMIT_MESH_REFEREE_BAR_DAYS` | 30 |
-| `stop_routing_after_contradictions` | `CAPSULE_EMIT_MESH_STOP_ROUTING_AFTER_CONTRADICTIONS` | off |
-| `stop_routing_window_days` | `CAPSULE_EMIT_MESH_STOP_ROUTING_WINDOW_DAYS` | 30 |
+| `adjudicate_differing_twins` | `CAPSULES_ADJUDICATE_DIFFERING_TWINS` | on |
+| `referee_bar_days` | `CAPSULES_REFEREE_BAR_DAYS` | 30 |
+| `stop_routing_after_contradictions` | `CAPSULES_STOP_ROUTING_AFTER_CONTRADICTIONS` | off |
+| `stop_routing_window_days` | `CAPSULES_STOP_ROUTING_WINDOW_DAYS` | 30 |
 
 The last two are the opt-in stop-routing rule: with N set, this node stops
 routing to a peer after N referee-signed contradictions within D days, at most
@@ -119,7 +119,7 @@ Undo it the same way as a manual block; the verdicts that met the rule never
 count toward it again.
 
 The referee's re-answer goes through the host's OpenAI-compatible API
-(`CAPSULE_EMIT_MESH_OPENAI_API_URL`, default `http://127.0.0.1:9337`), routed to
+(`CAPSULES_OPENAI_API_URL`, default `http://127.0.0.1:9337`), routed to
 the chosen node.
 
 ## Where this is checked

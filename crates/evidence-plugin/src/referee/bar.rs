@@ -25,7 +25,7 @@ use crate::verdict_counts::{CONTRADICTED, CORROBORATED};
 /// `referee_bar_days` when the operator has not set it.
 pub const DEFAULT_BAR_DAYS: u32 = 30;
 /// The setting: a positive whole number of days.
-pub const ENV_REFEREE_BAR_DAYS: &str = "CAPSULE_EMIT_MESH_REFEREE_BAR_DAYS";
+pub const ENV_REFEREE_BAR_DAYS: &str = "CAPSULES_REFEREE_BAR_DAYS";
 
 /// Decided: the bar window is half-open, `[t, t + D)`. `true` would make it
 /// `[t, t + D]`.

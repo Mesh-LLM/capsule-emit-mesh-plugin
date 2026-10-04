@@ -1,4 +1,4 @@
-//! The plugin's environment settings. Each is named `CAPSULE_EMIT_MESH_<NAME>`.
+//! The plugin's environment settings. Each is named `CAPSULES_<NAME>`.
 //!
 //! A setting the environment does not set is read from the value the
 //! operator saved in mesh's console (Configuration > Plugins). mesh-llm keeps
@@ -6,14 +6,16 @@
 //! (`[plugin.settings]`), and does not pass it to the plugin process, so the
 //! plugin reads it there itself: the file `MESH_LLM_CONFIG` names, or
 //! `~/.mesh-llm/config.toml`. The console key is the setting's name without
-//! the prefix, lower-cased (`CAPSULE_EMIT_MESH_SHARE_HISTORY_SEGMENTS` is
+//! the prefix, lower-cased (`CAPSULES_SHARE_HISTORY_SEGMENTS` is
 //! `share_history_segments`), except the witness: the console's `witness` is
-//! `CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS`. The environment wins over the
+//! `CAPSULES_CHECKPOINT_WITNESS_URLS`. The environment wins over the
 //! console. A setting read once at start (the witness, the checkpoint
 //! cadence) takes effect when mesh-llm is restarted.
 //!
-//! For one release the old name, `ADMISSION_POLICY_<NAME>`, is still read when
-//! the new one is unset, and a log line names the setting that was used. When
+//! The plugin was called `capsule-emit-mesh` until 0.1.3. For one release the
+//! old name, `CAPSULE_EMIT_MESH_<NAME>`, is still read when the new one is
+//! unset, and a log line names the setting that was used; console settings
+//! saved under the old plugin name are read the same way. When
 //! both are set the new name wins and the log line says the old one was
 //! ignored. Each setting is logged at most once per process.
 
@@ -23,10 +25,10 @@ use std::ffi::OsString;
 use std::sync::{Mutex, OnceLock};
 
 /// The prefix every setting's name carries.
-pub const PREFIX: &str = "CAPSULE_EMIT_MESH_";
+pub const PREFIX: &str = "CAPSULES_";
 
 /// The prefix the same settings carried before; read for one release only.
-pub const LEGACY_PREFIX: &str = "ADMISSION_POLICY_";
+pub const LEGACY_PREFIX: &str = "CAPSULE_EMIT_MESH_";
 
 /// The old name of `name`, or `None` when `name` is not a plugin setting.
 pub fn legacy_name(name: &str) -> Option<String> {
@@ -81,7 +83,11 @@ fn log_once(name: &str, legacy: &str, source: Source) {
 }
 
 /// This plugin's name in mesh's config file (`[[plugin]] name = ...`).
-pub const PLUGIN_NAME: &str = "capsule-emit-mesh";
+pub const PLUGIN_NAME: &str = "capsules";
+
+/// The plugin's name before 0.1.3. Console settings saved under it are read
+/// for one release, under the ones saved under [`PLUGIN_NAME`].
+pub const OLD_PLUGIN_NAME: &str = "capsule-emit-mesh";
 
 /// The console key a setting is saved under in mesh's config file.
 pub fn console_key(name: &str) -> Option<String> {
@@ -158,10 +164,13 @@ fn settings_from_config(raw: &str) -> std::collections::BTreeMap<String, String>
     let Some(plugins) = doc.get("plugin").and_then(|p| p.as_array()) else {
         return out;
     };
-    for entry in plugins {
-        if entry.get("name").and_then(|n| n.as_str()) != Some(PLUGIN_NAME) {
-            continue;
-        }
+    // The old name's entry first, so the current one's values win.
+    let named = |name: &'static str| {
+        plugins
+            .iter()
+            .filter(move |entry| entry.get("name").and_then(|n| n.as_str()) == Some(name))
+    };
+    for entry in named(OLD_PLUGIN_NAME).chain(named(PLUGIN_NAME)) {
         let Some(settings) = entry.get("settings").and_then(|s| s.as_table()) else {
             continue;
         };
@@ -259,7 +268,7 @@ mod tests {
 
     #[test]
     fn the_current_name_is_read() {
-        let name = "CAPSULE_EMIT_MESH_TEST_SETTINGS_CURRENT";
+        let name = "CAPSULES_TEST_SETTINGS_CURRENT";
         std::env::set_var(name, "new");
         assert_eq!(var(name).as_deref(), Ok("new"));
         assert_eq!(var_os(name), Some(OsString::from("new")));
@@ -267,24 +276,57 @@ mod tests {
 
     #[test]
     fn the_old_name_is_read_when_the_current_one_is_unset() {
-        let name = "CAPSULE_EMIT_MESH_TEST_SETTINGS_LEGACY";
-        std::env::set_var("ADMISSION_POLICY_TEST_SETTINGS_LEGACY", "old");
+        let name = "CAPSULES_TEST_SETTINGS_LEGACY";
+        std::env::set_var("CAPSULE_EMIT_MESH_TEST_SETTINGS_LEGACY", "old");
         assert_eq!(var(name).as_deref(), Ok("old"));
         assert_eq!(var_os(name), Some(OsString::from("old")));
     }
 
+    /// Reading a setting from its old name says so, once, naming both names.
+    #[test]
+    fn reading_the_old_name_is_logged_once_naming_both() {
+        #[derive(Clone, Default)]
+        struct Captured(std::sync::Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Captured {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let captured = Captured::default();
+        let writer = captured.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        let name = "CAPSULES_TEST_SETTINGS_LOGGED";
+        std::env::set_var("CAPSULE_EMIT_MESH_TEST_SETTINGS_LOGGED", "old");
+        tracing::subscriber::with_default(subscriber, || {
+            assert_eq!(var(name).as_deref(), Ok("old"));
+            assert_eq!(var(name).as_deref(), Ok("old"));
+        });
+        let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(log.lines().count(), 1, "{log}");
+        assert!(log.contains("CAPSULE_EMIT_MESH_TEST_SETTINGS_LOGGED"), "{log}");
+        assert!(log.contains(name), "{log}");
+        assert!(log.contains("one release"), "{log}");
+    }
+
     #[test]
     fn the_current_name_wins_over_the_old_one() {
-        let name = "CAPSULE_EMIT_MESH_TEST_SETTINGS_BOTH";
+        let name = "CAPSULES_TEST_SETTINGS_BOTH";
         std::env::set_var(name, "new");
-        std::env::set_var("ADMISSION_POLICY_TEST_SETTINGS_BOTH", "old");
+        std::env::set_var("CAPSULE_EMIT_MESH_TEST_SETTINGS_BOTH", "old");
         assert_eq!(var(name).as_deref(), Ok("new"));
         assert_eq!(var_os(name), Some(OsString::from("new")));
     }
 
     #[test]
     fn neither_name_set_is_not_present() {
-        let name = "CAPSULE_EMIT_MESH_TEST_SETTINGS_NEITHER";
+        let name = "CAPSULES_TEST_SETTINGS_NEITHER";
         assert_eq!(var(name), Err(VarError::NotPresent));
         assert_eq!(var_os(name), None);
     }
@@ -293,8 +335,8 @@ mod tests {
     fn a_name_outside_the_plugin_prefix_has_no_fallback() {
         assert_eq!(legacy_name("HOME"), None);
         assert_eq!(
-            legacy_name("CAPSULE_EMIT_MESH_PEER_KEYS").as_deref(),
-            Some("ADMISSION_POLICY_PEER_KEYS")
+            legacy_name("CAPSULES_PEER_KEYS").as_deref(),
+            Some("CAPSULE_EMIT_MESH_PEER_KEYS")
         );
     }
 
@@ -309,15 +351,15 @@ mod tests {
     #[test]
     fn console_keys_are_the_lower_cased_suffix_and_the_witness() {
         assert_eq!(
-            console_key("CAPSULE_EMIT_MESH_SHARE_HISTORY_SEGMENTS").as_deref(),
+            console_key("CAPSULES_SHARE_HISTORY_SEGMENTS").as_deref(),
             Some("share_history_segments")
         );
         assert_eq!(
-            console_key("CAPSULE_EMIT_MESH_REFEREE_BAR_DAYS").as_deref(),
+            console_key("CAPSULES_REFEREE_BAR_DAYS").as_deref(),
             Some("referee_bar_days")
         );
         assert_eq!(
-            console_key("CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS").as_deref(),
+            console_key("CAPSULES_CHECKPOINT_WITNESS_URLS").as_deref(),
             Some("witness")
         );
         assert_eq!(console_key("HOME"), None);
@@ -332,7 +374,7 @@ name = "other"
 witness = "https://other.example"
 
 [[plugin]]
-name = "capsule-emit-mesh"
+name = "capsules"
 enabled = true
 [plugin.settings]
 witness = "https://witness.example"
@@ -356,5 +398,28 @@ adjudicate_differing_twins = "off"
         );
         assert!(settings_from_config("not [valid").is_empty());
         assert!(settings_from_config("").is_empty());
+    }
+
+    #[test]
+    fn console_settings_saved_under_the_old_plugin_name_are_read_under_the_new_ones() {
+        let raw = r#"
+[[plugin]]
+name = "capsule-emit-mesh"
+[plugin.settings]
+witness = "https://old.example"
+referee_bar_days = 7
+
+[[plugin]]
+name = "capsules"
+[plugin.settings]
+witness = "https://new.example"
+"#;
+        let s = settings_from_config(raw);
+        assert_eq!(s.get("witness").map(String::as_str), Some("https://new.example"));
+        assert_eq!(s.get("referee_bar_days").map(String::as_str), Some("7"));
+        let only_old = settings_from_config(
+            "[[plugin]]\nname = \"capsule-emit-mesh\"\n[plugin.settings]\nwitness = \"https://old.example\"\n",
+        );
+        assert_eq!(only_old.get("witness").map(String::as_str), Some("https://old.example"));
     }
 }

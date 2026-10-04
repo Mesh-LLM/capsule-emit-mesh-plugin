@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.3 (unreleased)
+
+### Changed
+
+- **Renamed to `capsules`** (plugin id, repository `Mesh-LLM/capsules`, release assets
+  `capsules-<version>-<target>.tar.gz`, page `/plugins/capsules/evidence`). Settings are
+  `CAPSULES_*`; the old `CAPSULE_EMIT_MESH_*` names are read for this release, with a warning. The
+  `ADMISSION_POLICY_*` names are no longer read.
+- **The data directory moves once** from `capsule-emit-mesh` to `capsules`, as a single rename,
+  with the log verified before and after. A node with both directories refuses to start and says
+  why. Existing logs keep their log id.
+
+### Fixed
+
+- **Settings saved in the console reach the plugin.** The plugin reads its `[plugin.settings]`
+  from mesh-llm's config file (`MESH_LLM_CONFIG`, or `~/.mesh-llm/config.toml`); the environment
+  still wins. The console's `witness` is the checkpoint witness, and the witness client uses it.
+- **One plugin process per data directory.** A second process on the same directory refuses to
+  start instead of interleaving appends and breaking the chain.
+
 ## 0.1.2
 
 ### Fixed

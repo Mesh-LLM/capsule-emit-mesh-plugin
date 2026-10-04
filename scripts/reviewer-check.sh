@@ -19,8 +19,8 @@
 #   5. Prints how to run mesh-llm's four Linux smokes against a node with this plugin installed.
 set -uo pipefail
 
-PLUGIN=capsule-emit-mesh
-REPO=Mesh-LLM/capsule-emit-mesh-plugin
+PLUGIN=capsules
+REPO=Mesh-LLM/capsules
 MODEL_URL=https://huggingface.co/unsloth/SmolLM2-135M-Instruct-GGUF/resolve/9e6855bc4be717fca1ef21360a1db4b29d5c559a/SmolLM2-135M-Instruct-Q8_0.gguf
 MODEL_SHA256=c4a3dd037301b6ecea31d6da37f5cd793ead920dd5ddfe6d589294628d6ce66a
 IDLE_SECONDS=${IDLE_SECONDS:-60}

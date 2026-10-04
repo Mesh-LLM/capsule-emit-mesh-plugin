@@ -51,10 +51,10 @@ vi.mock('@/features/capsules/api/recordsClient', async (importOriginal) => {
   return {
     ...actual,
     fetchRecordsStatus: vi.fn().mockResolvedValue({
-      records_path: '/data/capsule-emit-mesh/ledger',
+      records_path: '/data/capsules/ledger',
       record_count: 5,
       head: null,
-      log_id: 'capsule-emit-mesh',
+      log_id: 'capsules',
       stored_text_count: 0,
       new_history_pending: null,
       sharing: {
@@ -608,7 +608,7 @@ describe('LedgerPageContent', () => {
 
     await user.click(await screen.findByTestId('hero-your-records'))
     const facts = await screen.findByTestId('your-records-facts')
-    expect(await within(facts).findByText('/data/capsule-emit-mesh/ledger')).toBeInTheDocument()
+    expect(await within(facts).findByText('/data/capsules/ledger')).toBeInTheDocument()
     expect(facts).toHaveTextContent('5 records')
     expect(facts).toHaveTextContent(
       `Covers 3 records, made no later than ${formatExchangeTimestamp('2026-09-28T16:16:00.000Z')}.`

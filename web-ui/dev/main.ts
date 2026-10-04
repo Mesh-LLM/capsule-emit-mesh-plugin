@@ -11,7 +11,7 @@ if (!harness) throw new Error('dev harness: #harness missing')
 const banner = document.createElement('p')
 banner.style.cssText = 'margin:0;padding:6px 16px;font:12px/1.4 ui-monospace,monospace;opacity:.7;border-bottom:1px solid var(--color-border)'
 const fixtures = import.meta.env.VITE_EVIDENCE_FIXTURES as string | undefined
-banner.textContent = `dev harness — /plugins/capsule-emit-mesh/evidence — ${fixtures ? `fixtures: ${fixtures}` : 'live: /api proxied to MESH_UI_API_ORIGIN'}`
+banner.textContent = `dev harness — /plugins/capsules/evidence — ${fixtures ? `fixtures: ${fixtures}` : 'live: /api proxied to MESH_UI_API_ORIGIN'}`
 const pageElement = document.createElement('main')
 pageElement.style.cssText = 'padding:16px 24px'
 harness.replaceChildren(banner, pageElement)

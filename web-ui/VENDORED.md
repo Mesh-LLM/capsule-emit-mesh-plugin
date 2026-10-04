@@ -34,7 +34,7 @@ Copied as-is except for these files:
 | --- | --- |
 | `api/client.ts` | ledger reads go to this plugin's routes through `host.network.fetchPlugin` (JSON-wrapped); same exports and return shapes |
 | `api/sidecarClient.ts` | pane reads go to this plugin's `panes/*` routes; `PaneFetchError` is the host seam's `PluginRouteError` |
-| `api/peerLedgerFetchClient.ts` (+ test) | the tool route is plugin-relative (`tools/mesh_ledger_fetch`), so it now reaches `capsule-emit-mesh`; the console tab addressed the retired name `admission-policy` |
+| `api/peerLedgerFetchClient.ts` (+ test) | the tool route is plugin-relative (`tools/mesh_ledger_fetch`), so it now reaches `capsules`; the console tab addressed the retired name `admission-policy` |
 | `pages/LedgerPage.tsx` | router `navigate` → `navigateHost`; the pane-error copy names the plugin (503) and adds the 404 "this plugin build doesn't serve its evidence panes yet" case |
 | `components/ExchangeIdCell.tsx` | router `navigate` → `navigateHost('/logs?focusExchangeId=…')` |
 | `lib/peer-mesh-status.ts` | calls the peers-only status adapter (below) |

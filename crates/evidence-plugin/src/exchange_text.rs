@@ -1,6 +1,6 @@
 //! The owner's opt-in to keep the TEXT of each exchange (prompt and answer)
 //! beside its sealed record, so the twin comparison and "Your records" can
-//! show it. Off unless `CAPSULE_EMIT_MESH_KEEP_EXCHANGE_TEXT=1`; nothing is
+//! show it. Off unless `CAPSULES_KEEP_EXCHANGE_TEXT=1`; nothing is
 //! written otherwise.
 //!
 //! The text comes from the host, and only when its operator hands exchange
@@ -11,7 +11,7 @@
 //! Each exchange gets one file, `<ledger>/disclosures/by-exchange/<exchange_id>.json`
 //! (both directories 0700, file 0600, written whole by rename), keyed by the
 //! host's `exchange_id`, which this plugin seals in `serving_provenance`.
-//! Files older than `CAPSULE_EMIT_MESH_KEEP_EXCHANGE_TEXT_DAYS` (default 30)
+//! Files older than `CAPSULES_KEEP_EXCHANGE_TEXT_DAYS` (default 30)
 //! are removed: at plugin start, every hour after that ([`spawn_retention`]),
 //! and on a write (at most once an hour per directory). The age-out runs
 //! whether or not keeping is still on, so text kept before the owner turned
@@ -37,9 +37,9 @@ use serde_json::{json, Value};
 use crate::lifecycle_channel::{ExchangeBodies, OpenAiExchangeEnvelope, Phase};
 
 /// Set to `1` to keep prompt and answer text. Off by default.
-pub const KEEP_EXCHANGE_TEXT_ENV: &str = "CAPSULE_EMIT_MESH_KEEP_EXCHANGE_TEXT";
+pub const KEEP_EXCHANGE_TEXT_ENV: &str = "CAPSULES_KEEP_EXCHANGE_TEXT";
 /// How many days a kept text stays; a positive whole number, else the default.
-pub const KEEP_EXCHANGE_TEXT_DAYS_ENV: &str = "CAPSULE_EMIT_MESH_KEEP_EXCHANGE_TEXT_DAYS";
+pub const KEEP_EXCHANGE_TEXT_DAYS_ENV: &str = "CAPSULES_KEEP_EXCHANGE_TEXT_DAYS";
 const DEFAULT_KEEP_DAYS: u64 = 30;
 /// The largest exchange text file this plugin writes.
 pub const MAX_FILE_BYTES: usize = 256 * 1024;

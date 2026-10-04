@@ -36,7 +36,7 @@ pids=()
 token=
 
 node_home() { echo "$out/nodes/$1"; }
-plugin_data() { echo "$(node_home "$1")/.local/share/capsule-emit-mesh"; }
+plugin_data() { echo "$(node_home "$1")/.local/share/capsules"; }
 
 # The token lets anyone join the mesh while it runs; it never reaches a log
 # anyone reads. Matched by value, wherever it appears.
@@ -85,7 +85,7 @@ start_node() {
 version = 1
 
 [[plugin]]
-name = "capsule-emit-mesh"
+name = "capsules"
 enabled = true
 command = "$plugin"
 args = []
@@ -162,4 +162,4 @@ cp -a "$(plugin_data requester)" "$out/data/requester"
 cp -a "$(plugin_data provider)" "$out/data/provider"
 cd "$repo/crates/evidence-plugin"
 E2E_REQUESTER_DIR=$out/data/requester E2E_PROVIDER_DIR=$out/data/provider E2E_EXCHANGES=$EXCHANGES \
-  cargo test --locked --bin capsule-emit-mesh -- --ignored --test-threads=1 two_node_e2e::
+  cargo test --locked --bin capsules -- --ignored --test-threads=1 two_node_e2e::

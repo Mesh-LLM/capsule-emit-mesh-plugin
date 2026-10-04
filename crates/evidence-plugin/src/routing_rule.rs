@@ -38,12 +38,12 @@ use crate::verdict_counts::{read_requested, PeerVerdict, CONTRADICTED};
 
 pub const RULE_NAME: &str = "stop_routing_after_contradictions";
 /// N. Unset, empty, `0` or not a number: the rule is off.
-pub const ENV_AFTER: &str = "CAPSULE_EMIT_MESH_STOP_ROUTING_AFTER_CONTRADICTIONS";
+pub const ENV_AFTER: &str = "CAPSULES_STOP_ROUTING_AFTER_CONTRADICTIONS";
 /// D, in days. Unset: [`DEFAULT_WINDOW_DAYS`]. `0` or not a number: off.
-pub const ENV_WINDOW_DAYS: &str = "CAPSULE_EMIT_MESH_STOP_ROUTING_WINDOW_DAYS";
+pub const ENV_WINDOW_DAYS: &str = "CAPSULES_STOP_ROUTING_WINDOW_DAYS";
 pub const DEFAULT_WINDOW_DAYS: u32 = 30;
 /// The host's local API. Unset: [`DEFAULT_HOST_API`].
-pub const ENV_HOST_API: &str = "CAPSULE_EMIT_MESH_HOST_API_URL";
+pub const ENV_HOST_API: &str = "CAPSULES_HOST_API_URL";
 pub const DEFAULT_HOST_API: &str = "http://127.0.0.1:3131";
 const PEER_BLOCKS_PATH: &str = "/api/peer-blocks";
 /// Beside the ledger: one line per rule block, the verdicts it cited, in

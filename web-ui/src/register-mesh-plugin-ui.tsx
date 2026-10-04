@@ -1,4 +1,4 @@
-// capsule-emit-mesh's mesh-llm plugin web UI bundle.
+// The capsules plugin's mesh-llm plugin web UI bundle.
 //
 // The console imports this module from the installed package (manifest
 // `web_ui` block: bundle `main` rooted at `bundle/`, page `evidence`) and calls
@@ -17,7 +17,7 @@ import type {
 } from '@/plugin-host/host-contract'
 
 export const EVIDENCE_PAGE_ID = 'evidence'
-const STYLE_ELEMENT_ID = 'capsule-emit-mesh-evidence-styles'
+const STYLE_ELEMENT_ID = 'capsules-evidence-styles'
 
 function injectStyles(): HTMLStyleElement {
   const existing = document.getElementById(STYLE_ELEMENT_ID)

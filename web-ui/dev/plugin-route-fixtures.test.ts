@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { answerFromFixtures, type Captured } from './plugin-route-fixtures'
 
-const P = '/api/plugins/capsule-emit-mesh'
+const P = '/api/plugins/capsules'
 
 function reader(entries: Record<string, { status?: number; body: string | Buffer; contentType?: string }>) {
   return (key: string): Captured | null => {

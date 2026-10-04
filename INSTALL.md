@@ -1,11 +1,22 @@
-# Install the capsule-emit-mesh plugin on a mesh-llm node
+# Install the capsules plugin on a mesh-llm node
 
-`capsule-emit-mesh` is a mesh-llm plugin. It keeps a signed, hash-chained
+`capsules` is a mesh-llm plugin. It keeps a signed, hash-chained
 record of every exchange this node serves or asks for, on this node's disk,
 and adds an **Evidence** page to the console: the peers you exchanged with,
 each exchange, and whether this node's log still verifies. It installs and
 runs on an unmodified mesh-llm release (0.77 or newer). No other runtime is
 needed.
+
+## What's new in 0.1.3
+
+- **The plugin is now called `capsules`** (it was `capsule-emit-mesh`), and so is its repository,
+  `Mesh-LLM/capsules`. Its settings are `CAPSULES_*`, its page is `/plugins/capsules/evidence`, and
+  its data directory is `~/.local/share/capsules`. A node upgrading keeps its key and records: see
+  [Upgrading from capsule-emit-mesh](#upgrading-from-capsule-emit-mesh).
+- **Settings saved in the console reach the plugin.** mesh-llm keeps them in its config file and
+  does not pass them to the plugin, so the plugin reads them there. The console's **witness** is
+  the witness checkpoints go to. A node started with `--config <path>` must also have
+  `MESH_LLM_CONFIG=<path>` in its environment, or the plugin reads `~/.mesh-llm/config.toml`.
 
 ## What's new in 0.1.2
 
@@ -25,7 +36,7 @@ needed.
   0.1.1 for this.
 - **The witness indicator** says "off" only when no witness is set.
 
-Details in [CHANGELOG.md](https://github.com/Mesh-LLM/capsule-emit-mesh-plugin/blob/main/CHANGELOG.md).
+Details in [CHANGELOG.md](https://github.com/Mesh-LLM/capsules/blob/main/CHANGELOG.md).
 
 ## What it sends, and where it listens
 
@@ -40,7 +51,13 @@ Records are kept on this node. With the default settings:
 All peer traffic uses mesh-llm's own peer connections. Nothing goes to any
 third party unless you set a witness. The switches are under Configuration ›
 Plugins › Sharing policy, and [`docs/SHARING-POLICY.md`](docs/SHARING-POLICY.md)
-explains each one.
+explains each one. The plugin reads what you save there from mesh-llm's
+config file: `~/.mesh-llm/config.toml`, or the file `MESH_LLM_CONFIG` names.
+**If you start the node with `--config <path>`, also set
+`MESH_LLM_CONFIG=<path>`** in its environment, or the plugin reads the default
+file and your console settings don't reach it. Settings in the environment win
+over the console. The witness and the checkpoint cadence are read when the
+plugin starts: restart the node after changing them.
 
 The plugin listens only on `127.0.0.1`, at a random port the node reaches it
 through.
@@ -51,7 +68,7 @@ One path, the same on macOS 11 or newer (Apple Silicon) and on Linux with
 glibc 2.35 or newer (x86_64 or arm64).
 
 **1. Download the package for your machine and the checksum file** from the
-[releases page](https://github.com/Mesh-LLM/capsule-emit-mesh-plugin/releases),
+[releases page](https://github.com/Mesh-LLM/capsules/releases),
 and set `VERSION` to the release (without the leading `v`):
 
 ```bash
@@ -62,8 +79,8 @@ case "$(uname -s)-$(uname -m)" in
   Linux-aarch64) TARGET=aarch64-unknown-linux-gnu ;;
   *) echo "unsupported platform: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
 esac
-BASE=https://github.com/Mesh-LLM/capsule-emit-mesh-plugin/releases/download/v$VERSION
-curl -fLO "$BASE/capsule-emit-mesh-$VERSION-$TARGET.tar.gz"
+BASE=https://github.com/Mesh-LLM/capsules/releases/download/v$VERSION
+curl -fLO "$BASE/capsules-$VERSION-$TARGET.tar.gz"
 curl -fLO "$BASE/SHA256SUMS"
 ```
 
@@ -76,8 +93,8 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 With the GitHub CLI you can also check where it was built:
 
 ```bash
-gh attestation verify "capsule-emit-mesh-$VERSION-$TARGET.tar.gz" \
-  --repo Mesh-LLM/capsule-emit-mesh-plugin
+gh attestation verify "capsules-$VERSION-$TARGET.tar.gz" \
+  --repo Mesh-LLM/capsules
 ```
 
 The checksum proves your file is the one published. The attestation proves it
@@ -88,16 +105,16 @@ which is public here.
 **3. Install it.**
 
 ```bash
-mesh-llm plugins install --archive "capsule-emit-mesh-$VERSION-$TARGET.tar.gz" \
-  --name capsule-emit-mesh --version "$VERSION"
+mesh-llm plugins install --archive "capsules-$VERSION-$TARGET.tar.gz" \
+  --name capsules --version "$VERSION"
 ```
 
-Pass `--name capsule-emit-mesh`: the plugin's id is `capsule-emit-mesh`, while
-this repository is `capsule-emit-mesh-plugin` (see the README), so installing
-by repository name does not find the release assets. The command unpacks the
+`mesh-llm plugins install Mesh-LLM/capsules` installs a release straight
+from GitHub instead, without your own checks in steps 1 and 2. Either way the
+command unpacks the
 package into the node's plugin directory (`~/.mesh-llm/plugins`, or
 `MESH_LLM_PLUGIN_DIR`) and enables it. `mesh-llm plugins info
-capsule-emit-mesh` shows what was installed.
+capsules` shows what was installed.
 
 **4. Restart the node.** An installed, enabled plugin starts with the node; no
 config entry is needed.
@@ -127,16 +144,16 @@ confirmed.
 
 **Each node must know the other node's public key.** Nodes do not exchange
 keys yet. The plugin accepts a record only from a peer whose key you have
-configured, and refuses the rest. Set `CAPSULE_EMIT_MESH_PEER_KEYS` in the
+configured, and refuses the rest. Set `CAPSULES_PEER_KEYS` in the
 node's environment to a JSON object mapping each peer's id to its raw Ed25519
 public key in hex. A node writes its own id to `<data dir>/self-peer-id` and
 its public key to `<data dir>/keys/node-key.pub.pem`.
 
 ## Where the records are kept
 
-Under the plugin's data directory: `CAPSULE_EMIT_MESH_DATA_DIR` if set in the
-node's environment (an absolute path), else `$XDG_DATA_HOME/capsule-emit-mesh`,
-else `~/.local/share/capsule-emit-mesh`. The sealed log is
+Under the plugin's data directory: `CAPSULES_DATA_DIR` if set in the
+node's environment (an absolute path), else `$XDG_DATA_HOME/capsules`,
+else `~/.local/share/capsules`. The sealed log is
 `<data dir>/ledger/capsules.jsonl` and its checkpoints are
 `<data dir>/ledger/checkpoints.jsonl`. The node's signing key is under
 `<data dir>/keys/`; it never leaves the node.
@@ -145,14 +162,14 @@ else `~/.local/share/capsule-emit-mesh`. The sealed log is
 
 Every checkpoint names the log it covers, and a witness keeps one history per
 log id, so no two nodes may share one. A node's log id is
-`capsule-emit-mesh/<key id>`, where the key id is the first 16 hex characters
+`capsules/<key id>`, where the key id is the first 16 hex characters
 of the SHA-256 of its public key. It is chosen at the first start and kept in
 `<data dir>/log_id`; a later change of key does not change it. To name it
-yourself, set `CAPSULE_EMIT_MESH_LOG_ID` before the node's first checkpoint.
+yourself, set `CAPSULES_LOG_ID` before the node's first checkpoint.
 
 A log keeps the id its checkpoints were cut under: changing it would break the
 log's checkpoint chain. So the plugin never changes the id of a log that has a
-checkpoint, and refuses to start when `CAPSULE_EMIT_MESH_LOG_ID` names a
+checkpoint, and refuses to start when `CAPSULES_LOG_ID` names a
 different one.
 
 **A node from an earlier release** whose log was checkpointed under the old
@@ -161,22 +178,43 @@ a warning at start. A witness accepts that id from one node only and refuses
 the others' checkpoints as a fork. To take a log id of the node's own, start a
 new log (Evidence › Clean up records › Start a new log) and restart the
 node: the old log is kept whole under `<data dir>/archive/<n>/` with its old
-id, and the new history runs under `capsule-emit-mesh/<key id>/h<n+1>` (or
-`<CAPSULE_EMIT_MESH_LOG_ID>/h<n+1>` when that is set).
+id, and the new history runs under `capsules/<key id>/h<n+1>` (or
+`<CAPSULES_LOG_ID>/h<n+1>` when that is set).
 
-## Settings were renamed
+## Upgrading from capsule-emit-mesh
 
-Every setting in the node's environment is named `CAPSULE_EMIT_MESH_*`. Until
-the next release the plugin still reads the old `ADMISSION_POLICY_*` name of a
-setting whose new name is unset, and logs which one it used; when both are
-set, the new name wins. Rename yours now: the old names stop working after
-this release.
+Until 0.1.3 the plugin was called `capsule-emit-mesh`. To upgrade, install
+`capsules` as above, then remove the old one: `mesh-llm plugins delete
+capsule-emit-mesh` (this leaves its data directory alone). Then restart the
+node.
+
+- **Records and key.** At its first start, `capsules` moves the old default
+  directory (`$XDG_DATA_HOME/capsule-emit-mesh` or
+  `~/.local/share/capsule-emit-mesh`) to the new name with a single rename: one
+  copy, never two. It verifies the log before and after the move and logs the
+  entry count and the chain's head. If the log doesn't verify the same after the
+  move, the plugin moves it back and refuses to start. A directory you chose
+  with `CAPSULES_DATA_DIR` (or the old `CAPSULE_EMIT_MESH_DATA_DIR`) is not moved.
+- **Both directories present.** If the node has a key or a log under both
+  names, the plugin refuses to start and names both. Keep the one that is this
+  node's, move the other out of the way, and start again.
+- **The log id.** A log keeps the id it was checkpointed under, so an existing
+  node's witness history continues. A new node's log id is
+  `capsules/<key id>`.
+- **Settings.** Every setting in the node's environment is now named
+  `CAPSULES_*`. For this release the plugin still reads the old
+  `CAPSULE_EMIT_MESH_*` name of a setting whose new name is unset, and logs a
+  warning naming both; when both are set, the new name wins. Console settings
+  saved under the old plugin name are read the same way. Rename yours now: the
+  old names stop working in the next release.
+- **Bookmarks.** The page moved from `/plugins/capsule-emit-mesh/evidence` to
+  `/plugins/capsules/evidence`.
 
 ## Turn it off or remove it
 
 ```bash
-mesh-llm plugins disable capsule-emit-mesh   # keeps it installed
-mesh-llm plugins delete capsule-emit-mesh    # removes the installed files
+mesh-llm plugins disable capsules   # keeps it installed
+mesh-llm plugins delete capsules    # removes the installed files
 ```
 
 Removing the plugin does not delete its data directory.
@@ -184,8 +222,8 @@ Removing the plugin does not delete its data directory.
 ## What is in the package
 
 ```text
-capsule-emit-mesh/
-  capsule-emit-mesh                   the plugin executable
+capsules/
+  capsules                   the plugin executable
   plugin.toml                         package marker (name, version)
   plugin-manifest.json                settings schema and web UI declaration
   bundle/register-mesh-plugin-ui.js   the Evidence page
@@ -203,7 +241,7 @@ from a checkout of a release tag (the packaging step needs GNU tar):
 ```bash
 cargo build --locked --release --manifest-path crates/evidence-plugin/Cargo.toml
 (cd web-ui && pnpm install --frozen-lockfile && pnpm build)
-scripts/package.sh "$VERSION" "$TARGET" crates/evidence-plugin/target/release/capsule-emit-mesh dist
+scripts/package.sh "$VERSION" "$TARGET" crates/evidence-plugin/target/release/capsules dist
 ```
 
 A different compiler or build machine can give a different executable and so a

@@ -36,7 +36,7 @@
 //! drive an outbound `OpenMeshStreamRequest` on this plugin's behalf. The
 //! mechanism that CAN -- `mesh_llm_plugin`'s tool/operation router
 //! (`ToolRouter`/`invoke_operation`, reachable locally over
-//! `POST /api/plugins/capsule-emit-mesh/tools/mesh_evidence_request`) -- hands
+//! `POST /api/plugins/capsules/tools/mesh_evidence_request`) -- hands
 //! its handler the full JSON arguments AND a `&mut PluginContext` in the same
 //! call, so a local client drives this tool;
 //! the handler opens the mesh stream, writes the E14 request bytes, and
@@ -70,7 +70,7 @@ pub const EVIDENCE_REQUEST_OPERATION: &str = "mesh_evidence_request";
 /// Overridable so a test proving the bound is actually enforced does not
 /// have to wait out the production default.
 fn responder_http_timeout() -> Duration {
-    env_millis("CAPSULE_EMIT_MESH_EVIDENCE_HTTP_TIMEOUT_MS", 10_000)
+    env_millis("CAPSULES_EVIDENCE_HTTP_TIMEOUT_MS", 10_000)
 }
 
 /// How long the REQUESTER waits for a response once the mesh stream is open
@@ -78,7 +78,7 @@ fn responder_http_timeout() -> Duration {
 /// stream with no reply" case the acceptance check requires read as a clean
 /// failure, never a hang.
 fn requester_idle_timeout_ms() -> u64 {
-    env_millis("CAPSULE_EMIT_MESH_MESH_REQUEST_TIMEOUT_MS", 8_000).as_millis() as u64
+    env_millis("CAPSULES_MESH_REQUEST_TIMEOUT_MS", 8_000).as_millis() as u64
 }
 
 /// Shared with `ledger_fetch_bridge`, the other plugin-mesh-stream carrier --
@@ -413,7 +413,7 @@ pub struct MeshEvidenceRequestArgs {
     /// (the responder's sharing policy reads it; it is this node's word).
     pub request: serde_json::Value,
     /// Check what comes back against the peer's announced key
-    /// (`CAPSULE_EMIT_MESH_PEER_KEYS`). **On unless the caller turns it off**
+    /// (`CAPSULES_PEER_KEYS`). **On unless the caller turns it off**
     /// with an explicit `"verify": false`. The result is
     /// `{"answer": <the peer's JSON>, "request_digest", "verification"}`
     /// (`evidence_answer::verify_response`, or `no_announced_key` when the

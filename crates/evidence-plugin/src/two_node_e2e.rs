@@ -8,7 +8,7 @@
 //!
 //! ```sh
 //! E2E_REQUESTER_DIR=<copy> E2E_PROVIDER_DIR=<copy> E2E_EXCHANGES=<n> \
-//!   cargo test --locked --bin capsule-emit-mesh -- --ignored --test-threads=1 two_node_e2e::
+//!   cargo test --locked --bin capsules -- --ignored --test-threads=1 two_node_e2e::
 //! ```
 //!
 //! Every check calls the plugin's own code (the ledger reload, the receiver,

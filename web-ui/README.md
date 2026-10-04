@@ -1,7 +1,7 @@
-# capsule-emit-mesh Evidence page (mesh-llm plugin web UI bundle)
+# capsules Evidence page (mesh-llm plugin web UI bundle)
 
 The plugin's one console page, **Evidence**, at
-`/plugins/capsule-emit-mesh/evidence`. It uses mesh-llm's plugin web UI
+`/plugins/capsules/evidence`. It uses mesh-llm's plugin web UI
 projection (manifest `web_ui` block, `src/web_ui_manifest.rs`): install the
 plugin and the page appears. No console fork is needed.
 
