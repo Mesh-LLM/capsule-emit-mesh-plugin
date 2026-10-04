@@ -1,6 +1,11 @@
 import { act } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { EVIDENCE_PAGE_ID, registerMeshPluginUi } from '@/register-mesh-plugin-ui'
+import {
+  CHAT_CONTRIBUTION_ID,
+  EVIDENCE_PAGE_ID,
+  LOGS_CONTRIBUTION_ID,
+  registerMeshPluginUi
+} from '@/register-mesh-plugin-ui'
 import { pluginHost, setPluginHost } from '@/plugin-host/host'
 import { createStandaloneHost } from '@/plugin-host/standalone-host'
 
@@ -26,6 +31,7 @@ describe('registerMeshPluginUi', () => {
   it('registers exactly one page, `evidence`, and no config sections', async () => {
     const registration = await registerMeshPluginUi(createStandaloneHost())
     expect(Object.keys(registration.pages)).toEqual([EVIDENCE_PAGE_ID])
+    expect(Object.keys(registration.contributions ?? {})).toEqual([CHAT_CONTRIBUTION_ID, LOGS_CONTRIBUTION_ID])
     expect(registration.configSections).toBeUndefined()
   })
 

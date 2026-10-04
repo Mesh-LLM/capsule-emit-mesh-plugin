@@ -218,6 +218,22 @@
         "host_header": false
       }
     ],
+    "contributions": [
+      {
+        "id": "evidence-chat",
+        "slot": "chat_message",
+        "label": "Evidence",
+        "bundle_id": "main",
+        "entry_script": "register-mesh-plugin-ui.js"
+      },
+      {
+        "id": "evidence-logs",
+        "slot": "logs_request",
+        "label": "Evidence",
+        "bundle_id": "main",
+        "entry_script": "register-mesh-plugin-ui.js"
+      }
+    ],
     "bundles": [
       {
         "id": "main",

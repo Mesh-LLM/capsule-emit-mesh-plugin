@@ -906,6 +906,38 @@ fn poc_block(record: &Value) -> Option<&Value> {
     record.pointer("/model_attestation/compute_attestation/x-mesh-poc-v1")
 }
 
+/// This node's own sealed record of one exchange, found by the host's
+/// exchange id or by the client nonce the host forwarded: the Exchanges row
+/// key it is listed under (`exchange_key`, what `?focusExchangeKey=` takes),
+/// its record id and its role. The newest match wins. `found: false` when
+/// this node holds no record of it; nothing is guessed from timing.
+pub(crate) fn find_own_record(
+    records: &[Value],
+    exchange_id: Option<&str>,
+    client_nonce: Option<&str>,
+) -> Value {
+    let matches = |record: &&Value| {
+        let by_exchange = exchange_id
+            .is_some_and(|id| record_exchange_id(record) == Some(id));
+        let by_nonce = client_nonce.is_some_and(|nonce| {
+            poc_block(record)
+                .and_then(|poc| poc.get("client_nonce"))
+                .and_then(Value::as_str)
+                == Some(nonce)
+        });
+        by_exchange || by_nonce
+    };
+    match records.iter().rev().find(matches) {
+        Some(record) => json!({
+            "found": true,
+            "exchange_key": exchange_key_for(record),
+            "capsule_id": record.get("capsule_id").cloned().unwrap_or(Value::Null),
+            "role": label_role(record),
+        }),
+        None => json!({ "found": false }),
+    }
+}
+
 /// `x-mesh-lifecycle-v1` block, `capsule_mesh_view._lifecycle_block`.
 fn lifecycle_block(record: &Value) -> Option<&Value> {
     record.pointer("/model_attestation/compute_attestation/x-mesh-lifecycle-v1")

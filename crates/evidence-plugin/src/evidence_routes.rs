@@ -13,6 +13,7 @@
 //! | `panes/pane-a`, `panes/pane-b` | the pane JSON ([`crate::evidence_panes`]) |
 //! | `panes/pane-c[?exchange_id=]` | the Exchanges list, or one exchange's drilldown |
 //! | `peer-key?peer=` | `{announced_key_id}`: the key the operator says that peer signs with, or null |
+//! | `lookup?exchange_id=` or `?client_nonce=` | `{found, exchange_key, capsule_id, role}`: this node's own record of that exchange, for the console's chat and Logs contributions |
 //!
 //! The host turns query parameters into typed JSON (numbers stay numbers),
 //! so a capsule id that is not a string is refused rather than guessed back.
@@ -48,6 +49,29 @@ pub struct NoArgs {}
 pub struct CapsuleIdArgs {
     /// The record's id: 64 lowercase hex.
     pub capsule_id: Value,
+}
+
+/// The host's ids for one exchange: either is enough.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct LookupArgs {
+    /// The host's exchange id (the Logs request's).
+    #[serde(default)]
+    pub exchange_id: Option<Value>,
+    /// The client nonce the host forwarded (the chat message's).
+    #[serde(default)]
+    pub client_nonce: Option<Value>,
+}
+
+/// A query value as text: the host types query values, so a nonce of digits
+/// arrives as a number.
+fn query_text(value: &Option<Value>) -> Result<Option<String>, PluginError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) if s.is_empty() => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s.clone())),
+        Some(Value::Number(n)) => Ok(Some(n.to_string())),
+        Some(_) => Err(PluginError::invalid_params("must be a string")),
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -300,6 +324,35 @@ pub fn with_routes(
             }),
     );
 
+    let s = source.clone();
+    builder = builder.http_item(
+        http::get("/lookup")
+            .binding_id("evidence_lookup")
+            .description(
+                "This node's own record of one exchange, by the host's exchange id or client nonce.",
+            )
+            .input::<LookupArgs>()
+            .handle(move |args, _context| {
+                let s = s.clone();
+                Box::pin(async move {
+                    let exchange_id = query_text(&args.exchange_id)?;
+                    let client_nonce = query_text(&args.client_nonce)?;
+                    if exchange_id.is_none() && client_nonce.is_none() {
+                        return Err(PluginError::invalid_params("give exchange_id or client_nonce"));
+                    }
+                    blocking(move || {
+                        let records = read_capsule_records(&s.ledger_dir);
+                        Ok(crate::evidence_panes::find_own_record(
+                            &records,
+                            exchange_id.as_deref(),
+                            client_nonce.as_deref(),
+                        ))
+                    })
+                    .await
+                })
+            }),
+    );
+
     let s = source;
     builder = builder.http_item(
         http::get("/panes/pane-c")
@@ -474,6 +527,7 @@ mod tests {
                 "/ledger/disclosure",
                 "/ledger/signed-statement",
                 "/ledger/verdict",
+                "/lookup",
                 "/panes/pane-a",
                 "/panes/pane-b",
                 "/panes/pane-c",
@@ -583,5 +637,27 @@ mod tests {
             Some(data.path().join(DEFAULT_RECEIVED_LOG_SUBDIR)),
             "an empty env var is unset"
         );
+    }
+
+    #[test]
+    fn lookup_finds_this_nodes_record_by_exchange_id_or_nonce() {
+        let mut a = record(&"a".repeat(64));
+        a["model_attestation"]["compute_attestation"]["x-mesh-poc-v1"] = json!({
+            "role": "requested", "client_nonce": "n-1",
+            "serving_provenance": {"exchange_id": "ex-1"},
+        });
+        let records = vec![a];
+        let by_id = crate::evidence_panes::find_own_record(&records, Some("ex-1"), None);
+        assert_eq!(by_id["found"], json!(true));
+        assert_eq!(by_id["capsule_id"], json!("a".repeat(64)));
+        assert_eq!(by_id["exchange_key"], json!("ex-1"));
+        let by_nonce = crate::evidence_panes::find_own_record(&records, None, Some("n-1"));
+        assert_eq!(by_nonce["capsule_id"], json!("a".repeat(64)));
+        assert_eq!(
+            crate::evidence_panes::find_own_record(&records, Some("ex-2"), Some("n-2")),
+            json!({"found": false})
+        );
+        assert_eq!(query_text(&Some(json!(12345))).unwrap().as_deref(), Some("12345"));
+        assert_eq!(query_text(&Some(json!(""))).unwrap(), None);
     }
 }
