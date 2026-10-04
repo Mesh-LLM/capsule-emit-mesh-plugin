@@ -1,7 +1,7 @@
 {
   "name": "capsule-emit-mesh-web-ui",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "The capsule-emit-mesh plugin's Evidence page, built as a mesh-llm plugin web UI bundle.",
   "license": "Apache-2.0",

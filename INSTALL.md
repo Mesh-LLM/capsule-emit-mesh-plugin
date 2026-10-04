@@ -7,6 +7,13 @@ each exchange, and whether this node's log still verifies. It installs and
 runs on an unmodified mesh-llm release (0.77 or newer). No other runtime is
 needed.
 
+## What's new in 0.1.2
+
+- **No models, no provider by default.** 0.1.1 registered an OpenAI-compatible provider on every
+  node and listed `blocked-test-model` (it always answers 403) unless `CAPSULE_EMIT_MESH_BLOCKED_MODELS`
+  was set. From 0.1.2 the plugin registers no provider and serves no models unless you name blocked
+  models in that variable.
+
 ## What's new in 0.1.1
 
 - **Settlement-record legs for paid exchanges** (draft-mih-agent-settlement-records-00): both
@@ -48,7 +55,7 @@ glibc 2.35 or newer (x86_64 or arm64).
 and set `VERSION` to the release (without the leading `v`):
 
 ```bash
-VERSION=0.1.1
+VERSION=0.1.2
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64)  TARGET=aarch64-apple-darwin ;;
   Linux-x86_64)  TARGET=x86_64-unknown-linux-gnu ;;
