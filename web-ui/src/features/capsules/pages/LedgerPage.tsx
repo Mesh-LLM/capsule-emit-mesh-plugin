@@ -561,7 +561,7 @@ function ExchangesSection({
   // from the row before it", and index 0 always differs from "no previous
   // row").
   const dayHeaderAt = useMemo(() => dayHeaderIndices(currentPageRows), [currentPageRows])
-  // No twin bracket on any row: the host does not mark twins, so no pair is
+  // No twin bracket on any row: no client marked a pair, so no pair is
   // ever adjudicated (nothing is guessed from timing). Said once, here.
   const twinsUnmarkedLine =
     query.data?.referee && !query.data.referee.twins_marked ? NOT_ADJUDICATED_LINES.host_does_not_mark_twins : null

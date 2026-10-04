@@ -563,8 +563,8 @@ export type PaneCListJson = {
   next_after_seq: number | null
   archived_segments: unknown[]
   /** The independent check's state for this list: whether it is on, and
-   *  whether the host marks twins at all (no twin bracket on any row: "Not
-   *  adjudicated: this host does not mark twins"). */
+   *  whether any client marked a pair (no twin bracket on any row: "Not
+   *  adjudicated: no client marked these as a pair"). */
   referee?: {
     adjudicate_differing_twins: boolean
     twins_marked: boolean

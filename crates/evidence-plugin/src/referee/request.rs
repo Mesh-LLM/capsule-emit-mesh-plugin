@@ -2,8 +2,8 @@
 //!
 //! A referee is asked only when two twins of a pair a client marked (a twin
 //! bracket id) answered the same request at temperature 0, on the same model
-//! and weights, and their answers differ. It is on unless the operator turns
-//! it off (`adjudicate_differing_twins`). At most one call per pair, never
+//! and weights, and their answers differ. It is off unless the operator turns
+//! it on (`adjudicate_differing_twins`). At most one call per pair, never
 //! retried: a pair is the bracket id, the twins' request digest and the two
 //! node ids, so re-sealed halves of one exchange are the same pair. A call
 //! that was made and not answered has used the pair's one call.
@@ -40,6 +40,8 @@ pub const STATE_ADJUDICATED: &str = "adjudicated";
 pub const STATE_NOT_ADJUDICATED: &str = "not_adjudicated";
 
 pub const REASON_OFF: &str = "off";
+/// No client marked any pair on this list. The value is the legacy wire id,
+/// kept so stored rows and the page keep reading it.
 pub const REASON_HOST_DOES_NOT_MARK_TWINS: &str = "host_does_not_mark_twins";
 pub const REASON_TWINS_AGREE: &str = "twins_agree";
 pub const REASON_NOT_COMPARABLE: &str = "not_comparable";
@@ -447,10 +449,10 @@ pub fn rows_by_bracket(ledger_dir: &Path) -> HashMap<String, Value> {
 }
 
 /// Put each twin row's pair outcome on it (`twin.referee_row`, `null` while
-/// the pair has none), and say on the list whether this host marks twins at
-/// all (`referee.twins_marked`) and whether the check is on. With no twin
-/// bracket on any row, the page reads "Not adjudicated: this host does not
-/// mark twins": no pair is ever guessed from timing.
+/// the pair has none), and say on the list whether any client marked a pair
+/// (`referee.twins_marked`) and whether the check is on. With no twin bracket
+/// on any row, the page reads "Not adjudicated: no client marked these as a
+/// pair": no pair is ever guessed from timing.
 pub fn attach_rows(pane: &mut Value, ledger_dir: &Path) {
     let rows = rows_by_bracket(ledger_dir);
     let mut marked = false;
