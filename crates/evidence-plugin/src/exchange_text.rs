@@ -3,10 +3,10 @@
 //! show it. Off unless `CAPSULES_KEEP_EXCHANGE_TEXT=1`; nothing is
 //! written otherwise.
 //!
-//! The text comes from the host, and only when its operator hands exchange
-//! bodies to plugins (`MESH_LLM_PLUGIN_EXCHANGE_BODIES=1`, off by default):
-//! the `openai.exchange.v1` terminal event then carries `exchange_bodies`.
-//! Both switches must be on for anything to be kept.
+//! The text could only come from the host, as `exchange_bodies` on the
+//! `openai.exchange.v1` terminal event. mesh-llm sends no such field today,
+//! so the plugin sees digests only and keeps no text, whatever this setting
+//! says. Text is kept only if a host sends the bodies AND this setting is on.
 //!
 //! Each exchange gets one file, `<ledger>/disclosures/by-exchange/<exchange_id>.json`
 //! (both directories 0700, file 0600, written whole by rename), keyed by the

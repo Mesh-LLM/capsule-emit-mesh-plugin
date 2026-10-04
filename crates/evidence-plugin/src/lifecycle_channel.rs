@@ -248,9 +248,9 @@ pub struct OpenAiExchangeEnvelope {
     /// host that computes it; `None` from a host that predates the field.
     #[serde(default)]
     pub response_text_digest: Option<String>,
-    /// The exchange's request and response bodies, sent only by a host whose
-    /// operator hands them to plugins (`MESH_LLM_PLUGIN_EXCHANGE_BODIES=1`,
-    /// off by default). Absent otherwise: this plugin then sees digests only.
+    /// The exchange's request and response bodies. mesh-llm does not send
+    /// them today, so this is always absent there and the plugin sees digests
+    /// only.
     /// Kept on disk only with this plugin's own opt-in (`exchange_text`).
     #[serde(default)]
     pub exchange_bodies: Option<ExchangeBodies>,
