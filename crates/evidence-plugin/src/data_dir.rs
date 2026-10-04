@@ -328,12 +328,16 @@ pub fn lock(dir: &Path) -> anyhow::Result<DataDirLock> {
     let mut files = vec![dir_lock, ledger_lock];
     // The log of requests made of this node can live elsewhere
     // (CAPSULES_RECEIVED_LOG_DIR); two nodes must not share it either.
-    if let Some(lock_path) =
-        received_log_lock_path(crate::settings::var_os(crate::evidence_routes::ENV_RECEIVED_LOG_DIR), &real_ledger)
-    {
+    if let Some(lock_path) = received_log_lock_path(
+        crate::settings::var_os(crate::evidence_routes::ENV_RECEIVED_LOG_DIR),
+        &real_ledger,
+    ) {
         match take(
             &lock_path,
-            &format!("received-request log {}", lock_path.parent().unwrap_or(&lock_path).display()),
+            &format!(
+                "received-request log {}",
+                lock_path.parent().unwrap_or(&lock_path).display()
+            ),
         ) {
             Ok(Ok(file)) => files.push(file),
             // Another process writes it: refused, as for the ledger.
@@ -392,7 +396,10 @@ mod tests {
         assert!(!missing.exists());
         let under_a_file = base.join("a-file");
         std::fs::write(&under_a_file, b"x").unwrap();
-        assert_eq!(received_log_lock_path(os(&under_a_file.join("log")), &ledger), None);
+        assert_eq!(
+            received_log_lock_path(os(&under_a_file.join("log")), &ledger),
+            None
+        );
         // The ledger itself, directly or through a link: already locked.
         assert_eq!(received_log_lock_path(os(&ledger), &ledger), None);
         #[cfg(unix)]

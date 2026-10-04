@@ -197,10 +197,13 @@ async fn with_the_push_turned_on_the_counterparty_is_contacted() {
     host.stop().await;
 }
 
+/// Each request a [`recording_witness`] saw: its request line and `Host`.
+type Seen = std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>;
+
 /// A local witness that answers every request with 503 and keeps the request
 /// line and `Host` header of each, so a test can see exactly where the plugin
 /// went.
-fn recording_witness() -> (String, std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>) {
+fn recording_witness() -> (String, Seen) {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();

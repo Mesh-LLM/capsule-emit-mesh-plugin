@@ -172,6 +172,10 @@ fn classify(err: &crate::producer::anchor::AnchorError) -> (&'static str, String
     match err {
         AnchorError::Status { status, .. } => ("http", format!("answered HTTP {status}")),
         AnchorError::Decode(_) => ("not_a_witness", "answered, but not as a witness".into()),
+        AnchorError::TooLarge(cap) => (
+            "not_a_witness",
+            format!("answered with more than {cap} bytes"),
+        ),
         AnchorError::Transport(msg) => {
             let m = msg.to_ascii_lowercase();
             if m.contains("timed out") || m.contains("timeout") {
@@ -188,9 +192,9 @@ fn classify(err: &crate::producer::anchor::AnchorError) -> (&'static str, String
 }
 
 /// One GET to a witness: no redirects (a witness never sends this plugin
-/// elsewhere), 10 s, and at most 64 KiB of answer read. These reads only:
-/// registering a checkpoint goes through capsule-emit's client, which
-/// follows redirects until capsule-emit makes it not to.
+/// elsewhere), 10 s, and at most 64 KiB of answer read. Registering a
+/// checkpoint goes through capsule-emit's client, which also follows no
+/// redirect (and reads at most 1 MiB).
 fn get_json(url: &str) -> Result<Value, crate::producer::anchor::AnchorError> {
     use crate::producer::anchor::AnchorError;
     use std::io::Read;
