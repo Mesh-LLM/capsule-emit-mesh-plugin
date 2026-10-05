@@ -45,9 +45,6 @@ const WEIGHTS_DIGEST_ABSENT_REASON: &str =
     "no capsule field named weights_digest exists in records this sidecar emits today \
      (same absence self_accountability.rung_summary documents) -- never fabricated";
 
-/// `chain.relation` of an adjudication verdict record.
-const RELATION_ADJUDICATES: &str = "adjudicates";
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StatusBucket {
     Completed,
@@ -104,15 +101,14 @@ impl LeafFacts {
                     .is_some_and(|w| !w.is_null()),
             }
         });
-        let adjudicated_halves = (record.pointer("/chain/relation").and_then(Value::as_str)
-            == Some(RELATION_ADJUDICATES))
-        .then(|| record.pointer("/model_attestation/compute_attestation/adjudication"))
-        .flatten()
-        .filter(|a| is_truthy(a))
-        .map(|a| {
-            let half = |k: &str| a.get(k).and_then(Value::as_str).map(str::to_string);
-            (half("half_a_capsule_id"), half("half_b_capsule_id"))
-        });
+        let adjudicated_halves = crate::producer::capsule::is_adjudication(record)
+            .then(|| record.pointer("/model_attestation/compute_attestation/adjudication"))
+            .flatten()
+            .filter(|a| is_truthy(a))
+            .map(|a| {
+                let half = |k: &str| a.get(k).and_then(Value::as_str).map(str::to_string);
+                (half("half_a_capsule_id"), half("half_b_capsule_id"))
+            });
         Self {
             served,
             adjudicated_halves,
@@ -305,6 +301,23 @@ pub fn summary_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_verdict_is_read_whether_it_writes_confirms_or_the_legacy_adjudicates() {
+        for relation in ["confirms", "adjudicates"] {
+            let record = json!({"chain": {"relation": relation},
+                "model_attestation": {"compute_attestation": {"epistemic_type": "adjudication",
+                    "adjudication": {"half_a_capsule_id": "a", "half_b_capsule_id": "b"}}}});
+            assert_eq!(
+                LeafFacts::of(&record).adjudicated_halves,
+                Some((Some("a".into()), Some("b".into()))),
+                "{relation}"
+            );
+        }
+        let plain = json!({"chain": {"relation": "confirms"},
+            "model_attestation": {"compute_attestation": {"adjudication": {"half_a_capsule_id": "a"}}}});
+        assert_eq!(LeafFacts::of(&plain).adjudicated_halves, None);
+    }
 
     fn served(model: &str, status: &str, latency: Value) -> Value {
         json!({
