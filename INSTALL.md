@@ -29,7 +29,12 @@ needed.
   it, its public key (still none by default, and no witness is contacted until you add one). The
   Evidence page shows what each witness holds, and counts a witness only once its receipt checks
   against the witness's key. A key you don't give is fetched from the witness once and kept, and
-  the page says so.
+  the page says so. Every witness is contacted at exactly the URL you give, and no redirect is
+  followed.
+- **On mesh-llm 0.78 and later:** the Evidence page can be a primary console tab (your choice, under
+  Configuration › Plugins), and a chat answer this node sealed shows "Sealed on this node" with a
+  link to its record. An exchange can be confirmed by the other side once you turn record push on
+  (see [What works today](#what-works-today)).
 
 ## What's new in 0.1.2
 
@@ -96,7 +101,7 @@ glibc 2.35 or newer (x86_64 or arm64).
 and set `VERSION` to the release (without the leading `v`):
 
 ```bash
-VERSION=0.1.2
+VERSION=0.1.3
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64)  TARGET=aarch64-apple-darwin ;;
   Linux-x86_64)  TARGET=x86_64-unknown-linux-gnu ;;
