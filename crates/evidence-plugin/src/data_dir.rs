@@ -379,9 +379,12 @@ fn received_log_target(
     data_dir: &Path,
     real_ledger: &Path,
 ) -> ReceivedLog {
-    let given = env.filter(|v| !v.is_empty()).map(|raw| PathBuf::from(raw.to_string_lossy().trim()));
+    let given = env
+        .filter(|v| !v.is_empty())
+        .map(|raw| PathBuf::from(raw.to_string_lossy().trim()));
     let configured = given.is_some();
-    let dir = given.unwrap_or_else(|| data_dir.join(crate::evidence_routes::DEFAULT_RECEIVED_LOG_SUBDIR));
+    let dir =
+        given.unwrap_or_else(|| data_dir.join(crate::evidence_routes::DEFAULT_RECEIVED_LOG_SUBDIR));
     if !dir.is_dir() {
         return ReceivedLog::Off;
     }

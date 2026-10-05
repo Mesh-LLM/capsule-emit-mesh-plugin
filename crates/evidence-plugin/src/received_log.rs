@@ -145,7 +145,10 @@ mod tests {
         std::fs::create_dir_all(&other).unwrap();
         let decided = Some(std::fs::canonicalize(&locked).unwrap());
         assert!(writable_under(Some(&decided), &locked));
-        assert!(!writable_under(Some(&decided), &other), "a directory made after start");
+        assert!(
+            !writable_under(Some(&decided), &other),
+            "a directory made after start"
+        );
         assert!(!writable_under(Some(&None), &locked), "off for this run");
         let _ = std::fs::remove_dir_all(&base);
     }

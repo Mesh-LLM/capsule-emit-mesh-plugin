@@ -598,7 +598,9 @@ mod tests {
             assert!(is_enabled_for(Some(on)), "{on:?}");
         }
         assert!(is_enabled_for(Some("")), "empty is unset");
-        for off in ["OFF", "Off", "off ", " off", "0", "false", "no", "of", "disabled"] {
+        for off in [
+            "OFF", "Off", "off ", " off", "0", "false", "no", "of", "disabled",
+        ] {
             assert!(!is_enabled_for(Some(off)), "{off:?}");
         }
     }
