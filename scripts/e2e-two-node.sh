@@ -126,12 +126,24 @@ halves() {
 }
 has_halves() { [ "$(halves "$1" "$2")" -ge "$EXCHANGES" ]; }
 
+# Record push is off by default; turned on at both ends here (a node with it
+# off does not take the other side's push either), so the run shows what a
+# node holds once the host names the other side.
+export CAPSULES_SHARE_RECORD_AT_COMPLETION=counterparty
+
 # --- the provider: serves the model -----------------------------------------
 start_node provider "$PROVIDER_API" "$PROVIDER_CONSOLE" --gguf "$model" --model "$MODEL_NAME"
 wait_for 600 "the provider has loaded the model" status_field "$PROVIDER_CONSOLE" '.llama_ready == true'
 token=$(status_field "$PROVIDER_CONSOLE" '.token')
 provider_id=$(curl -fsS "http://127.0.0.1:$PROVIDER_CONSOLE/api/diagnostics/network" | jq -er '.node_id')
 echo "provider node id: $provider_id"
+# The requester accepts the provider's record under the provider's own key
+# (its raw Ed25519 public key, hex). The provider cannot be given the
+# requester's: a client node's id is new each time it starts.
+provider_key=$(openssl pkey -pubin -in "$(plugin_data provider)/keys/node-key.pub.pem" -outform DER | tail -c 32 | od -An -v -tx1 | tr -d ' \n')
+[ ${#provider_key} = 64 ] || { echo "could not read the provider's public key" >&2; exit 1; }
+CAPSULES_PEER_KEYS=$(jq -cn --arg id "$provider_id" --arg k "$provider_key" '{($id): $k}')
+export CAPSULES_PEER_KEYS
 
 # --- the requester: serves nothing, joins the provider's mesh ---------------
 start_node requester "$REQUESTER_API" "$REQUESTER_CONSOLE" --client --join "$token"
@@ -153,6 +165,12 @@ done
 # --- each side seals its own half -------------------------------------------
 wait_for 120 "the requester sealed $EXCHANGES requested halves" has_halves requester requested
 wait_for 120 "the provider sealed $EXCHANGES served halves" has_halves provider served
+holds_providers_record() {
+  local file
+  file=$(plugin_data requester)/ledger/received-capsules.jsonl
+  [ -f "$file" ] && [ "$(wc -l < "$file")" -ge "$EXCHANGES" ]
+}
+wait_for 120 "the requester holds the provider's record of each exchange" holds_providers_record
 
 stop_nodes
 

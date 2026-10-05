@@ -90,13 +90,13 @@ in `crates/evidence-plugin/src/two_node_e2e.rs` run over what each node wrote:
   provider's log;
 - attack B, a record naming another server, and attack D, a record naming
   other model weights, are refused, and the run repeats both against a
-  receiver built without its claim checks, which must fail them.
-
-Confirming an exchange (each side holding the other's record, the row
-CLOSED) needs the exchange event to name the other side, which no mesh-llm
-release does yet. That check runs as "expected-blocked until the host names the other side": it
-asserts the honest one-sided state, and fails once the pinned release names
-the other side, so it can become the confirmed / CLOSED check.
+  receiver built without its claim checks, which must fail them;
+- the host names both sides (mesh-llm 0.78 and later): with record push on
+  at both ends, the requester holds the provider's record of every exchange
+  and its Evidence page shows each one confirmed; the provider holds none
+  from the requester, because the requester is a client node, whose id is new
+  each start and so cannot be given a key, and each of its pushes is refused
+  for that reason.
 
 The mesh-llm release and the model are pinned by SHA-256 in the workflow and
 cached. Add the `run-e2e` label to a pull request to run it before merge.
