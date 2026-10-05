@@ -153,18 +153,19 @@ exchange, and the log's integrity.
 | --- | --- |
 | Install, start, the Evidence page | works |
 | Each node seals its own record of each exchange | works |
-| An exchange confirmed by the other side | **not yet** |
+| An exchange confirmed by the other side | works on mesh-llm 0.78 and later, once turned on (below); not on 0.77 |
 
 A confirmed exchange is the serving node's record and the requesting node's
-record, matched and each held by the other side. The plugin already receives
-and checks the other side's record. What is not there yet is **two fields from
-mesh-llm**: `requested_by_node_id` on the exchange event the serving node sees
-(which peer asked), and `served_by_node_id` with the request and response
-digests on the event the requesting node sees for a request another peer
-served. Without them neither side knows whom to match.
+record, matched and each held by the other side. Since mesh-llm 0.78 the
+exchange event names both nodes: `requested_by_node_id` on the event the
+serving node sees (which peer asked), and `served_by_node_id` with the request
+and response digests on the event the requesting node sees for a request
+another peer served. mesh-llm 0.77 has neither, so there each node holds only
+its own record, and nothing is shown as confirmed.
 
-Until they exist, each node holds only its own record, and nothing is shown as
-confirmed.
+Confirmation is off by default, because it sends this node's record to the
+other side: turn on `share_record_at_completion` (`counterparty`) on both
+nodes, and give each node the other's key (below).
 
 **Each node must know the other node's public key.** Nodes do not exchange
 keys yet. The plugin accepts a record only from a peer whose key you have

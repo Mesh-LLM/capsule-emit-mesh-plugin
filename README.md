@@ -53,10 +53,11 @@ repository, for macOS arm64 and Linux x86_64/arm64.
   reads "Not adjudicated: no client marked these as a pair" and nothing is
   called. Asking a referee sends it the twins' request and both their answers.
 
-**Not yet:** an exchange confirmed by both sides. That needs mesh-llm to tell
-the plugin which peer asked and which peer served (see
-[Host changes](#host-changes)). Until then each node holds only its own
-record.
+**An exchange confirmed by both sides** needs mesh-llm 0.78 or later, which
+tells the plugin which peer asked and which peer served (see
+[Host changes](#host-changes)), and record push turned on at both ends with
+each node's key configured (INSTALL.md). It is off by default; on mesh-llm
+0.77, or with it off, each node holds only its own record.
 
 ## Host changes
 
@@ -65,11 +66,12 @@ host feature; none names this plugin.
 
 | Change | What it enables | Status |
 | --- | --- | --- |
-| Provider-side `payment.lifecycle.v1` events | the serving node's record of a paid exchange | mesh-llm#2108, merged; not in a release yet |
-| The exchange event on the paid serving path | paid exchanges are visible to plugins | mesh-llm#2109, merged; not in a release yet |
-| `requested_by_node_id` on the served side; `served_by_node_id` with request/response digests on the routed side | matching the two sides' records | proposed |
-| An operator's "stop routing to this peer" as a core router feature a plugin can request (behind the operator's `allow_peer_blocks`), plus a routing-choice event | acting on evidence without the plugin touching the router | mesh-llm#2142, merged; not in a release yet |
-| A plugin page can ask to be a primary console tab; the operator decides | a stable place for the Evidence page | mesh-llm#2130, merged; not in a release yet |
+| Provider-side `payment.lifecycle.v1` events | the serving node's record of a paid exchange | mesh-llm#2108, in 0.78.0 |
+| The exchange event on the paid serving path | paid exchanges are visible to plugins | mesh-llm#2109, in 0.78.0 |
+| `requested_by_node_id` on the served side; `served_by_node_id` with request/response digests on the routed side | matching the two sides' records | mesh-llm#2138, in 0.78.0 |
+| An operator's "stop routing to this peer" as a core router feature a plugin can request (behind the operator's `allow_peer_blocks`), plus a routing-choice event | acting on evidence without the plugin touching the router | mesh-llm#2142, in 0.78.0 |
+| A plugin page can ask to be a primary console tab; the operator decides | a stable place for the Evidence page | mesh-llm#2130, in 0.78.0 |
+| A plugin page can turn off the host's page header; contributions under a chat answer and in the Logs request inspector | the page's own header; the "sealed on this node" line | mesh-llm#2141 and #2140, in 0.78.0 |
 | A built-in or default plugin can serve its web UI bundle | shipping this plugin by default | proposed |
 | Per-request `skippy.stage.v1` events from split-inference stages | records for multi-stage requests | proposed |
 
