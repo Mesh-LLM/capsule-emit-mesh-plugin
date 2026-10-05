@@ -109,7 +109,7 @@ about a node's future answers.
 
 | Setting | Environment variable | Default |
 | --- | --- | --- |
-| `adjudicate_differing_twins` | `CAPSULES_ADJUDICATE_DIFFERING_TWINS` | on |
+| `adjudicate_differing_twins` | `CAPSULES_ADJUDICATE_DIFFERING_TWINS` | off (`on`, `1`, `true` or `yes` turns it on) |
 | `referee_bar_days` | `CAPSULES_REFEREE_BAR_DAYS` | 30 |
 | `stop_routing_after_contradictions` | `CAPSULES_STOP_ROUTING_AFTER_CONTRADICTIONS` | off |
 | `stop_routing_window_days` | `CAPSULES_STOP_ROUTING_WINDOW_DAYS` | 30 |
