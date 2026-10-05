@@ -6,6 +6,15 @@
 //! `share_record_at_completion = counterparty` does open a mesh stream to the
 //! counterparty, so the quiet result is not just a test that cannot see a
 //! push.
+//!
+//! Besides a 5-second look while idle, no fixed window decides a result. The plugin handles channel
+//! messages strictly one at a time, in order, so once it has recorded a
+//! second exchange, its handling of the first (any push included) has
+//! finished: that is when the quiet test looks. The control waits for the
+//! push itself. A push first cuts a checkpoint covering the record, padded to
+//! its bucket, which a slow machine running a debug build can take many
+//! seconds to do. Every wait is bounded ([`SETTLE`], [`STARTUP`]) and fails
+//! loudly.
 
 use mesh_llm_plugin::proto::{self, envelope::Payload};
 use mesh_llm_plugin::{
@@ -19,6 +28,10 @@ use tokio::time::timeout;
 const PLUGIN_BIN: &str = env!("CARGO_BIN_EXE_capsules");
 const SELF_PEER: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
 const SERVING_PEER: &str = "bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22";
+/// The most a test waits for the plugin to finish with an exchange.
+const SETTLE: Duration = Duration::from_secs(180);
+/// The most a test waits for the plugin to connect and answer initialize.
+const STARTUP: Duration = Duration::from_secs(60);
 
 fn nonce() -> String {
     format!(
@@ -35,6 +48,9 @@ struct Host {
     child: tokio::process::Child,
     stream: LocalStream,
     next: u64,
+    data_dir: std::path::PathBuf,
+    /// Everything peer-bound the plugin has sent so far.
+    sent: Vec<String>,
 }
 
 impl Host {
@@ -42,13 +58,11 @@ impl Host {
         let socket = std::env::temp_dir().join(format!("capsules-quiet-{}.sock", nonce()));
         let _ = std::fs::remove_file(&socket);
         let listener = UnixListener::bind(&socket).unwrap();
+        let data_dir = std::env::temp_dir().join(format!("capsules-quiet-data-{}", nonce()));
         let mut cmd = Command::new(PLUGIN_BIN);
         cmd.env("MESH_LLM_PLUGIN_ENDPOINT", &socket)
             .env("MESH_LLM_PLUGIN_TRANSPORT", "unix")
-            .env(
-                "CAPSULES_DATA_DIR",
-                std::env::temp_dir().join(format!("capsules-quiet-data-{}", nonce())),
-            )
+            .env("CAPSULES_DATA_DIR", &data_dir)
             .env("CAPSULES_SELF_PEER_ID", SELF_PEER)
             // Never the developer's own mesh config or settings.
             .env("MESH_LLM_CONFIG", "/nonexistent/config.toml")
@@ -60,17 +74,16 @@ impl Host {
             cmd.env(k, v);
         }
         let child = cmd.spawn().unwrap();
-        let stream = timeout(
-            Duration::from_secs(10),
-            LocalListener::Unix(listener, socket).accept(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let stream = timeout(STARTUP, LocalListener::Unix(listener, socket).accept())
+            .await
+            .unwrap_or_else(|_| panic!("the plugin did not connect within {STARTUP:?}"))
+            .unwrap();
         let mut host = Self {
             child,
             stream,
             next: 1,
+            data_dir,
+            sent: Vec::new(),
         };
         host.send(Payload::InitializeRequest(proto::InitializeRequest {
             host_protocol_version: PROTOCOL_VERSION,
@@ -80,7 +93,13 @@ impl Host {
             ..Default::default()
         }))
         .await;
-        let reply = host.recv(Duration::from_secs(10)).await.unwrap();
+        // The plugin registers its handlers before it connects, so its
+        // initialize reply is the readiness signal: an exchange sent after it
+        // is queued and handled, never dropped.
+        let reply = host
+            .recv(STARTUP)
+            .await
+            .unwrap_or_else(|| panic!("no initialize reply within {STARTUP:?}"));
         assert!(matches!(
             reply.payload,
             Some(Payload::InitializeResponse(_))
@@ -111,40 +130,71 @@ impl Host {
             .ok()
     }
 
-    /// Everything the plugin sends that would reach a peer (or the routing
-    /// plane), over `window`. Rpc replies to the host are not counted.
-    async fn peer_bound_within(&mut self, window: Duration) -> Vec<String> {
+    /// Read what the plugin sends for up to `window`, keeping everything
+    /// that would reach a peer (or the routing plane) in `sent`. Rpc replies
+    /// to the host are not kept. Returns early once `done` holds.
+    async fn watch(&mut self, window: Duration, done: impl Fn(&Self) -> bool) {
         let deadline = tokio::time::Instant::now() + window;
-        let mut seen = Vec::new();
-        while let Some(left) = deadline.checked_duration_since(tokio::time::Instant::now()) {
-            let Some(envelope) = self.recv(left).await else {
-                break;
+        while !done(self) {
+            let Some(left) = deadline.checked_duration_since(tokio::time::Instant::now()) else {
+                return;
+            };
+            // Short reads, so `done` is checked often even when nothing comes.
+            let Some(envelope) = self.recv(left.min(Duration::from_millis(250))).await else {
+                continue;
             };
             match envelope.payload {
                 Some(Payload::OpenMeshStreamRequest(r)) => {
-                    seen.push(format!("open_mesh_stream {r:?}"))
+                    self.sent.push(format!("open_mesh_stream {r:?}"))
                 }
                 Some(Payload::ChannelMessage(m)) => {
-                    seen.push(format!("channel_message {}", m.channel))
+                    self.sent.push(format!("channel_message {}", m.channel))
                 }
-                Some(Payload::BulkTransferMessage(_)) => seen.push("bulk_transfer".into()),
+                Some(Payload::BulkTransferMessage(_)) => self.sent.push("bulk_transfer".into()),
                 Some(Payload::PeerBlockRequest(r)) => {
-                    seen.push(format!("peer_block {}", r.peer_id))
+                    self.sent.push(format!("peer_block {}", r.peer_id))
                 }
                 _ => {}
             }
         }
-        seen
     }
 
-    /// A completed exchange this node asked for and `SERVING_PEER` served.
-    async fn completed_exchange(&mut self) {
+    /// Whether the plugin has recorded the exchange `exchange_id` in its
+    /// lifecycle log, which it does while handling that exchange.
+    fn has_recorded(&self, exchange_id: &str) -> bool {
+        std::fs::read_to_string(self.data_dir.join("lifecycle-events.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .any(|event| event["exchange_id"] == exchange_id)
+    }
+
+    /// Send a completed exchange, then a second one, and wait until the
+    /// plugin has recorded the second: channel messages are handled one at
+    /// a time, in order, so by then it has finished with the first, push or
+    /// no push. Fails if that does not happen within [`SETTLE`].
+    async fn exchange_and_settle(&mut self) {
+        self.completed_exchange().await;
+        let barrier = self.completed_exchange().await;
+        let started = std::time::Instant::now();
+        self.watch(SETTLE, |host| host.has_recorded(&barrier)).await;
+        assert!(
+            self.has_recorded(&barrier),
+            "the plugin did not finish with the exchange within {SETTLE:?}"
+        );
+        eprintln!("exchange settled after {:?}", started.elapsed());
+    }
+
+    /// A completed exchange this node asked for and `SERVING_PEER` served;
+    /// returns its exchange id.
+    async fn completed_exchange(&mut self) -> String {
+        let exchange_id = format!("quiet-{}", nonce());
         let event = serde_json::json!({
             "dispatch_path": "remote_mesh",
             "phase": "terminal",
             "model": "quiet-test-model",
             "status": 200,
-            "exchange_id": format!("quiet-{}", nonce()),
+            "exchange_id": exchange_id,
             "capsule_id": null,
             "nonce": null,
             "request_digest": "11".repeat(32),
@@ -160,6 +210,7 @@ impl Host {
             ..Default::default()
         }))
         .await;
+        exchange_id
     }
 
     async fn stop(mut self) {
@@ -170,15 +221,14 @@ impl Host {
 #[tokio::test]
 async fn a_default_node_sends_nothing_to_peers_idle_or_serving() {
     let mut host = Host::spawn(&[]).await;
+    host.watch(Duration::from_secs(5), |_| false).await;
+    assert!(host.sent.is_empty(), "idle: {:?}", host.sent);
+    host.exchange_and_settle().await;
     assert!(
-        host.peer_bound_within(Duration::from_secs(5))
-            .await
-            .is_empty(),
-        "idle"
+        host.sent.is_empty(),
+        "serving, default settings: {:?}",
+        host.sent
     );
-    host.completed_exchange().await;
-    let sent = host.peer_bound_within(Duration::from_secs(8)).await;
-    assert!(sent.is_empty(), "serving, default settings: {sent:?}");
     host.stop().await;
 }
 
@@ -188,12 +238,19 @@ async fn a_default_node_sends_nothing_to_peers_idle_or_serving() {
 async fn with_the_push_turned_on_the_counterparty_is_contacted() {
     let mut host = Host::spawn(&[("CAPSULES_SHARE_RECORD_AT_COMPLETION", "counterparty")]).await;
     host.completed_exchange().await;
-    let sent = host.peer_bound_within(Duration::from_secs(8)).await;
+    let pushed = |host: &Host| {
+        host.sent
+            .iter()
+            .any(|s| s.starts_with("open_mesh_stream") && s.contains(SERVING_PEER))
+    };
+    let started = std::time::Instant::now();
+    host.watch(SETTLE, pushed).await;
     assert!(
-        sent.iter()
-            .any(|s| s.starts_with("open_mesh_stream") && s.contains(SERVING_PEER)),
-        "expected a push to the counterparty, saw {sent:?}"
+        pushed(&host),
+        "expected a push to the counterparty within {SETTLE:?}, saw {:?}",
+        host.sent
     );
+    eprintln!("pushed after {:?}", started.elapsed());
     host.stop().await;
 }
 
@@ -247,25 +304,23 @@ async fn a_configured_witness_is_dialled_exactly_as_given() {
     ])
     .await;
     host.completed_exchange().await;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        let requests = seen.lock().unwrap().clone();
-        let fetched_key = requests
+    let both = |seen: &Seen| {
+        let requests = seen.lock().unwrap();
+        requests
             .iter()
-            .any(|(line, _)| line.starts_with("GET /given/prefix/anchor/authority-pubkey "));
-        let registered = requests
-            .iter()
-            .any(|(line, _)| line.starts_with("POST /given/prefix/"));
-        if fetched_key && registered {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "expected the key fetch and a checkpoint registration, saw {requests:?}"
-        );
-        // Keep the host side drained while the plugin works.
-        let _ = host.peer_bound_within(Duration::from_millis(500)).await;
-    }
+            .any(|(line, _)| line.starts_with("GET /given/prefix/anchor/authority-pubkey "))
+            && requests
+                .iter()
+                .any(|(line, _)| line.starts_with("POST /given/prefix/"))
+    };
+    // Keeps the host side drained while the plugin works; returns as soon as
+    // the witness has seen both requests.
+    host.watch(SETTLE, |_| both(&seen)).await;
+    assert!(
+        both(&seen),
+        "expected the key fetch and a checkpoint registration within {SETTLE:?}, saw {:?}",
+        seen.lock().unwrap()
+    );
     for (line, host_header) in seen.lock().unwrap().iter() {
         assert_eq!(host_header, &addr, "{line}");
         let path = line.split(' ').nth(1).unwrap_or_default();
