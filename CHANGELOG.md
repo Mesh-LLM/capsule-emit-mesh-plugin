@@ -52,6 +52,11 @@
 
 ### Fixed
 
+- **The log of requests made of this node never stops the plugin starting.** It is written only to
+  a directory that exists when the plugin starts (`CAPSULES_RECEIVED_LOG_DIR`, else
+  `<data dir>/received-log`) and that this process holds a lock on; never the ledger directory. A
+  directory another node holds, or one that cannot be locked, turns that log off for the run, with
+  a warning.
 - **A witness is dialled at the URL given.** With capsule-emit 0.0.4, one public witness URL
   (`https://witness.agentactioncapsule.org`) was sent to a different host
   (`anchor.agentactioncapsule.org`). capsule-emit now dials every witness exactly as configured and

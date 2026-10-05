@@ -326,53 +326,80 @@ pub fn lock(dir: &Path) -> anyhow::Result<DataDirLock> {
     )?
     .map_err(anyhow::Error::msg)?;
     let mut files = vec![dir_lock, ledger_lock];
-    // The log of requests made of this node can live elsewhere
-    // (CAPSULES_RECEIVED_LOG_DIR); two nodes must not share it either.
-    if let Some(lock_path) = received_log_lock_path(
+    // The log of requests made of this node: written only to the directory
+    // decided here, and only while this process holds a lock covering it.
+    let writable = match received_log_target(
         crate::settings::var_os(crate::evidence_routes::ENV_RECEIVED_LOG_DIR),
+        dir,
         &real_ledger,
     ) {
-        match take(
-            &lock_path,
-            &format!(
-                "received-request log {}",
-                lock_path.parent().unwrap_or(&lock_path).display()
-            ),
+        ReceivedLog::Off => None,
+        ReceivedLog::Covered(real) => Some(real),
+        ReceivedLog::NeedsLock(real) => match take(
+            &real.join(LEDGER_LOCK_FILE),
+            &format!("received-request log {}", real.display()),
         ) {
-            Ok(Ok(file)) => files.push(file),
-            // Another process writes it: refused, as for the ledger.
-            Ok(Err(held)) => anyhow::bail!(held),
-            // The log is best-effort; it never stops the plugin starting.
-            Err(e) => tracing::warn!(
-                path = %lock_path.display(),
-                error = %e,
-                "cannot lock the received-request log; starting without that lock"
-            ),
-        }
-    }
+            Ok(Ok(file)) => {
+                files.push(file);
+                Some(real)
+            }
+            // Held by another process, or not lockable: the log is
+            // best-effort, so it is off for this run; the plugin still starts.
+            Ok(Err(held)) => {
+                tracing::warn!(%held, "the received-request log is off for this run");
+                None
+            }
+            Err(e) => {
+                tracing::warn!(path = %real.display(), error = %e, "cannot lock the received-request log; it is off for this run");
+                None
+            }
+        },
+    };
+    crate::received_log::set_writable(writable);
     check_no_other_writer(dir)?;
     Ok(DataDirLock { _files: files })
 }
 
-/// The lock file for the received-request log, when it needs one of its own:
-/// the log is opt-in and written only to a directory that already exists, so
-/// none is created here; a directory that cannot be resolved is left alone
-/// (warned, not fatal); and a directory that is the ledger itself is already
-/// locked by this process.
-fn received_log_lock_path(env: Option<std::ffi::OsString>, real_ledger: &Path) -> Option<PathBuf> {
-    let raw = env.filter(|v| !v.is_empty())?;
-    let given = PathBuf::from(raw.to_string_lossy().trim());
-    if !given.is_dir() {
-        return None;
+/// Where the received-request log may be written this run.
+#[derive(Debug, PartialEq, Eq)]
+enum ReceivedLog {
+    /// Nowhere: no directory at start (the log is opt-in, and none is
+    /// created), one that cannot be resolved, or the ledger directory (this
+    /// log is not evidence and is never kept with it).
+    Off,
+    /// This directory, already covered by the data directory's lock: the
+    /// default `<data dir>/received-log`.
+    Covered(PathBuf),
+    /// This directory, once its own lock is taken.
+    NeedsLock(PathBuf),
+}
+
+fn received_log_target(
+    env: Option<std::ffi::OsString>,
+    data_dir: &Path,
+    real_ledger: &Path,
+) -> ReceivedLog {
+    let given = env.filter(|v| !v.is_empty()).map(|raw| PathBuf::from(raw.to_string_lossy().trim()));
+    let configured = given.is_some();
+    let dir = given.unwrap_or_else(|| data_dir.join(crate::evidence_routes::DEFAULT_RECEIVED_LOG_SUBDIR));
+    if !dir.is_dir() {
+        return ReceivedLog::Off;
     }
-    let real = match std::fs::canonicalize(&given) {
+    let real = match std::fs::canonicalize(&dir) {
         Ok(real) => real,
         Err(e) => {
-            tracing::warn!(path = %given.display(), error = %e, "cannot resolve the received-request log directory");
-            return None;
+            tracing::warn!(path = %dir.display(), error = %e, "cannot resolve the received-request log directory; it is off for this run");
+            return ReceivedLog::Off;
         }
     };
-    (real != real_ledger).then(|| real.join(LEDGER_LOCK_FILE))
+    if real == real_ledger {
+        tracing::warn!(path = %real.display(), "the received-request log is never kept in the ledger directory; it is off for this run");
+        ReceivedLog::Off
+    } else if !configured {
+        ReceivedLog::Covered(real)
+    } else {
+        ReceivedLog::NeedsLock(real)
+    }
 }
 
 #[cfg(test)]
@@ -380,40 +407,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_received_log_is_locked_only_when_it_exists_apart_from_the_ledger() {
+    fn the_received_log_is_written_only_where_a_lock_covers_it() {
         let base = tmp("received-lock");
-        let ledger = base.join("ledger");
+        let data = base.join("data");
+        let ledger = data.join("ledger");
         std::fs::create_dir_all(&ledger).unwrap();
         let ledger = std::fs::canonicalize(&ledger).unwrap();
         let os = |p: &Path| Some(p.as_os_str().to_os_string());
-        // Unset or empty: no log, no lock.
-        assert_eq!(received_log_lock_path(None, &ledger), None);
-        assert_eq!(received_log_lock_path(Some("".into()), &ledger), None);
-        // Not there (or impossible to make): no lock, and nothing created,
-        // because the log is written only to a directory that exists.
+        let target = |env| received_log_target(env, &data, &ledger);
+        // Unset or empty, and no default directory: off.
+        assert_eq!(target(None), ReceivedLog::Off);
+        assert_eq!(target(Some("".into())), ReceivedLog::Off);
+        // The default directory, when it exists: under the data dir's lock.
+        let default = data.join(crate::evidence_routes::DEFAULT_RECEIVED_LOG_SUBDIR);
+        std::fs::create_dir_all(&default).unwrap();
+        assert_eq!(
+            target(None),
+            ReceivedLog::Covered(std::fs::canonicalize(&default).unwrap())
+        );
+        // Not there (or impossible to make): off, and nothing created.
         let missing = base.join("not-yet");
-        assert_eq!(received_log_lock_path(os(&missing), &ledger), None);
+        assert_eq!(target(os(&missing)), ReceivedLog::Off);
         assert!(!missing.exists());
         let under_a_file = base.join("a-file");
         std::fs::write(&under_a_file, b"x").unwrap();
-        assert_eq!(
-            received_log_lock_path(os(&under_a_file.join("log")), &ledger),
-            None
-        );
-        // The ledger itself, directly or through a link: already locked.
-        assert_eq!(received_log_lock_path(os(&ledger), &ledger), None);
+        assert_eq!(target(os(&under_a_file.join("log"))), ReceivedLog::Off);
+        // The ledger itself, directly or through a link: never; and no
+        // second lock on the ledger's own lock file.
+        assert_eq!(target(os(&ledger)), ReceivedLog::Off);
         #[cfg(unix)]
         {
             let link = base.join("ledger-link");
             std::os::unix::fs::symlink(&ledger, &link).unwrap();
-            assert_eq!(received_log_lock_path(os(&link), &ledger), None);
+            assert_eq!(target(os(&link)), ReceivedLog::Off);
         }
         // A directory of its own: its own lock.
         let own = base.join("received");
         std::fs::create_dir_all(&own).unwrap();
         assert_eq!(
-            received_log_lock_path(os(&own), &ledger),
-            Some(std::fs::canonicalize(&own).unwrap().join(LEDGER_LOCK_FILE))
+            target(os(&own)),
+            ReceivedLog::NeedsLock(std::fs::canonicalize(&own).unwrap())
         );
     }
 
