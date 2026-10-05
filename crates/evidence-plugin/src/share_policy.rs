@@ -104,7 +104,10 @@ pub fn setting_problems() -> Vec<String> {
             crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS,
             &["on", "off", "1", "0", "true", "false", "yes", "no"],
         ),
-        (crate::checkpoint_cadence::ENV_ENABLE, &["on", "off"]),
+        (
+            crate::checkpoint_cadence::ENV_ENABLE,
+            &["on", "off", "1", "0", "true", "false", "yes", "no"],
+        ),
     ];
     known
         .iter()
