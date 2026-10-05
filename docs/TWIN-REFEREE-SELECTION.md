@@ -23,7 +23,7 @@ machines, so re-sealed records of the same exchange are the same pair. A call
 that was made and not answered has used the pair's one call; it is not
 retried, and another referee is not tried.
 
-The operator can turn this off (`adjudicate_differing_twins: off`).
+It is off by default; the operator turns it on (`adjudicate_differing_twins: on`).
 
 ## 2. Who is eligible
 
