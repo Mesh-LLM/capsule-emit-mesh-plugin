@@ -14,6 +14,9 @@ import {
   identityFact,
   INTEGRITY_TILE_INFO,
   RETENTION_FACT,
+  witnessKeyProblems,
+  witnessRestartNote,
+  witnessRows,
   witnessTileNote
 } from '@/features/capsules/lib/integrity-view'
 import { WITNESS_OFF } from '@/features/capsules/lib/tooltip-copy'
@@ -89,7 +92,7 @@ describe('buildSetupSteps — ledger-ux-from-the-user §6, three steps in value 
   })
 
   it('step 1 flips to "witnessed" ONLY once a witness actually holds a checkpoint, and drops its explanatory body', () => {
-    const steps = buildSetupSteps({ checkpoint_count: 3, witnesses: [{}] }, null)
+    const steps = buildSetupSteps({ checkpoint_count: 3, witnesses: [{ checked: true }] }, null)
     expect(steps[0].done).toBe(true)
     expect(steps[0].status).toBe('witnessed')
     expect(steps[0].body).toBeNull()
@@ -104,7 +107,7 @@ describe('buildSetupSteps — ledger-ux-from-the-user §6, three steps in value 
     expect(buildSetupSteps(unwitnessed, null)[0].status).toContain('no witness')
     expect(buildRegistrationCopy(unwitnessed)?.witnessSummary).toContain('no witness')
 
-    const witnessed = { checkpoint_count: 5, witnesses: [{}] }
+    const witnessed = { checkpoint_count: 5, witnesses: [{ checked: true }] }
     expect(checkpointRegistration(witnessed).registered).toBe(true)
     expect(buildSetupSteps(witnessed, null)[0].status).toBe('witnessed')
     expect(buildRegistrationCopy(witnessed)?.witnessSummary).toMatch(/^Held by 1 witness/)
@@ -195,7 +198,7 @@ describe('checkpointRegistration — the witness state', () => {
     expect(state({ witness_configured: false })).toBe('off')
     expect(state({ witness_configured: true })).toBe('pending')
     expect(state({})).toBe('unknown')
-    expect(state({ witnesses: [{}], witness_configured: false })).toBe('latest')
+    expect(state({ witnesses: [{ checked: true }], witness_configured: false })).toBe('latest')
     expect(witnessTileNote('off')).toBe(WITNESS_OFF)
     expect(witnessTileNote('pending')).not.toMatch(/off/)
     expect(witnessTileNote('latest')).toBeUndefined()
@@ -210,18 +213,59 @@ describe('buildRegistrationCopy — only renders once a checkpoint exists', () =
     expect(buildRegistrationCopy({ checkpoint_count: null })).toBeNull()
   })
 
-  it('renders "Held by N witnesses (M not operated by this node)"', () => {
+  it('renders "Held by N witnesses: <names> (M not operated by this node)"', () => {
     const copy = buildRegistrationCopy({
       checkpoint_count: 2,
-      witnesses: [{ operated_by_producer: true }, { operated_by_producer: false }, {}]
+      witnesses: [
+        { ts_url: 'https://a.example/log', operated_by_producer: true, checked: true },
+        { ts_url: 'https://b.example', operated_by_producer: false, checked: true },
+        { ts_url: 'https://c.example', checked: true }
+      ]
     })
     expect(copy).not.toBeNull()
-    expect(copy?.witnessSummary).toBe('Held by 3 witnesses (2 not operated by this node)')
+    expect(copy?.witnessSummary).toBe('Held by 3 witnesses: a.example, b.example, c.example (2 not operated by this node)')
+  })
+
+  it('a receipt that did not check is not counted, and never says "held"', () => {
+    const card = {
+      checkpoint_count: 2,
+      witness_configured: true,
+      witnesses: [{ ts_url: 'https://a.example', checked: false, check: 'the receipt does not verify' }]
+    }
+    expect(checkpointRegistration(card).registered).toBe(false)
+    expect(checkpointRegistration(card).witnessState).toBe('pending')
+    expect(buildRegistrationCopy(card)?.witnessSummary).not.toMatch(/Held by/)
+  })
+
+  it('lists every witness by name with what it holds', () => {
+    const rows = witnessRows({
+      witness_status: [
+        { name: 'a.example', url: 'https://a.example', state: 'latest', held_count: 3, checked_count: 3, key_source: 'configured' },
+        { name: 'b.example', url: 'https://b.example', state: 'pending', held_count: 0, checked_count: 0, problem: 'refused the connection' },
+        { name: 'c.example', url: 'https://c.example', state: 'unchecked', held_count: 1, checked_count: 0, problem: 'its key is not fetched yet' },
+        { name: 'd.example', url: 'https://d.example', state: 'earlier', held_count: 2, checked_count: 2, key_source: 'pinned_on_first_contact' }
+      ]
+    })
+    expect(rows.map((row) => [row.name, row.status, row.tone])).toEqual([
+      ['a.example', 'holds the latest checkpoint', 'good'],
+      ['b.example', 'none held yet', 'pending'],
+      ['c.example', '1 receipt not checked', 'bad'],
+      ['d.example', 'holds an earlier checkpoint', 'good']
+    ])
+    expect(rows[1].detail).toBe('refused the connection')
+    expect(rows[2].detail).toBe('its key is not fetched yet')
+    expect(rows.map((row) => row.key)).toEqual([
+      'key configured',
+      null,
+      null,
+      'key pinned on first contact, not configured'
+    ])
+    expect(witnessRows({})).toEqual([])
   })
 
   it('a witness with no operated_by_producer field counts toward M (errs independent-claim-is-wrong)', () => {
-    const copy = buildRegistrationCopy({ checkpoint_count: 1, witnesses: [{}] })
-    expect(copy?.witnessSummary).toBe('Held by 1 witness (1 not operated by this node)')
+    const copy = buildRegistrationCopy({ checkpoint_count: 1, witnesses: [{ ts_url: 'https://w.example', checked: true }] })
+    expect(copy?.witnessSummary).toBe('Held by 1 witness: w.example (1 not operated by this node)')
   })
 
   it('D1: an unwitnessed checkpoint reads "checkpointed locally", NEVER "Held by 0 witnesses"', () => {
@@ -245,7 +289,7 @@ describe('buildRegistrationCopy — only renders once a checkpoint exists', () =
   it('adds "witnessed no later than T" (local time) only when a witness holds the checkpoint; unwitnessed says "checkpointed no later than"', () => {
     const registered = buildRegistrationCopy({
       checkpoint_count: 1,
-      witnesses: [{}],
+      witnesses: [{ checked: true }],
       registered_no_later_than: '2026-09-10T00:00:00Z'
     })
     const local = formatExchangeTimestamp('2026-09-10T00:00:00Z')
@@ -391,7 +435,7 @@ describe('banned vocabulary — never "timestamped", never "registered", and "wi
       step.status,
       step.body ?? ''
     ]),
-    buildRegistrationCopy({ checkpoint_count: 1, witnesses: [{}] })?.witnessSummary ?? ''
+    buildRegistrationCopy({ checkpoint_count: 1, witnesses: [{ checked: true }] })?.witnessSummary ?? ''
   ]
 
   it('never renders "timestamped"', () => {
@@ -410,5 +454,20 @@ describe('banned vocabulary — never "timestamped", never "registered", and "wi
       buildRegistrationCopy(unwitnessed)?.registeredNoLaterThan ?? ''
     ]
     for (const text of local) expect(text.toLowerCase()).not.toMatch(/\bwitnessed\b/)
+  })
+})
+
+describe('the witness list says when saved changes are not in force yet', () => {
+  it('notes a restart only when the saved list differs from the one in use', () => {
+    expect(witnessRestartNote({ witness_restart_needed: true })).toMatch(/takes effect when mesh-llm restarts/)
+    expect(witnessRestartNote({ witness_restart_needed: false })).toBeNull()
+    expect(witnessRestartNote({})).toBeNull()
+  })
+})
+
+describe('configured witness key problems are shown', () => {
+  it('lists each problem string, and nothing without any', () => {
+    expect(witnessKeyProblems({ witness_key_problems: ['bad key'] })).toEqual(['bad key'])
+    expect(witnessKeyProblems({})).toEqual([])
   })
 })

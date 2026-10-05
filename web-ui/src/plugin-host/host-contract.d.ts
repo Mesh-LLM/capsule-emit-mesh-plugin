@@ -101,6 +101,42 @@ export type MeshPluginUiConfigMountContext = {
   readonly section: PluginWebUiConfigSection
 }
 
+/** A contribution: a small piece of this plugin's UI the console places in
+ *  one of its own views (mesh-llm 0.78+, "contribution slots"). */
+export type PluginWebUiContribution = {
+  readonly id: string
+  readonly slot: 'chat_message' | 'logs_request'
+  readonly label: string
+  readonly bundle_id: string
+  readonly entry_script: string
+}
+
+/** Host ids for one finished assistant chat message. Optional fields are
+ *  absent when the host does not have them. */
+export type MeshPluginUiChatMessageSubject = {
+  readonly slot: 'chat_message'
+  readonly messageId: string
+  readonly clientNonce?: string
+  readonly model?: string
+  readonly servedBy?: string
+}
+
+/** Host ids for one Logs request. */
+export type MeshPluginUiLogsRequestSubject = {
+  readonly slot: 'logs_request'
+  readonly requestId: string
+  readonly exchangeId?: string
+}
+
+export type MeshPluginUiContributionSubject = MeshPluginUiChatMessageSubject | MeshPluginUiLogsRequestSubject
+
+export type MeshPluginUiContributionMountContext = {
+  readonly element: HTMLElement
+  readonly host: MeshPluginUiHost
+  readonly contribution: PluginWebUiContribution
+  readonly subject: MeshPluginUiContributionSubject
+}
+
 export type MeshPluginUiRegistration = {
     readonly pages: Readonly<Record<string, (context: {
       readonly element: HTMLElement
@@ -112,6 +148,8 @@ export type MeshPluginUiRegistration = {
       readonly host: MeshPluginUiHost
       readonly section: PluginWebUiConfigSection
     }) => MeshPluginUiMountHandle | Promise<MeshPluginUiMountHandle>>>
+    readonly contributions?: Readonly<Record<string, (context: MeshPluginUiContributionMountContext) =>
+      MeshPluginUiMountHandle | Promise<MeshPluginUiMountHandle>>>
 }
 
 export type MeshPluginUiBundleModule = {

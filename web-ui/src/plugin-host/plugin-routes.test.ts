@@ -1,5 +1,5 @@
 // The page reaches data ONLY through the host's plugin-scoped fetch: every
-// request resolves under `/api/plugins/capsule-emit-mesh/`, never a
+// request resolves under `/api/plugins/capsules/`, never a
 // host-private route such as the fork's `/api/capsules/*`.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -37,7 +37,7 @@ describe('ledger client', () => {
   it('reads the wrapped ledger from the plugin route and skips a malformed entry', async () => {
     const spy = stubFetch({ records: [{ capsule_id: 'a' }, 'not-a-record', null, { capsule_id: 'b' }], node_pub_key_pem: 'PEM' })
     const ledger = await fetchCapsuleLedger()
-    expect(requestedUrls(spy)).toEqual(['/api/plugins/capsule-emit-mesh/http/ledger'])
+    expect(requestedUrls(spy)).toEqual(['/api/plugins/capsules/http/ledger'])
     expect(ledger).toEqual({ records: [{ capsule_id: 'a' }, { capsule_id: 'b' }], nodePubKeyPem: 'PEM' })
   })
 
@@ -52,7 +52,7 @@ describe('ledger client', () => {
     const spy = stubFetch({ signed_statement_b64: 'AQID' })
     await expect(fetchSignedStatement('cap/1')).resolves.toEqual(new Uint8Array([1, 2, 3]))
     expect(requestedUrls(spy)).toEqual([
-      '/api/plugins/capsule-emit-mesh/http/ledger/signed-statement?capsule_id=cap%2F1'
+      '/api/plugins/capsules/http/ledger/signed-statement?capsule_id=cap%2F1'
     ])
     stubFetch({ signed_statement_b64: null })
     await expect(fetchSignedStatement('cap-1')).resolves.toBeNull()
@@ -77,10 +77,10 @@ describe('pane client', () => {
     await fetchPaneCList({ limit: 50, afterSeq: 7 })
     await fetchPaneCDrilldown('digest:ab')
     expect(requestedUrls(spy)).toEqual([
-      '/api/plugins/capsule-emit-mesh/http/panes/pane-a',
-      '/api/plugins/capsule-emit-mesh/http/panes/pane-b',
-      '/api/plugins/capsule-emit-mesh/http/panes/pane-c?limit=50&after_seq=7',
-      '/api/plugins/capsule-emit-mesh/http/panes/pane-c?exchange_id=digest%3Aab'
+      '/api/plugins/capsules/http/panes/pane-a',
+      '/api/plugins/capsules/http/panes/pane-b',
+      '/api/plugins/capsules/http/panes/pane-c?limit=50&after_seq=7',
+      '/api/plugins/capsules/http/panes/pane-c?exchange_id=digest%3Aab'
     ])
   })
 
@@ -94,15 +94,15 @@ describe('pane client', () => {
 
 describe('plugin-scoped paths (the console host rules)', () => {
   it('encodes segments and keeps the query', () => {
-    expect(pluginScopedApiUrl('capsule-emit-mesh', 'panes/pane-c?limit=1')).toBe(
-      '/api/plugins/capsule-emit-mesh/panes/pane-c?limit=1'
+    expect(pluginScopedApiUrl('capsules', 'panes/pane-c?limit=1')).toBe(
+      '/api/plugins/capsules/panes/pane-c?limit=1'
     )
   })
 
   it.each(['../status', 'panes/./a', 'http://evil/x', 'panes#frag', 'a\\b', 'a\u0000b'])(
     'rejects %j',
     (path) => {
-      expect(() => pluginScopedApiUrl('capsule-emit-mesh', path)).toThrow(TypeError)
+      expect(() => pluginScopedApiUrl('capsules', path)).toThrow(TypeError)
     }
   )
 })

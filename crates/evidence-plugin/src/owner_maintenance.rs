@@ -24,7 +24,7 @@
 //!    running yet.
 //!
 //! Reached from the browser through the host's generic tool-call route
-//! (`POST /api/plugins/capsule-emit-mesh/tools/<operation>`), the same way
+//! (`POST /api/plugins/capsules/tools/<operation>`), the same way
 //! `mesh_evidence_request` is.
 
 use crate::capsule_emit::{CapsuleState, EmittedCapsule};
@@ -46,7 +46,7 @@ pub const START_NEW_HISTORY_OPERATION: &str = "evidence_start_new_history";
 /// Where this node's log id is kept once chosen (see [`resolve_log_id`]).
 const LOG_ID_FILE: &str = "log_id";
 /// The setting that names a node's log id instead of the default.
-pub const LOG_ID_SETTING: &str = "CAPSULE_EMIT_MESH_LOG_ID";
+pub const LOG_ID_SETTING: &str = "CAPSULES_LOG_ID";
 const PENDING_FILE: &str = "new-history.pending.json";
 const ARCHIVE_DIR: &str = "archive";
 
@@ -137,12 +137,13 @@ fn has_checkpoints(ledger_dir: &Path) -> bool {
 /// `<data_dir>/log_id`. Runs BEFORE `CapsuleState::open` and the checkpoint
 /// cadence, and applies a staged new history first.
 ///
-/// - `log_id_setting` (the `CAPSULE_EMIT_MESH_LOG_ID` setting) names the log
+/// - `log_id_setting` (the `CAPSULES_LOG_ID` setting) names the log
 ///   id instead of the default [`default_log_id`].
 /// - A recorded log id is kept as it is.
 /// - A ledger that already holds checkpoints but has no recorded log id was
-///   checkpointed under the plugin id, the default before log ids were
-///   node-unique. It keeps that id: re-keying a log with checkpoints would
+///   checkpointed under `old_shared_log_id`, the plugin's name at the time and
+///   the default before log ids were node-unique (`capsules`, even
+///   after the plugin was renamed). It keeps that id: re-keying a log with checkpoints would
 ///   break its checkpoint chain. The id is recorded and a warning names the
 ///   way to a node-unique id: start a new history.
 /// - A setting that differs from the log id of a log that already holds
@@ -151,6 +152,7 @@ fn has_checkpoints(ledger_dir: &Path) -> bool {
 pub fn resolve_log_id(
     data_dir: &Path,
     plugin_id: &str,
+    old_shared_log_id: &str,
     node_key_id: &str,
     log_id_setting: Option<&str>,
 ) -> anyhow::Result<String> {
@@ -162,7 +164,7 @@ pub fn resolve_log_id(
     let checkpointed = has_checkpoints(&data_dir.join("ledger"));
     let current = match recorded_log_id(data_dir) {
         Some(recorded) => recorded,
-        None if checkpointed => plugin_id.to_string(),
+        None if checkpointed => old_shared_log_id.to_string(),
         None => base.clone(),
     };
     let log_id = match setting {
@@ -179,7 +181,7 @@ pub fn resolve_log_id(
         }
         _ => current,
     };
-    if setting.is_none() && checkpointed && log_id == plugin_id {
+    if setting.is_none() && checkpointed && log_id == old_shared_log_id {
         tracing::warn!(
             log_id = %log_id,
             node_unique_log_id = %base,
@@ -454,6 +456,11 @@ impl Maintenance {
         json!({
             "records_path": self.ledger_dir().display().to_string(),
             "record_count": ids.len(),
+            // The ledger's last line was torn when it was opened (a write cut
+            // short) and was cut back to the last whole record.
+            "torn_write_cut_at": self.capsules.torn_write_cut_at(),
+            // Every such cut, kept across restarts.
+            "ledger_repairs": self.capsules.ledger_repairs(),
             "head": ids.last(),
             "log_id": self.log_id,
             "stored_text_count": stored_text_count(self.ledger_dir()),
@@ -462,6 +469,12 @@ impl Maintenance {
                 "closing_record_id": p.closing_record_id,
             })),
             "sharing": sharing_status(),
+            // Why mesh's config file is not being read as written, when it
+            // is not: the switches are then its last good values, or all off.
+            "config_problem": crate::settings::config_problem(),
+            // Sharing switches set to a value this plugin does not know (each
+            // read as off).
+            "setting_problems": crate::share_policy::setting_problems(),
             // Whether this plugin keeps exchange text it is handed
             // (`exchange_text`), and for how long: the page says so.
             "exchange_text": {
@@ -630,7 +643,9 @@ fn switch(env: &str, default: Option<&str>) -> Value {
         .ok()
         .filter(|v| !v.trim().is_empty())
     {
-        Some(value) => json!({ "value": value, "source": "set" }),
+        Some(value) => {
+            json!({ "value": value, "source": crate::settings::origin(env).unwrap_or("set") })
+        }
         None => json!({ "value": default, "source": "default" }),
     }
 }
@@ -638,7 +653,7 @@ fn switch(env: &str, default: Option<&str>) -> Value {
 /// A witness URL as the page may show it: scheme, host and path only. A
 /// user, password, query or fragment can carry a credential, so none of them
 /// leaves this process.
-fn without_credentials(url: &str) -> String {
+pub(crate) fn without_credentials(url: &str) -> String {
     let url = url.trim();
     let url = url.split(['?', '#']).next().unwrap_or(url);
     match url.split_once("://") {
@@ -657,7 +672,7 @@ fn without_credentials(url: &str) -> String {
 }
 
 fn witness_switch() -> Value {
-    let mut witness = switch("CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS", None);
+    let mut witness = switch("CAPSULES_CHECKPOINT_WITNESS_URLS", None);
     if let Some(value) = witness["value"].as_str() {
         let shown: Vec<String> = value
             .split(',')
@@ -671,9 +686,10 @@ fn witness_switch() -> Value {
 
 fn sharing_status() -> Value {
     json!({
-        "record_at_completion": switch(crate::share_policy::ENV_RECORD_AT_COMPLETION, Some("counterparty")),
-        "history_segments": switch("CAPSULE_EMIT_MESH_SHARE_HISTORY_SEGMENTS", Some("prospective")),
-        "adjudications": switch("CAPSULE_EMIT_MESH_SHARE_ADJUDICATIONS", Some("deliver_to_subjects")),
+        "record_at_completion": switch(crate::share_policy::ENV_RECORD_AT_COMPLETION, Some("off")),
+        "history_segments": switch("CAPSULES_SHARE_HISTORY_SEGMENTS", Some("prospective")),
+        "adjudications": switch("CAPSULES_SHARE_ADJUDICATIONS", Some("off")),
+        "adjudicate_differing_twins": switch(crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS, Some("off")),
         "witness": witness_switch(),
     })
 }
@@ -739,18 +755,18 @@ mod tests {
     fn the_default_log_id_is_node_unique_and_kept() {
         let a = temp_dir("log-id-a");
         let b = temp_dir("log-id-b");
-        let id_a = resolve_log_id(&a, "plugin", &key_id_of_node(&a), None).unwrap();
-        let id_b = resolve_log_id(&b, "plugin", &key_id_of_node(&b), None).unwrap();
+        let id_a = resolve_log_id(&a, "plugin", "plugin", &key_id_of_node(&a), None).unwrap();
+        let id_b = resolve_log_id(&b, "plugin", "plugin", &key_id_of_node(&b), None).unwrap();
         assert_ne!(id_a, id_b);
         assert_eq!(id_a, format!("plugin/{}", key_id_of_node(&a)));
         assert_eq!(recorded_log_id(&a).as_deref(), Some(id_a.as_str()));
         assert_eq!(
-            resolve_log_id(&a, "plugin", &key_id_of_node(&a), None).unwrap(),
+            resolve_log_id(&a, "plugin", "plugin", &key_id_of_node(&a), None).unwrap(),
             id_a
         );
         // A recorded id outlives a change of key.
         assert_eq!(
-            resolve_log_id(&a, "plugin", "other-key", None).unwrap(),
+            resolve_log_id(&a, "plugin", "plugin", "other-key", None).unwrap(),
             id_a
         );
         let _ = fs::remove_dir_all(&a);
@@ -764,42 +780,64 @@ mod tests {
         let dir = temp_dir("log-id-legacy");
         put_checkpoint(&dir, "plugin");
         assert_eq!(
-            resolve_log_id(&dir, "plugin", "k1", None).unwrap(),
+            resolve_log_id(&dir, "plugin", "plugin", "k1", None).unwrap(),
             "plugin"
         );
         assert_eq!(recorded_log_id(&dir).as_deref(), Some("plugin"));
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// The plugin was renamed after logs were checkpointed under its old name.
+    /// Such a log keeps the old name: the new plugin id never re-keys it.
+    #[test]
+    fn a_log_checkpointed_under_the_old_name_keeps_it_after_the_rename() {
+        let dir = temp_dir("log-id-renamed");
+        put_checkpoint(&dir, "capsule-emit-mesh");
+        assert_eq!(
+            resolve_log_id(&dir, "capsules", "capsule-emit-mesh", "k1", None).unwrap(),
+            "capsule-emit-mesh"
+        );
+        assert_eq!(recorded_log_id(&dir).as_deref(), Some("capsule-emit-mesh"));
+        // A fresh node takes the new name in its node-unique default.
+        let fresh = temp_dir("log-id-renamed-fresh");
+        assert_eq!(
+            resolve_log_id(&fresh, "capsules", "capsule-emit-mesh", "k1", None).unwrap(),
+            "capsules/k1"
+        );
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&fresh);
+    }
+
     #[test]
     fn the_setting_names_the_log_id_and_never_re_keys_a_checkpointed_log() {
         let fresh = temp_dir("log-id-setting");
         assert_eq!(
-            resolve_log_id(&fresh, "plugin", "k1", Some("my-node")).unwrap(),
+            resolve_log_id(&fresh, "plugin", "plugin", "k1", Some("my-node")).unwrap(),
             "my-node"
         );
         // Not checkpointed yet: a changed setting is taken.
         assert_eq!(
-            resolve_log_id(&fresh, "plugin", "k1", Some("my-node-2")).unwrap(),
+            resolve_log_id(&fresh, "plugin", "plugin", "k1", Some("my-node-2")).unwrap(),
             "my-node-2"
         );
         put_checkpoint(&fresh, "my-node-2");
         assert_eq!(
-            resolve_log_id(&fresh, "plugin", "k1", Some("my-node-2")).unwrap(),
+            resolve_log_id(&fresh, "plugin", "plugin", "k1", Some("my-node-2")).unwrap(),
             "my-node-2"
         );
-        let refused = resolve_log_id(&fresh, "plugin", "k1", Some("my-node-3")).unwrap_err();
+        let refused =
+            resolve_log_id(&fresh, "plugin", "plugin", "k1", Some("my-node-3")).unwrap_err();
         assert!(refused.to_string().contains("start a new log"));
         assert_eq!(recorded_log_id(&fresh).as_deref(), Some("my-node-2"));
         // Unset: the recorded id stays.
         assert_eq!(
-            resolve_log_id(&fresh, "plugin", "k1", None).unwrap(),
+            resolve_log_id(&fresh, "plugin", "plugin", "k1", None).unwrap(),
             "my-node-2"
         );
 
         let legacy = temp_dir("log-id-setting-legacy");
         put_checkpoint(&legacy, "plugin");
-        assert!(resolve_log_id(&legacy, "plugin", "k1", Some("my-node")).is_err());
+        assert!(resolve_log_id(&legacy, "plugin", "plugin", "k1", Some("my-node")).is_err());
         assert!(recorded_log_id(&legacy).is_none());
         let _ = fs::remove_dir_all(&fresh);
         let _ = fs::remove_dir_all(&legacy);
@@ -823,7 +861,8 @@ mod tests {
         drop(m);
         put_checkpoint(&dir, "node-under-test");
         let key_id = key_id_of_node(&dir);
-        let log_id = resolve_log_id(&dir, "node-under-test", &key_id, None).unwrap();
+        let log_id =
+            resolve_log_id(&dir, "node-under-test", "node-under-test", &key_id, None).unwrap();
         assert_eq!(log_id, "node-under-test");
         let state = Arc::new(CapsuleState::open(&dir, "node-under-test").unwrap());
         Maintenance::new(dir.clone(), state, log_id)
@@ -831,7 +870,8 @@ mod tests {
             .unwrap();
 
         // --- restart ---
-        let log_id = resolve_log_id(&dir, "node-under-test", &key_id, None).unwrap();
+        let log_id =
+            resolve_log_id(&dir, "node-under-test", "node-under-test", &key_id, None).unwrap();
         assert_eq!(log_id, format!("node-under-test/{key_id}/h2"));
         let state = CapsuleState::open(&dir, "node-under-test").unwrap();
         finish_pending_after_open(&dir, &state, &log_id).unwrap();

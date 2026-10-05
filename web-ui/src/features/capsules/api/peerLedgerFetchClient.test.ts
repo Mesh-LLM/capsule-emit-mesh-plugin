@@ -23,7 +23,7 @@ describe('fetchPeerLedgerCapsule', () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     const [url, init] = fetchSpy.mock.calls[0]
-    expect(String(url)).toBe('/api/plugins/capsule-emit-mesh/tools/mesh_ledger_fetch')
+    expect(String(url)).toBe('/api/plugins/capsules/tools/mesh_ledger_fetch')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body)).toEqual({ peer_id: 'peer-a', capsule_id: 'cap-1' })
   })

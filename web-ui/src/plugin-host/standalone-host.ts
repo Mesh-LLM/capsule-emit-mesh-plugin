@@ -9,7 +9,7 @@
 // request that works here is one the real host would also send.
 import type { MeshPluginUiHost } from '@/plugin-host/host-contract'
 
-export const PLUGIN_NAME = 'capsule-emit-mesh'
+export const PLUGIN_NAME = 'capsules'
 
 function hasControlCharacter(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {

@@ -280,7 +280,7 @@ digest = h_n,   frames = n
 - **No end-requester identity.** Stages are not told who the end requester is. A stage's
   counterparty is the coordinator.
 - **No per-slice weights digest,** because none exists (§2.8). `package_id` + layer range is
-  what the stage *claims* it loaded, with the same standing as row C4 in `TRUST-MODEL.md`
+  what the stage *claims* it loaded, with the same standing as row C4 in the threat model (`THREAT-MODEL.md`)
   §2.4. This record makes the claim signed and per-request. It does not make it verified.
 
 ### 4.4 Salt, and who it protects
@@ -512,7 +512,7 @@ earlier host ask has an answer. It asks the maintainers:
     compare digests.
   - The hop digest stays exact, because it compares bytes that were never recomputed.
 - **Identity.** A stage record is signed by the stage's key. Who operates that key has the
-  same standing as for any exchange record today (`TRUST-MODEL.md`).
+  same standing as for any exchange record today (the threat model (`THREAT-MODEL.md`)).
 - **Later: per-slice payment accounting** ("who is owed for which slice"). It depends on this
   record, because a slice nobody signed for cannot be accounted for. That design is out of
   scope here.
@@ -604,7 +604,7 @@ The decisions in §10 are built as recommended.
   that terminal event instead of sealing it. A terminal event that arrives first is sealed as an
   ordinary exchange, and the late stage-0 event is refused and counted. This goes to the host
   issue alongside Q-H1 to Q-H5.
-- **Deadline.** `CAPSULE_EMIT_MESH_SPLIT_STAGE_DEADLINE_MS`, 2000 ms by default, counted from
+- **Deadline.** `CAPSULES_SPLIT_STAGE_DEADLINE_MS`, 2000 ms by default, counted from
   stage 0's event and recorded in the receipt. A background tick seals released splits. The push
   to the requester waits for the next handler that has a host context, because pushing needs one.
 - **A received stage record is cited twice.** Its ordinary `counterparty_half` citing record is

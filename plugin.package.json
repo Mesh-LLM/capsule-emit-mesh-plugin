@@ -1,6 +1,6 @@
 {
   "config_schema": {
-    "plugin_name": "capsule-emit-mesh",
+    "plugin_name": "capsules",
     "schema_version": 1,
     "allow_unvalidated_config": false,
     "settings": [
@@ -15,11 +15,11 @@
           "allow_additional_properties": false
         },
         "required": false,
-        "default_json": "\"counterparty\"",
+        "default_json": "\"off\"",
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Push this node's own sealed record of a completed exchange to the counterparty (counterparty), or don't (off). With checkpointing on, the push also carries a signed checkpoint of this node's log and the record's inclusion proof -- the checkpoint reveals the log's total size (records across all peers) and its time, never any other record's content. Symmetric: a node with this off also does not receive the other side's push -- fetch-on-request still works either way.",
+        "description": "Push this node's own sealed record of a completed exchange to the counterparty (counterparty), or don't (off, the default). With checkpointing on, the push also carries a signed checkpoint of this node's log and the record's inclusion proof -- the checkpoint reveals the log's total size (records across all peers) and its time, never any other record's content. Symmetric: a node with this off also does not receive the other side's push -- fetch-on-request still works either way.",
         "presentation": {
           "label": "Record at completion",
           "category_id": "share",
@@ -45,7 +45,7 @@
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Who this node answers a chain-segment/record/correlation request from: past counterparties only, counterparties plus prospective ones (default), any peer, or nobody. A refusal is structural (not_authorized), never a score.",
+        "description": "Who this node answers a chain-segment/record/correlation request from: past counterparties only, counterparties plus prospective ones (default), any peer, or nobody. A refusal is structural (not_authorized): it says nothing about the peer.",
         "presentation": {
           "label": "History segments",
           "category_id": "share",
@@ -65,11 +65,11 @@
           "allow_additional_properties": false
         },
         "required": false,
-        "default_json": "\"deliver_to_subjects\"",
+        "default_json": "\"off\"",
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Deliver a sealed verdict to every node it judges (default), or don't. The subject acks or disputes on its own chain -- this is delivery, never a computed standing.",
+        "description": "Deliver a sealed verdict to every node it judges, or don't (off, the default). The subject acks or disputes on its own chain -- this is delivery, never a computed standing.",
         "presentation": {
           "label": "Adjudications",
           "category_id": "share",
@@ -81,16 +81,40 @@
       {
         "key": "witness",
         "value_schema": {
-          "kind": "url",
+          "kind": "array",
+          "items": {
+            "kind": "object",
+            "object_properties": [
+              {
+                "key": "endpoint",
+                "value_schema": {
+                  "kind": "url",
+                  "allow_additional_properties": false
+                },
+                "required": true,
+                "description": "The witness service's URL."
+              },
+              {
+                "key": "public_key",
+                "value_schema": {
+                  "kind": "string",
+                  "allow_additional_properties": false
+                },
+                "required": false,
+                "description": "The witness's Ed25519 public key in hex, as its operator publishes it. Leave empty to have the plugin fetch it from the witness once and keep it; the Evidence page then says the key was pinned on first contact, not configured."
+              }
+            ],
+            "allow_additional_properties": false
+          },
           "allow_additional_properties": false
         },
         "required": false,
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Witness service URL to checkpoint against. Empty is off (the default) -- no default witness URL, no network call without an operator-supplied one.",
+        "description": "Witness services to offer this node's checkpoints to: each one's URL, and its public key if you have it. Empty is off (the default): there is no default witness, and the plugin contacts none until you add one. The Evidence page shows what each witness holds. Takes effect when mesh-llm is restarted.",
         "presentation": {
-          "label": "Witness",
+          "label": "Witnesses",
           "category_id": "share",
           "category_label": "Sharing policy",
           "category_summary": "What this node shares, with whom, by default. Every default keys on relationship (counterparty in the window), never proximity or latency.",
@@ -108,16 +132,16 @@
           "allow_additional_properties": false
         },
         "required": false,
-        "default_json": "\"on\"",
+        "default_json": "\"off\"",
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Ask a referee when two twins of a pair the host marked answered the same request at temperature 0, on the same model and weights, and differ (on, the default), or never (off). At most one call per pair, never retried. A pair with no ruling reads \"Not adjudicated\" with the reason, and never counts against either twin.",
+        "description": "Ask a referee when two twins of a pair a client marked answered the same request at temperature 0, on the same model and weights, and differ (on), or never (off, the default). Asking sends the twins' request, including the prompt, and both twins' answers to the referee peer, which answers the request with its own inference; so only you turn this on. At most one call per pair, never retried. A pair with no ruling reads \"Not adjudicated\" with the reason, and never counts against either twin.",
         "presentation": {
           "label": "Ask a referee when twins differ",
           "category_id": "referee",
           "category_label": "Referee",
-          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; no figure about a peer is computed, and nothing is sent.",
+          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; no figure about a peer is computed. Off by default: asking a referee sends the twins' request, including the prompt, and both twins' answers to the referee peer.",
           "category_order": 0
         }
       },
@@ -137,7 +161,7 @@
           "label": "Bar window, days",
           "category_id": "referee",
           "category_label": "Referee",
-          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; no figure about a peer is computed, and nothing is sent.",
+          "category_summary": "An independent check of two twins that answered the same request differently. Eligibility is yes or no, from this node's own records; no figure about a peer is computed. Off by default: asking a referee sends the twins' request, including the prompt, and both twins' answers to the referee peer.",
           "category_order": 1
         }
       },
@@ -151,7 +175,7 @@
         "apply_mode": "static_on_load",
         "restart_scope": "none",
         "visibility": "user",
-        "description": "Stop routing to a peer after this many contradictions within the window below. Off when empty or 0 (the default). Only verdicts this node asked a referee for, and whose signature it checked, count, once per referee and pair of answers; with N of 2 or more, no single referee can reach N alone. When it fires, the host blocks the peer until you undo it, exactly like Stop routing, and the sealed record names this rule and cites the verdicts. Undo it the same way. No figure about a peer is computed, and nothing is sent.",
+        "description": "Stop routing to a peer after this many contradictions within the window below. Off when empty or 0 (the default). Only verdicts this node asked a referee for, and whose signature it checked, count, once per referee and pair of answers; with N of 2 or more, no single referee can reach N alone. When it fires, the plugin asks the host to stop routing to that peer until you undo it. The host does that only if you also set allow_peer_blocks = true for this plugin in mesh-llm's config; otherwise it refuses and nothing is blocked. The host records the block as this plugin's, and the plugin seals a record that names this rule and cites the verdicts. Undo it like any Stop routing. No figure about a peer is computed.",
         "presentation": {
           "label": "Stop routing after N contradictions",
           "category_id": "routing_rule",
@@ -188,6 +212,24 @@
         "id": "evidence",
         "label": "Evidence",
         "route": "evidence",
+        "bundle_id": "main",
+        "entry_script": "register-mesh-plugin-ui.js",
+        "placement": "primary",
+        "host_header": false
+      }
+    ],
+    "contributions": [
+      {
+        "id": "evidence-chat",
+        "slot": "chat_message",
+        "label": "Evidence",
+        "bundle_id": "main",
+        "entry_script": "register-mesh-plugin-ui.js"
+      },
+      {
+        "id": "evidence-logs",
+        "slot": "logs_request",
+        "label": "Evidence",
         "bundle_id": "main",
         "entry_script": "register-mesh-plugin-ui.js"
       }

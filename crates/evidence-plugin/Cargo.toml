@@ -1,13 +1,13 @@
 [package]
 name = "evidence-plugin"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 license = "Apache-2.0"
-description = "The capsule-emit-mesh mesh-llm plugin: a signed, hash-chained record of every exchange and the Evidence page."
+description = "The capsules mesh-llm plugin: a signed, hash-chained record of every exchange and the Evidence page."
 publish = false
 
 [[bin]]
-name = "capsule-emit-mesh"
+name = "capsules"
 path = "src/main.rs"
 
 [features]
@@ -43,7 +43,7 @@ mutant-referee-verdict-names-wrong-twin = []
 mutant-referee-hold-skips-asked-check = []
 
 [dependencies]
-mesh-llm-plugin = "0.77"
+mesh-llm-plugin = "0.78"
 tokio = { version = "1", features = ["full"] }
 axum = "0.7"
 serde = { version = "1", features = ["derive"] }
@@ -58,11 +58,15 @@ ed25519-dalek = "2"
 # COSE_Sign1 bytes for its JSON carrier.
 base64 = "0.22"
 tracing = "0.1"
+# mesh keeps the console's plugin settings in its config file and does not
+# pass them to the plugin; the plugin reads them there (`settings`).
+toml = "0.9"
 # Record times and the stop-routing rule's window (`routing_rule`).
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# The stop-routing rule asks the host's local operator API to block a peer
-# (`routing_rule`); the interop tests also drive the plugin's routes with it.
+# The referee's re-answer goes through the host's own OpenAI-compatible API
+# (`referee::live`, only when the operator turned the referee on); the interop
+# tests also drive the plugin's routes with it.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # The capsule producer: every record this plugin seals, its ledger,
 # checkpoints and offline verification come from the capsule-emit crate; the
@@ -70,13 +74,23 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # A pushed record's checks, `capsule_id` and producer signature are checked
 # with it too, and a bundle's inclusion proof with `cll`. Renamed because
 # this crate already has a `capsule_emit` module.
-# 0.0.4 carries `settlement` (draft-mih-agent-settlement-records-00 legs).
-capsule-emit-lib = { package = "capsule-emit", version = "0.0.4" }
+# 0.0.4 carries `settlement` (draft-mih-agent-settlement-records-00 legs);
+# 0.0.6 gives each witness its own client, dialled at the URL given (no
+# built-in service, no redirect followed).
+capsule-emit-lib = { package = "capsule-emit", version = "0.0.6" }
 cll = { package = "checkpointed-local-log", version = "0.2.1" }
 # Evidence requests are answered in-process (`evidence_answer`): parsing,
 # resolution, signed refusals and the artifact answer come from the protocol
 # crate (draft-mih-agent-evidence-request-00). 0.0.2 carries the answer path.
 capsule-emit-evidence-request = "0.0.2"
+# A witness's receipt for a checkpoint is checked offline before the page
+# counts it (`witness_status`). Not on crates.io: pinned to a public commit.
+# The witness's own record of this log (`witness_status`): one blocking GET,
+# no redirects, a capped body. Already in the tree through capsule-emit.
+ureq = { version = "2", features = ["json"] }
+# O_NOFOLLOW for the lock files (`data_dir`). Already in the tree.
+libc = "0.2"
+scitt-cose-receipt = { git = "https://github.com/action-state-group/scitt-cose", rev = "8833281c11d33e3c1e289cf74f11d25ee7f3c6dc" }
 
 [dev-dependencies]
 # The record-push parity run reads its own golden answers, which hold a record

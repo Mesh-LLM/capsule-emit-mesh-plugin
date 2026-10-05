@@ -264,8 +264,28 @@ fn mmr_leaf_count(mmr_size: u64) -> Option<u64> {
 /// checkpoint line when carried (`covered_leaf_count`/`leaf_count`), else
 /// inverted from the line's `mmr_size` (a NODE count) via `mmr_leaf_count`.
 fn read_checkpoint_card(ledger_dir: &Path) -> Value {
+    // The witnesses checkpoints actually go to: the list the cadence took at
+    // start. A setting saved since then applies at the next restart.
+    let (active, restart_needed) = crate::checkpoint_cadence::active_witness_urls();
+    let mut card = read_checkpoint_card_with(
+        ledger_dir,
+        &active,
+        &crate::checkpoint_cadence::active_witness_keys(),
+    );
+    card["witness_restart_needed"] = json!(restart_needed);
+    card["witness_key_problems"] = json!(crate::checkpoint_cadence::witness_keys_problems());
+    card
+}
+
+/// [`read_checkpoint_card`] for these configured witness URLs. A receipt
+/// counts only once `witness_status` has checked it.
+fn read_checkpoint_card_with(
+    ledger_dir: &Path,
+    configured: &[String],
+    configured_keys: &std::collections::BTreeMap<String, String>,
+) -> Value {
     let path = ledger_dir.join("checkpoints.jsonl");
-    let checkpoints: Vec<Value> = match std::fs::read_to_string(&path) {
+    let mut checkpoints: Vec<Value> = match std::fs::read_to_string(&path) {
         Ok(text) => text
             .lines()
             .map(str::trim)
@@ -274,10 +294,12 @@ fn read_checkpoint_card(ledger_dir: &Path) -> Value {
             .collect(),
         Err(_) => Vec::new(),
     };
+    let witness_status =
+        crate::witness_status::annotate(&mut checkpoints, configured, configured_keys, ledger_dir);
     let held = |cp: &Value| {
         cp.get("witnesses")
             .and_then(Value::as_array)
-            .is_some_and(|w| !w.is_empty())
+            .is_some_and(|w| w.iter().any(|r| r.get("checked") == Some(&json!(true))))
     };
     let mut card = json!({
         "checkpoint_count": checkpoints.len(),
@@ -285,6 +307,9 @@ fn read_checkpoint_card(ledger_dir: &Path) -> Value {
         // Checkpoints a witness holds, among all of them: the latest line can
         // be a cut no witness was offered yet while earlier ones are held.
         "witnessed_checkpoint_count": checkpoints.iter().filter(|cp| held(cp)).count(),
+        // Every configured witness, and every witness a receipt names: what
+        // it holds and whether its receipts check (`witness_status`).
+        "witness_status": witness_status,
     });
     if let Some(witnessed) = checkpoints.iter().rev().find(|cp| held(cp)) {
         card["latest_witnessed"] = json!({
@@ -881,6 +906,37 @@ fn poc_block(record: &Value) -> Option<&Value> {
     record.pointer("/model_attestation/compute_attestation/x-mesh-poc-v1")
 }
 
+/// This node's own sealed record of one exchange, found by the host's
+/// exchange id or by the client nonce the host forwarded: the Exchanges row
+/// key it is listed under (`exchange_key`, what `?focusExchangeKey=` takes),
+/// its record id and its role. The newest match wins. `found: false` when
+/// this node holds no record of it; nothing is guessed from timing.
+pub(crate) fn find_own_record(
+    records: &[Value],
+    exchange_id: Option<&str>,
+    client_nonce: Option<&str>,
+) -> Value {
+    let matches = |record: &&Value| {
+        let by_exchange = exchange_id.is_some_and(|id| record_exchange_id(record) == Some(id));
+        let by_nonce = client_nonce.is_some_and(|nonce| {
+            poc_block(record)
+                .and_then(|poc| poc.get("client_nonce"))
+                .and_then(Value::as_str)
+                == Some(nonce)
+        });
+        by_exchange || by_nonce
+    };
+    match records.iter().rev().find(matches) {
+        Some(record) => json!({
+            "found": true,
+            "exchange_key": exchange_key_for(record),
+            "capsule_id": record.get("capsule_id").cloned().unwrap_or(Value::Null),
+            "role": label_role(record),
+        }),
+        None => json!({ "found": false }),
+    }
+}
+
 /// `x-mesh-lifecycle-v1` block, `capsule_mesh_view._lifecycle_block`.
 fn lifecycle_block(record: &Value) -> Option<&Value> {
     record.pointer("/model_attestation/compute_attestation/x-mesh-lifecycle-v1")
@@ -987,7 +1043,7 @@ fn peer_fetch_join_key(record: &Value) -> Option<(&str, &str)> {
 /// -- not `absent` -- the moment a real peer-asserted join key exists: the
 /// peer half is KNOWN to be fetchable (`ledger-fetch/1`, piece 2's
 /// `mesh_ledger_fetch` plugin tool, already reachable at
-/// `POST /api/plugins/capsule-emit-mesh/tools/mesh_ledger_fetch`), only
+/// `POST /api/plugins/capsules/tools/mesh_ledger_fetch`), only
 /// unverified until the browser's own recompute actually runs one -- this
 /// route never fetches, verifies, or fabricates a verdict itself.
 fn theirs_cell(record: &Value) -> Value {
@@ -5726,9 +5782,14 @@ mod tests {
         // 4 leaves), NOT `checkpoint_count` (2). This is the field the chain strip
         // caption reads.
         assert_eq!(card["covered_leaf_count"], json!(4));
+        // The receipt is listed, but it is not a real one, so it does not
+        // count: nothing is witnessed until a receipt checks.
         assert_eq!(card["witnesses"].as_array().unwrap().len(), 1);
-        assert_eq!(card["witnessed_checkpoint_count"], json!(1));
-        assert_eq!(card["latest_witnessed"]["mmr_size"], json!(7));
+        assert_eq!(card["witnesses"][0]["checked"], json!(false));
+        assert_eq!(card["witnessed_checkpoint_count"], json!(0));
+        assert!(card.get("latest_witnessed").is_none());
+        // No witness is configured in this test, so it reads as removed.
+        assert_eq!(card["witness_status"][0]["state"], json!("removed"));
         assert_eq!(
             build_pane_a(&[], card)["card"]["checkpoint_count"],
             json!(2)
@@ -5740,22 +5801,31 @@ mod tests {
     /// checkpoint, and which, not only that the latest has none.
     #[test]
     fn the_card_counts_checkpoints_a_witness_holds_not_only_the_latest() {
+        use crate::witness_status::fixture;
         let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("witness-keys.json"), fixture::keys_json()).unwrap();
+        let mut latest = fixture::held_line();
+        latest["mmr_size"] = json!(7);
+        latest["witnesses"] = json!([]);
         std::fs::write(
             dir.path().join("checkpoints.jsonl"),
-            "{\"kind\":\"mmr_checkpoint\",\"mmr_size\":63,\"root\":\"aa\",\"timestamp\":\"2026-10-02T02:40:00.000Z\"}\n\
-             {\"kind\":\"mmr_checkpoint\",\"mmr_size\":127,\"root\":\"bb\",\"timestamp\":\"2026-10-02T02:41:00.000Z\",\"witnesses\":[{\"ts_url\":\"https://witness.example\"}]}\n\
-             {\"kind\":\"mmr_checkpoint\",\"mmr_size\":190,\"root\":\"cc\",\"timestamp\":\"2026-10-02T02:41:00.000Z\"}\n",
+            format!("{}\n{}\n", fixture::held_line(), latest),
         )
         .unwrap();
-        let card = read_checkpoint_card(dir.path());
+        let card = read_checkpoint_card_with(
+            dir.path(),
+            &[fixture::WITNESS.to_string()],
+            &Default::default(),
+        );
         assert_eq!(card["witnesses"], json!([]), "the latest is not held");
         assert_eq!(card["witnessed_checkpoint_count"], json!(1));
-        assert_eq!(card["latest_witnessed"]["mmr_size"], json!(127));
+        assert_eq!(card["latest_witnessed"]["mmr_size"], json!(3));
         assert_eq!(
             card["latest_witnessed"]["witnesses"][0]["ts_url"],
-            json!("https://witness.example")
+            json!(fixture::WITNESS)
         );
+        assert_eq!(card["witness_status"][0]["name"], json!("witness.example"));
+        assert_eq!(card["witness_status"][0]["state"], json!("earlier"));
 
         let none = tempfile::tempdir().unwrap();
         std::fs::write(

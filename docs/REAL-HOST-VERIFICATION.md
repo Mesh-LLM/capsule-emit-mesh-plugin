@@ -22,12 +22,12 @@ CONTRIBUTING.md, "Tier 2".
 export MESH_LLM_HOST_BIN=/path/to/mesh-llm
 
 cd crates/evidence-plugin
-cargo build --bin capsule-emit-mesh
+cargo build --bin capsules
 cargo test --test host_runtime_e2e -- --ignored --test-threads=1
 ```
 
 The admission endpoint these tests exercise is opt-in from 0.1.2: the tests set
-`CAPSULE_EMIT_MESH_BLOCKED_MODELS` themselves. A node with the variable unset,
+`CAPSULES_BLOCKED_MODELS` themselves. A node with the variable unset,
 empty, `none` or `off` registers no inference provider and no admission
 capability at all.
 

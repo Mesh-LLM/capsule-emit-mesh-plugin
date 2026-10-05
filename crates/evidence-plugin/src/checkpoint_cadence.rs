@@ -42,30 +42,158 @@ use std::time::{Duration, Instant};
 pub const PUSH_COALESCE_WINDOW: Duration = Duration::from_millis(100);
 
 /// On by default: the plugin runs its OWN checkpoint cadence unless the
-/// operator sets `CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE=off` to opt out (e.g.
+/// operator sets `CAPSULES_CHECKPOINT_CADENCE=off` to opt out (e.g.
 /// because a standalone process is already checkpointing this `ledger_dir`
-/// -- see the module doc's race note). Any other value, including
-/// unset, leaves it on.
-const ENV_ENABLE: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE";
+/// -- see the module doc's race note). Unset, empty, `on`, `1`, `true` or
+/// `yes` leaves it on; `off`, `0`, `false` or `no` turns it off; any other
+/// value is read as `off` and listed as a setting problem.
+pub(crate) const ENV_ENABLE: &str = "CAPSULES_CHECKPOINT_CADENCE";
 /// Age-clock override, seconds. Defaults to `CheckpointCadenceConfig`'s own
 /// 300s mesh default.
-const ENV_INTERVAL_SECONDS: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE_SECONDS";
+const ENV_INTERVAL_SECONDS: &str = "CAPSULES_CHECKPOINT_CADENCE_SECONDS";
 /// Entry-count cadence override. Defaults to 100 (upstream `capsule_emit`'s
 /// own default).
-const ENV_CADENCE_ENTRIES: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE_ENTRIES";
+const ENV_CADENCE_ENTRIES: &str = "CAPSULES_CHECKPOINT_CADENCE_ENTRIES";
 /// Comma-separated witness URLs to register checkpoints with. Anchoring is
 /// OPT-IN, always (this repo's posture) -- empty/unset means
 /// self-checkpointed only, no network.
-const ENV_WITNESS_URLS: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_WITNESS_URLS";
+const ENV_WITNESS_URLS: &str = "CAPSULES_CHECKPOINT_WITNESS_URLS";
+/// Each witness's public key, as the operator gives it: a JSON object from
+/// witness URL to its raw Ed25519 key in hex. A witness with no key here has
+/// its key fetched from it once and pinned (`witness_status`).
+const ENV_WITNESS_KEYS: &str = "CAPSULES_CHECKPOINT_WITNESS_KEYS";
 /// `checkpoint_pad_bucket`: pad every checkpoint's leaf count up to a
 /// multiple of this (Evidence Layer -00 §12.1). Defaults to
 /// `DEFAULT_PAD_BUCKET` (32); `0` turns padding off.
-const ENV_PAD_BUCKET: &str = "CAPSULE_EMIT_MESH_CHECKPOINT_PAD_BUCKET";
+const ENV_PAD_BUCKET: &str = "CAPSULES_CHECKPOINT_PAD_BUCKET";
 
 /// Whether a witness URL is configured: checkpoints are offered to a witness.
 /// The same setting [`spawn`] registers checkpoints with.
 pub fn witness_configured() -> bool {
-    !config_from_env().witness_urls.is_empty()
+    !witness_urls().is_empty()
+}
+
+/// The witness URLs the operator named, in order: none by default.
+pub fn witness_urls() -> Vec<String> {
+    config_from_env().witness_urls
+}
+
+/// The witness list from the setting's raw value: none when it is unset or
+/// holds no URL. A URL with a user, password, query or fragment is not used
+/// (any of them can carry a credential, and the URL is kept in receipts and
+/// shown on the page); it is logged instead.
+fn witness_urls_from(raw: Option<&str>) -> Vec<String> {
+    raw.unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter(|url| {
+            let credential_free = crate::owner_maintenance::without_credentials(url) == *url;
+            if !credential_free {
+                tracing::warn!(
+                    witness = %crate::owner_maintenance::without_credentials(url),
+                    "a witness URL with a user, password, query or fragment is not used; name the witness without them"
+                );
+            }
+            credential_free
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// The witness list the checkpoint cadence took when it started: the one it
+/// registers with until mesh-llm restarts.
+static ACTIVE_WITNESSES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+/// The witness keys (and what is wrong with them) taken at start, just after
+/// the list: two settings, read one after the other, both kept until restart.
+#[allow(clippy::type_complexity)]
+static ACTIVE_KEYS: std::sync::OnceLock<(std::collections::BTreeMap<String, String>, Vec<String>)> =
+    std::sync::OnceLock::new();
+
+/// The witness keys in force: those the cadence took at start, or the
+/// setting as it is before then.
+pub fn active_witness_keys() -> std::collections::BTreeMap<String, String> {
+    ACTIVE_KEYS
+        .get()
+        .map(|(keys, _)| keys.clone())
+        .unwrap_or_else(witness_keys)
+}
+
+/// The witnesses checkpoints actually go to, and whether the saved setting
+/// now names different ones (they take effect at the next restart). Before
+/// the cadence starts (or with it off), the setting as it is.
+pub fn active_witness_urls() -> (Vec<String>, bool) {
+    let saved = witness_urls();
+    match ACTIVE_WITNESSES.get() {
+        Some(active) => {
+            let differs = active
+                .iter()
+                .map(|u| crate::witness_status::normalize_url(u))
+                .collect::<Vec<_>>()
+                != saved
+                    .iter()
+                    .map(|u| crate::witness_status::normalize_url(u))
+                    .collect::<Vec<_>>();
+            (active.clone(), differs)
+        }
+        None => (saved, false),
+    }
+}
+
+/// The witness keys the operator gave, by witness URL (hex, lower-cased).
+/// A value that is not a 32-byte hex key is dropped with a warning, so that
+/// witness's receipts stay unchecked rather than checked under a guess.
+pub fn witness_keys() -> std::collections::BTreeMap<String, String> {
+    witness_keys_checked(crate::settings::var(ENV_WITNESS_KEYS).ok().as_deref()).0
+}
+
+/// What is wrong with the configured witness keys, for the page: with a
+/// key that is not used, its witness's key would be pinned on first contact
+/// (https only), so the operator should see it.
+pub fn witness_keys_problems() -> Vec<String> {
+    match ACTIVE_KEYS.get() {
+        Some((_, problems)) => problems.clone(),
+        None => witness_keys_checked(crate::settings::var(ENV_WITNESS_KEYS).ok().as_deref()).1,
+    }
+}
+
+#[cfg(test)]
+fn witness_keys_from(raw: Option<&str>) -> std::collections::BTreeMap<String, String> {
+    witness_keys_checked(raw).0
+}
+
+fn witness_keys_checked(
+    raw: Option<&str>,
+) -> (std::collections::BTreeMap<String, String>, Vec<String>) {
+    let Some(raw) = raw.map(str::trim).filter(|r| !r.is_empty()) else {
+        return Default::default();
+    };
+    let Ok(map) = serde_json::from_str::<std::collections::BTreeMap<String, String>>(raw) else {
+        let problem = format!(
+            "{ENV_WITNESS_KEYS} is not a JSON object of witness URL to key, so no witness key is configured"
+        );
+        tracing::warn!("{problem}");
+        return (Default::default(), vec![problem]);
+    };
+    let mut problems = Vec::new();
+    let keys = map
+        .into_iter()
+        .filter_map(|(url, key)| {
+            let key = key.trim().to_ascii_lowercase();
+            if key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()) {
+                Some((url.trim().to_string(), key))
+            } else {
+                let problem = format!(
+                    "the key configured for {} is not a 32-byte key in hex; it is not used",
+                    crate::witness_status::display_url(&url)
+                );
+                tracing::warn!("{problem}");
+                problems.push(problem);
+                None
+            }
+        })
+        .collect();
+    (keys, problems)
 }
 
 pub fn is_enabled() -> bool {
@@ -76,8 +204,17 @@ pub fn is_enabled() -> bool {
 /// `None` when unset) directly so the on-by-default / explicit-opt-out
 /// behavior is unit-testable without mutating process-global env state
 /// (`std::env::set_var` races across parallel `cargo test` threads).
+///
+/// Read as the sharing settings are: trimmed and in any case, empty is
+/// unset. Unset, `on`, `1`, `true` or `yes` keeps checkpoints on (the same
+/// words the referee switch takes); `off`, `0`, `false`, `no`, or a value
+/// that is none of these, turns them off, so a typo never keeps a configured
+/// witness contacted (the Evidence page lists the value it did not recognise).
 fn is_enabled_for(raw: Option<&str>) -> bool {
-    raw != Some("off")
+    matches!(
+        crate::share_policy::normalized(raw).as_deref(),
+        None | Some("on" | "1" | "true" | "yes")
+    )
 }
 
 fn config_from_env() -> CheckpointCadenceConfig {
@@ -97,14 +234,7 @@ fn config_from_env() -> CheckpointCadenceConfig {
             cfg.pad_bucket = n;
         }
     }
-    if let Ok(v) = crate::settings::var(ENV_WITNESS_URLS) {
-        cfg.witness_urls = v
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect();
-    }
+    cfg.witness_urls = witness_urls_from(crate::settings::var(ENV_WITNESS_URLS).ok().as_deref());
     cfg
 }
 
@@ -179,7 +309,7 @@ impl CheckpointHandle {
         Self {
             state: Arc::new(Mutex::new(state)),
             signer,
-            anchor: Arc::new(AnchorClient::default()),
+            anchor: Arc::new(anchor_for()),
             latest_head: LatestHead::default(),
             last_push_cut: Arc::new(Mutex::new(None)),
         }
@@ -261,6 +391,13 @@ pub fn spawn(
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<CheckpointHandle> {
     let cfg = config_from_env();
+    let witness_urls = cfg.witness_urls.clone();
+    let _ = ACTIVE_WITNESSES.set(witness_urls.clone());
+    let _ = ACTIVE_KEYS.set(witness_keys_checked(
+        crate::settings::var(ENV_WITNESS_KEYS).ok().as_deref(),
+    ));
+    let log_id_for_witnesses = log_id.clone();
+    let keys_dir = ledger_dir.clone();
     let interval = Duration::from_secs(cfg.cadence_seconds);
     let pad_bucket = cfg.pad_bucket;
     let (mut state, report) = CheckpointState::load(&ledger_dir, log_id, cfg).map_err(|e| {
@@ -316,7 +453,21 @@ pub fn spawn(
 
         loop {
             tokio::select! {
-                _ = ticker.tick() => run("tick", |s, k, a| s.tick(k, a)),
+                _ = ticker.tick() => {
+                    run("tick", |s, k, a| s.tick(k, a));
+                    // Each named witness: its key fetched when none is given,
+                    // and one that lags asked again so its row can say why.
+                    // Only the named witnesses, and only when one is named.
+                    if !witness_urls.is_empty() {
+                        let (dir, urls) = (keys_dir.clone(), witness_urls.clone());
+                        let configured = active_witness_keys();
+                        let log_id = log_id_for_witnesses.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            crate::witness_status::refresh_witnesses(&dir, &urls, &configured, Some(&log_id))
+                        })
+                        .await;
+                    }
+                }
                 _ = shutdown.changed() => {
                     if *shutdown.borrow() {
                         break;
@@ -330,6 +481,14 @@ pub fn spawn(
     });
 
     Ok(handle)
+}
+
+/// The client capsule-emit's checkpoint calls take. Since capsule-emit
+/// fd74008 each named witness is reached through its own client, at its own
+/// URL, and this one is never called; it is given no address at all, so no
+/// default witness can ever be reached through it.
+fn anchor_for() -> AnchorClient {
+    AnchorClient::new(String::new())
 }
 
 fn report_checkpoint(
@@ -362,6 +521,67 @@ fn report_checkpoint(
 mod tests {
     use super::*;
 
+    /// Nothing set means no witness at all, so nothing is ever registered
+    /// anywhere and no witness is contacted (`witness_status` contacts only a
+    /// named one, and registration walks the named ones only).
+    #[test]
+    fn unset_means_no_witness_and_no_outbound() {
+        assert!(witness_urls_from(None).is_empty());
+        assert!(witness_urls_from(Some("")).is_empty());
+        assert!(witness_urls_from(Some(" , ,")).is_empty());
+        assert_eq!(
+            witness_urls_from(Some("https://a.example, https://b.example")),
+            ["https://a.example", "https://b.example"]
+        );
+        assert!(CheckpointCadenceConfig::default().witness_urls.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        crate::witness_status::refresh_witnesses(
+            dir.path(),
+            &witness_urls_from(None),
+            &Default::default(),
+            None,
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            0,
+            "nothing contacted, nothing written"
+        );
+    }
+
+    #[test]
+    fn a_witness_url_with_a_credential_or_a_query_is_not_used() {
+        assert!(witness_urls_from(Some("https://user:pw@w.example")).is_empty());
+        assert!(witness_urls_from(Some("https://w.example/?token=abc")).is_empty());
+        assert!(witness_urls_from(Some("https://w.example#frag")).is_empty());
+        assert_eq!(
+            witness_urls_from(Some("https://w.example/, https://x.example/log")),
+            ["https://w.example/", "https://x.example/log"]
+        );
+    }
+
+    #[test]
+    fn a_malformed_key_setting_is_a_problem_to_show() {
+        let (keys, problems) = witness_keys_checked(Some("not json"));
+        assert!(keys.is_empty());
+        assert!(problems[0].contains("not a JSON object"));
+        let (keys, problems) = witness_keys_checked(Some(r#"{"https://w.example": "short"}"#));
+        assert!(keys.is_empty());
+        assert!(problems[0].contains("w.example"));
+        assert!(witness_keys_checked(None).1.is_empty());
+    }
+
+    #[test]
+    fn configured_witness_keys_are_hex_32_byte_keys_by_url() {
+        let k = "AB".repeat(32);
+        let keys = witness_keys_from(Some(&format!(
+            r#"{{"https://a.example": "{k}", "https://b.example": "short"}}"#
+        )));
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys["https://a.example"], "ab".repeat(32));
+        assert!(witness_keys_from(Some("not json")).is_empty());
+        assert!(witness_keys_from(None).is_empty());
+    }
+
     #[test]
     fn on_by_default_when_unset() {
         assert!(is_enabled_for(None));
@@ -373,10 +593,16 @@ mod tests {
     }
 
     #[test]
-    fn any_other_value_stays_on() {
-        assert!(is_enabled_for(Some("on")));
-        assert!(is_enabled_for(Some("")));
-        assert!(is_enabled_for(Some("OFF"))); // case-sensitive: only lowercase "off" opts out
+    fn on_or_empty_stays_on_and_any_spelling_of_off_or_a_typo_is_off() {
+        for on in ["on", " On ", "1", "true", "TRUE", "yes", "Yes "] {
+            assert!(is_enabled_for(Some(on)), "{on:?}");
+        }
+        assert!(is_enabled_for(Some("")), "empty is unset");
+        for off in [
+            "OFF", "Off", "off ", " off", "0", "false", "no", "of", "disabled",
+        ] {
+            assert!(!is_enabled_for(Some(off)), "{off:?}");
+        }
     }
 
     #[test]

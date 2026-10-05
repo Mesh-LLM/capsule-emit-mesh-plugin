@@ -13,6 +13,7 @@
 //! | `panes/pane-a`, `panes/pane-b` | the pane JSON ([`crate::evidence_panes`]) |
 //! | `panes/pane-c[?exchange_id=]` | the Exchanges list, or one exchange's drilldown |
 //! | `peer-key?peer=` | `{announced_key_id}`: the key the operator says that peer signs with, or null |
+//! | `lookup?exchange_id=` or `?client_nonce=` | `{found, exchange_key, capsule_id, role}`: this node's own record of that exchange, for the console's chat and Logs contributions |
 //!
 //! The host turns query parameters into typed JSON (numbers stay numbers),
 //! so a capsule id that is not a string is refused rather than guessed back.
@@ -34,7 +35,7 @@ use crate::peer_keys::{announced_key_in, ENV_PEER_KEYS};
 /// The directory this node's log of requests made of it
 /// (`received_log.jsonl`, written by `received_log`) lives in: the drill's
 /// "Asked of you".
-pub const ENV_RECEIVED_LOG_DIR: &str = "CAPSULE_EMIT_MESH_RECEIVED_LOG_DIR";
+pub const ENV_RECEIVED_LOG_DIR: &str = "CAPSULES_RECEIVED_LOG_DIR";
 /// Where that log is read from when [`ENV_RECEIVED_LOG_DIR`] is unset:
 /// `<data dir>/received-log`.
 pub const DEFAULT_RECEIVED_LOG_SUBDIR: &str = "received-log";
@@ -48,6 +49,29 @@ pub struct NoArgs {}
 pub struct CapsuleIdArgs {
     /// The record's id: 64 lowercase hex.
     pub capsule_id: Value,
+}
+
+/// The host's ids for one exchange: either is enough.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct LookupArgs {
+    /// The host's exchange id (the Logs request's).
+    #[serde(default)]
+    pub exchange_id: Option<Value>,
+    /// The client nonce the host forwarded (the chat message's).
+    #[serde(default)]
+    pub client_nonce: Option<Value>,
+}
+
+/// A query value as text: the host types query values, so a nonce of digits
+/// arrives as a number.
+fn query_text(value: &Option<Value>) -> Result<Option<String>, PluginError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) if s.is_empty() => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s.clone())),
+        Some(Value::Number(n)) => Ok(Some(n.to_string())),
+        Some(_) => Err(PluginError::invalid_params("must be a string")),
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -289,13 +313,42 @@ pub fn with_routes(
         http::get("/peer-key")
             .binding_id("evidence_peer_key")
             .description(
-                "The key the operator announced for one peer (CAPSULE_EMIT_MESH_PEER_KEYS), or null.",
+                "The key the operator announced for one peer (CAPSULES_PEER_KEYS), or null.",
             )
             .input::<PeerKeyArgs>()
             .handle(move |args, _context| {
                 Box::pin(async move {
                     let registry = crate::settings::var(ENV_PEER_KEYS).ok();
                     peer_key_json(registry.as_deref(), &args.peer)
+                })
+            }),
+    );
+
+    let s = source.clone();
+    builder = builder.http_item(
+        http::get("/lookup")
+            .binding_id("evidence_lookup")
+            .description(
+                "This node's own record of one exchange, by the host's exchange id or client nonce.",
+            )
+            .input::<LookupArgs>()
+            .handle(move |args, _context| {
+                let s = s.clone();
+                Box::pin(async move {
+                    let exchange_id = query_text(&args.exchange_id)?;
+                    let client_nonce = query_text(&args.client_nonce)?;
+                    if exchange_id.is_none() && client_nonce.is_none() {
+                        return Err(PluginError::invalid_params("give exchange_id or client_nonce"));
+                    }
+                    blocking(move || {
+                        let records = read_capsule_records(&s.ledger_dir);
+                        Ok(crate::evidence_panes::find_own_record(
+                            &records,
+                            exchange_id.as_deref(),
+                            client_nonce.as_deref(),
+                        ))
+                    })
+                    .await
                 })
             }),
     );
@@ -444,9 +497,9 @@ mod tests {
         use mesh_llm_plugin::{plugin_server_info, Plugin, PluginMetadata};
         let dir = tempfile::tempdir().unwrap();
         let builder = DeclarativePluginBuilder::new(PluginMetadata::new(
-            "capsule-emit-mesh",
+            "capsules",
             "0.0.0",
-            plugin_server_info("capsule-emit-mesh", "0.0.0", "t", "t", None::<String>),
+            plugin_server_info("capsules", "0.0.0", "t", "t", None::<String>),
         ));
         let plugin = with_routes(
             builder,
@@ -474,6 +527,7 @@ mod tests {
                 "/ledger/disclosure",
                 "/ledger/signed-statement",
                 "/ledger/verdict",
+                "/lookup",
                 "/panes/pane-a",
                 "/panes/pane-b",
                 "/panes/pane-c",
@@ -583,5 +637,35 @@ mod tests {
             Some(data.path().join(DEFAULT_RECEIVED_LOG_SUBDIR)),
             "an empty env var is unset"
         );
+    }
+
+    #[test]
+    fn lookup_finds_this_nodes_record_by_exchange_id_or_nonce() {
+        let mut a = record(&"a".repeat(64));
+        a["model_attestation"]["compute_attestation"]["x-mesh-poc-v1"] = json!({
+            "role": "requested", "client_nonce": "n-1",
+            "serving_provenance": {"exchange_id": "ex-1"},
+        });
+        let records = vec![a];
+        let by_id = crate::evidence_panes::find_own_record(&records, Some("ex-1"), None);
+        assert_eq!(by_id["found"], json!(true));
+        assert_eq!(by_id["capsule_id"], json!("a".repeat(64)));
+        // The Evidence page's grouping key, which the link focuses: the
+        // request digest first, the host's exchange id only without one.
+        assert_eq!(
+            by_id["exchange_key"],
+            json!(format!("digest:{}", "a".repeat(64)))
+        );
+        let by_nonce = crate::evidence_panes::find_own_record(&records, None, Some("n-1"));
+        assert_eq!(by_nonce["capsule_id"], json!("a".repeat(64)));
+        assert_eq!(
+            crate::evidence_panes::find_own_record(&records, Some("ex-2"), Some("n-2")),
+            json!({"found": false})
+        );
+        assert_eq!(
+            query_text(&Some(json!(12345))).unwrap().as_deref(),
+            Some("12345")
+        );
+        assert_eq!(query_text(&Some(json!(""))).unwrap(), None);
     }
 }

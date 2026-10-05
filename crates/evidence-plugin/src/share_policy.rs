@@ -5,24 +5,24 @@
 //! Plugins with the host's own controls -- nothing here is a score, and
 //! nothing here ranks anyone.
 //!
-//! **Declarative only.** mesh-llm 0.76 gives a plugin its own declared
-//! `config_schema` but there is no live host-to-plugin config channel wired
-//! yet -- an operator sets the four `CAPSULE_EMIT_MESH_SHARE_*`
-//! / `CAPSULE_EMIT_MESH_WITNESS` env vars directly on the node today. This
-//! module's setting keys match those env var suffixes byte for byte
-//! (`share_record_at_completion` -> `CAPSULE_EMIT_MESH_SHARE_RECORD_AT_COMPLETION`,
-//! etc.) so wiring the host's resolved value into this process's env later
-//! is a direct 1:1 map, not a re-naming exercise. Adding this schema does
-//! not by itself flip any runtime behavior -- it only makes the four
-//! switches visible and editable in the console.
+//! **How a console value reaches the plugin.** mesh-llm saves what the
+//! operator sets in the console to its config file (this plugin's
+//! `[plugin.settings]`) and does not pass it to the plugin process (no env,
+//! no protocol message). `crate::settings::var` reads it there when the
+//! environment does not set the setting. Each key is its env var's suffix
+//! lower-cased (`share_record_at_completion` ->
+//! `CAPSULES_SHARE_RECORD_AT_COMPLETION`), except `witness`, which
+//! is `CAPSULES_CHECKPOINT_WITNESS_URLS`. The witness is read when
+//! the plugin starts: restart mesh-llm after changing it.
 //!
 //! The same schema also declares the opt-in stop-routing rule's two settings
 //! (`routing_rule`), under their own "Routing rule" category, on the same
-//! env-var convention: `CAPSULE_EMIT_MESH_STOP_ROUTING_AFTER_CONTRADICTIONS`
-//! (off unless set) and `CAPSULE_EMIT_MESH_STOP_ROUTING_WINDOW_DAYS`.
+//! env-var convention: `CAPSULES_STOP_ROUTING_AFTER_CONTRADICTIONS`
+//! (off unless set) and `CAPSULES_STOP_ROUTING_WINDOW_DAYS`.
 
 use mesh_llm_plugin::{
-    config_enum, config_integer, config_schema, config_setting, config_url, ManifestEntry,
+    config_array, config_enum, config_integer, config_object, config_object_property,
+    config_schema, config_setting, config_string, config_url, ManifestEntry,
 };
 
 pub const RECORD_AT_COMPLETION_KEY: &str = "share_record_at_completion";
@@ -30,13 +30,13 @@ pub const HISTORY_SEGMENTS_KEY: &str = "share_history_segments";
 pub const ADJUDICATIONS_KEY: &str = "share_adjudications";
 pub const WITNESS_KEY: &str = "witness";
 /// The opt-in stop-routing rule (`routing_rule`): N, and D in days. Same
-/// env-suffix convention (`CAPSULE_EMIT_MESH_STOP_ROUTING_*`).
+/// env-suffix convention (`CAPSULES_STOP_ROUTING_*`).
 pub const STOP_ROUTING_AFTER_KEY: &str = "stop_routing_after_contradictions";
 pub const STOP_ROUTING_WINDOW_KEY: &str = "stop_routing_window_days";
 /// The referee (`crate::referee`): whether a differing twin pair asks one
-/// (on unless set to off), and the bar window after a contradiction, in days.
-/// Same env-suffix convention (`CAPSULE_EMIT_MESH_ADJUDICATE_DIFFERING_TWINS`,
-/// `CAPSULE_EMIT_MESH_REFEREE_BAR_DAYS`).
+/// (off unless set to on), and the bar window after a contradiction, in days.
+/// Same env-suffix convention (`CAPSULES_ADJUDICATE_DIFFERING_TWINS`,
+/// `CAPSULES_REFEREE_BAR_DAYS`).
 pub const ADJUDICATE_DIFFERING_TWINS_KEY: &str = "adjudicate_differing_twins";
 pub const REFEREE_BAR_DAYS_KEY: &str = "referee_bar_days";
 
@@ -44,12 +44,12 @@ pub const REFEREE_BAR_DAYS_KEY: &str = "referee_bar_days";
 /// see the module doc's "declarative only" note: no live host->plugin
 /// config channel exists yet, so an operator sets this directly on the
 /// node.
-pub const ENV_RECORD_AT_COMPLETION: &str = "CAPSULE_EMIT_MESH_SHARE_RECORD_AT_COMPLETION";
+pub const ENV_RECORD_AT_COMPLETION: &str = "CAPSULES_SHARE_RECORD_AT_COMPLETION";
 
-/// This process's runtime `share_record_at_completion` value: `true` only
-/// when explicitly set to `"off"`; unset or any other value resolves to the
-/// documented default (`"counterparty"`, i.e. NOT off).
-/// Seam A1.
+/// This process's runtime `share_record_at_completion` value: off unless
+/// the operator set it to `"counterparty"`. Unset, `off` or any other value
+/// is the default, off: a node pushes nothing to a peer unless its operator
+/// turned this on.
 pub fn record_at_completion_is_off() -> bool {
     record_at_completion_is_off_for(
         crate::settings::var(ENV_RECORD_AT_COMPLETION)
@@ -59,35 +59,81 @@ pub fn record_at_completion_is_off() -> bool {
 }
 
 fn record_at_completion_is_off_for(raw: Option<&str>) -> bool {
-    raw == Some("off")
+    normalized(raw).as_deref() != Some("counterparty")
+}
+
+/// A switch's value as the operator meant it: trimmed and lower-cased;
+/// empty is no value.
+pub(crate) fn normalized(raw: Option<&str>) -> Option<String> {
+    raw.map(|r| r.trim().to_ascii_lowercase())
+        .filter(|r| !r.is_empty())
 }
 
 /// This process's own env var for `share_history_segments`.
-pub const ENV_HISTORY_SEGMENTS: &str = "CAPSULE_EMIT_MESH_SHARE_HISTORY_SEGMENTS";
+pub const ENV_HISTORY_SEGMENTS: &str = "CAPSULES_SHARE_HISTORY_SEGMENTS";
 
 /// Who may read one of this node's records back: `off`, `counterparties`,
-/// `prospective` or `peers`. Unset or unknown is the documented default,
-/// `prospective`.
+/// `prospective` or `peers`. Unset is the documented default, `prospective`;
+/// an unknown value is `off`, never wider.
 pub fn history_segments() -> &'static str {
     history_segments_for(crate::settings::var(ENV_HISTORY_SEGMENTS).ok().as_deref())
 }
 
 fn history_segments_for(raw: Option<&str>) -> &'static str {
-    match raw {
-        Some("off") => "off",
+    match normalized(raw).as_deref() {
+        None | Some("prospective") => "prospective",
         Some("counterparties") => "counterparties",
         Some("peers") => "peers",
-        _ => "prospective",
+        // "off", and anything this plugin does not know: never wider than
+        // the operator could have meant (`setting_problems` says so).
+        Some(_) => "off",
     }
 }
 
-/// This process's own env var for `share_adjudications`.
-pub const ENV_ADJUDICATIONS: &str = "CAPSULE_EMIT_MESH_SHARE_ADJUDICATIONS";
+/// The sharing switches set to a value this plugin does not know, each read
+/// as off: for the page, so a typo is seen rather than silently obeyed.
+pub fn setting_problems() -> Vec<String> {
+    let known: [(&str, &[&str]); 5] = [
+        (ENV_RECORD_AT_COMPLETION, &["counterparty", "off"]),
+        (
+            ENV_HISTORY_SEGMENTS,
+            &["counterparties", "prospective", "peers", "off"],
+        ),
+        (ENV_ADJUDICATIONS, &["deliver_to_subjects", "off"]),
+        (
+            crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS,
+            &["on", "off", "1", "0", "true", "false", "yes", "no"],
+        ),
+        (
+            crate::checkpoint_cadence::ENV_ENABLE,
+            &["on", "off", "1", "0", "true", "false", "yes", "no"],
+        ),
+    ];
+    known
+        .iter()
+        .filter_map(|(env, values)| {
+            let value = normalized(crate::settings::var(env).ok().as_deref())?;
+            (!values.contains(&value.as_str())).then(|| {
+                format!(
+                    "{env} is {value:?}, which is not one of {}; it is read as off",
+                    values.join(", ")
+                )
+            })
+        })
+        .collect()
+}
 
-/// Deliver a verdict to the nodes it judges: unless `share_adjudications` is
-/// explicitly `off` (the default is `deliver_to_subjects`).
+/// This process's own env var for `share_adjudications`.
+pub const ENV_ADJUDICATIONS: &str = "CAPSULES_SHARE_ADJUDICATIONS";
+
+/// Deliver a verdict to the nodes it judges: only when the operator set
+/// `share_adjudications` to `deliver_to_subjects`. The default is off.
 pub fn adjudications_delivered() -> bool {
-    crate::settings::var(ENV_ADJUDICATIONS).ok().as_deref() != Some("off")
+    adjudications_delivered_for(crate::settings::var(ENV_ADJUDICATIONS).ok().as_deref())
+}
+
+fn adjudications_delivered_for(raw: Option<&str>) -> bool {
+    normalized(raw).as_deref() == Some("deliver_to_subjects")
 }
 
 const CATEGORY_ID: &str = "share";
@@ -99,7 +145,8 @@ const REFEREE_CATEGORY_ID: &str = "referee";
 const REFEREE_CATEGORY_LABEL: &str = "Referee";
 const REFEREE_CATEGORY_SUMMARY: &str =
     "An independent check of two twins that answered the same request differently. \
-    Eligibility is yes or no, from this node's own records; no figure about a peer is computed, and nothing is sent.";
+    Eligibility is yes or no, from this node's own records; no figure about a peer is computed. Off by default: \
+    asking a referee sends the twins' request, including the prompt, and both twins' answers to the referee peer.";
 
 const RULE_CATEGORY_ID: &str = "routing_rule";
 const RULE_CATEGORY_LABEL: &str = "Routing rule";
@@ -113,10 +160,10 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
     config_schema(plugin_id)
         .setting(
             config_setting(RECORD_AT_COMPLETION_KEY, config_enum(["counterparty", "off"]))
-                .default_value(&"counterparty")
+                .default_value(&"off")
                 .description(
                     "Push this node's own sealed record of a completed exchange to the \
-                     counterparty (counterparty), or don't (off). With checkpointing on, the \
+                     counterparty (counterparty), or don't (off, the default). With checkpointing on, the \
                      push also carries a signed checkpoint of this node's log and the record's \
                      inclusion proof -- the checkpoint reveals the log's total size (records \
                      across all peers) and its time, never any other record's content. \
@@ -135,16 +182,16 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
             .description(
                 "Who this node answers a chain-segment/record/correlation request from: past \
                  counterparties only, counterparties plus prospective ones (default), any peer, \
-                 or nobody. A refusal is structural (not_authorized), never a score.",
+                 or nobody. A refusal is structural (not_authorized): it says nothing about the peer.",
             )
             .label("History segments")
             .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 1),
         )
         .setting(
             config_setting(ADJUDICATIONS_KEY, config_enum(["deliver_to_subjects", "off"]))
-                .default_value(&"deliver_to_subjects")
+                .default_value(&"off")
                 .description(
-                    "Deliver a sealed verdict to every node it judges (default), or don't. The \
+                    "Deliver a sealed verdict to every node it judges, or don't (off, the default). The \
                      subject acks or disputes on its own chain -- this is delivery, never a \
                      computed standing.",
                 )
@@ -152,21 +199,35 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
                 .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 2),
         )
         .setting(
-            config_setting(WITNESS_KEY, config_url())
-                .description(
-                    "Witness service URL to checkpoint against. Empty is off (the default) -- no \
-                     default witness URL, no network call without an operator-supplied one.",
-                )
-                .label("Witness")
+            config_setting(
+                WITNESS_KEY,
+                config_array(config_object([
+                    config_object_property("endpoint", config_url())
+                        .required(true)
+                        .description("The witness service's URL.")
+                        .into(),
+                    config_object_property("public_key", config_string())
+                        .description(
+                            "The witness's Ed25519 public key in hex, as its operator publishes it. Leave empty to have the plugin fetch it from the witness once and keep it; the Evidence page then says the key was pinned on first contact, not configured.",
+                        )
+                        .into(),
+                ])),
+            )
+            .description(
+                "Witness services to offer this node's checkpoints to: each one's URL, and its public key if you have it. Empty is off (the default): there is no default witness, and the plugin contacts none until you add one. The Evidence page shows what each witness holds. Takes effect when mesh-llm is restarted.",
+            )
+                .label("Witnesses")
                 .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 3),
         )
         .setting(
             config_setting(ADJUDICATE_DIFFERING_TWINS_KEY, config_enum(["on", "off"]))
-                .default_value(&"on")
+                .default_value(&"off")
                 .description(
-                    "Ask a referee when two twins of a pair the host marked answered the same \
-                     request at temperature 0, on the same model and weights, and differ (on, the \
-                     default), or never (off). At most one call per pair, never retried. A pair \
+                    "Ask a referee when two twins of a pair a client marked answered the same \
+                     request at temperature 0, on the same model and weights, and differ (on), or \
+                     never (off, the default). Asking sends the twins' request, including the \
+                     prompt, and both twins' answers to the referee peer, which answers the \
+                     request with its own inference; so only you turn this on. At most one call per pair, never retried. A pair \
                      with no ruling reads \"Not adjudicated\" with the reason, and never counts \
                      against either twin.",
                 )
@@ -190,9 +251,13 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
                     "Stop routing to a peer after this many contradictions within the window below. \
                      Off when empty or 0 (the default). Only verdicts this node asked a referee \
                      for, and whose signature it checked, count, once per referee and pair of \
-                     answers; with N of 2 or more, no single referee can reach N alone. When it fires, the host blocks the peer until you undo \
-                     it, exactly like Stop routing, and the sealed record names this rule and \
-                     cites the verdicts. Undo it the same way. No figure about a peer is computed, and nothing is sent.",
+                     answers; with N of 2 or more, no single referee can reach N alone. When it \
+                     fires, the plugin asks the host to stop routing to that peer until you undo \
+                     it. The host does that only if you also set allow_peer_blocks = true for \
+                     this plugin in mesh-llm's config; otherwise it refuses and nothing is \
+                     blocked. The host records the block as this plugin's, and the plugin seals a \
+                     record that names this rule and cites the verdicts. Undo it like any Stop \
+                     routing. No figure about a peer is computed.",
                 )
                 .label("Stop routing after N contradictions")
                 .category(RULE_CATEGORY_ID, RULE_CATEGORY_LABEL, RULE_CATEGORY_SUMMARY, 0),
@@ -221,8 +286,8 @@ mod tests {
 
     #[test]
     fn declares_all_four_switches_under_the_plugin_id() {
-        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
-        assert_eq!(schema.plugin_name, "capsule-emit-mesh");
+        let schema = as_config_schema(share_policy_config_schema("capsules"));
+        assert_eq!(schema.plugin_name, "capsules");
         let keys: Vec<&str> = schema.settings.iter().map(|s| s.key.as_str()).collect();
         assert_eq!(
             keys,
@@ -242,22 +307,23 @@ mod tests {
     #[test]
     fn the_referee_settings_are_the_env_names_the_referee_reads() {
         assert_eq!(
-            format!(
-                "CAPSULE_EMIT_MESH_{}",
-                ADJUDICATE_DIFFERING_TWINS_KEY.to_uppercase()
-            ),
+            format!("CAPSULES_{}", ADJUDICATE_DIFFERING_TWINS_KEY.to_uppercase()),
             crate::referee::request::ENV_ADJUDICATE_DIFFERING_TWINS
         );
         assert_eq!(
-            format!("CAPSULE_EMIT_MESH_{}", REFEREE_BAR_DAYS_KEY.to_uppercase()),
+            format!("CAPSULES_{}", REFEREE_BAR_DAYS_KEY.to_uppercase()),
             crate::referee::bar::ENV_REFEREE_BAR_DAYS
         );
     }
 
     #[test]
-    fn history_segments_defaults_to_prospective_and_reads_the_four_tiers() {
+    fn history_segments_defaults_to_prospective_reads_the_four_tiers_and_unknown_is_off() {
         assert_eq!(history_segments_for(None), "prospective");
-        assert_eq!(history_segments_for(Some("bogus")), "prospective");
+        assert_eq!(
+            history_segments_for(Some("bogus")),
+            "off",
+            "an unknown value never widens"
+        );
         for tier in ["off", "counterparties", "prospective", "peers"] {
             assert_eq!(history_segments_for(Some(tier)), tier);
         }
@@ -266,13 +332,13 @@ mod tests {
     #[test]
     fn setting_keys_match_the_python_env_var_suffix_convention() {
         // Each env var is the setting key with the shared
-        // CAPSULE_EMIT_MESH_ prefix -- this module's whole "no
+        // CAPSULES_ prefix -- this module's whole "no
         // re-naming exercise later" claim rests on this correspondence.
         let expected_env_suffix = [
             (RECORD_AT_COMPLETION_KEY, "SHARE_RECORD_AT_COMPLETION"),
             (HISTORY_SEGMENTS_KEY, "SHARE_HISTORY_SEGMENTS"),
             (ADJUDICATIONS_KEY, "SHARE_ADJUDICATIONS"),
-            (WITNESS_KEY, "WITNESS"),
+            (WITNESS_KEY, "CHECKPOINT_WITNESS_URLS"),
             (ADJUDICATE_DIFFERING_TWINS_KEY, "ADJUDICATE_DIFFERING_TWINS"),
             (REFEREE_BAR_DAYS_KEY, "REFEREE_BAR_DAYS"),
             (STOP_ROUTING_AFTER_KEY, "STOP_ROUTING_AFTER_CONTRADICTIONS"),
@@ -280,20 +346,20 @@ mod tests {
         ];
         for (key, suffix) in expected_env_suffix {
             assert_eq!(
-                key.to_uppercase(),
-                suffix,
-                "key {key} must upper-case to its env suffix"
+                crate::settings::console_key(&format!("CAPSULES_{suffix}")).as_deref(),
+                Some(key),
+                "env suffix {suffix} must map to the console key {key}"
             );
         }
     }
 
     #[test]
-    fn record_at_completion_and_adjudications_default_to_the_documented_on_state() {
-        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
+    fn nothing_that_reaches_a_peer_on_its_own_is_on_by_default() {
+        let schema = as_config_schema(share_policy_config_schema("capsules"));
         let by_key = |k: &str| schema.settings.iter().find(|s| s.key == k).unwrap();
         assert_eq!(
             by_key(RECORD_AT_COMPLETION_KEY).default_json.as_deref(),
-            Some("\"counterparty\"")
+            Some("\"off\"")
         );
         assert_eq!(
             by_key(HISTORY_SEGMENTS_KEY).default_json.as_deref(),
@@ -301,13 +367,25 @@ mod tests {
         );
         assert_eq!(
             by_key(ADJUDICATIONS_KEY).default_json.as_deref(),
-            Some("\"deliver_to_subjects\"")
+            Some("\"off\"")
         );
+        assert_eq!(
+            by_key(ADJUDICATE_DIFFERING_TWINS_KEY)
+                .default_json
+                .as_deref(),
+            Some("\"off\"")
+        );
+        // Answering a request for a record is unchanged.
+        assert_eq!(history_segments_for(None), "prospective");
+        assert!(!adjudications_delivered_for(None));
+        assert!(!crate::referee::request::adjudicate_differing_twins_from(
+            None
+        ));
     }
 
     #[test]
     fn the_stop_routing_rule_is_off_by_default() {
-        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
+        let schema = as_config_schema(share_policy_config_schema("capsules"));
         let after = schema
             .settings
             .iter()
@@ -315,17 +393,11 @@ mod tests {
             .unwrap();
         assert_eq!(after.default_json, None, "no N by default: the rule is off");
         assert_eq!(
-            format!(
-                "CAPSULE_EMIT_MESH_{}",
-                STOP_ROUTING_AFTER_KEY.to_uppercase()
-            ),
+            format!("CAPSULES_{}", STOP_ROUTING_AFTER_KEY.to_uppercase()),
             crate::routing_rule::ENV_AFTER
         );
         assert_eq!(
-            format!(
-                "CAPSULE_EMIT_MESH_{}",
-                STOP_ROUTING_WINDOW_KEY.to_uppercase()
-            ),
+            format!("CAPSULES_{}", STOP_ROUTING_WINDOW_KEY.to_uppercase()),
             crate::routing_rule::ENV_WINDOW_DAYS
         );
     }
@@ -334,7 +406,7 @@ mod tests {
     fn witness_has_no_default_url_and_is_not_required() {
         // Design note S1: "witness: off | <url> # default: off" -- off IS
         // the absence of a default, never a magic sentinel string.
-        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
+        let schema = as_config_schema(share_policy_config_schema("capsules"));
         let witness = schema
             .settings
             .iter()
@@ -342,27 +414,63 @@ mod tests {
             .unwrap();
         assert_eq!(witness.default_json, None);
         assert!(!witness.required);
+        // A list of witnesses, each an endpoint and, optionally, its key.
+        let value = witness.value_schema.as_ref().unwrap();
+        assert_eq!(value.kind, proto::PluginConfigValueKind::Array as i32);
+        let row = value.items.as_ref().unwrap();
+        assert_eq!(row.kind, proto::PluginConfigValueKind::Object as i32);
+        let props: Vec<_> = row
+            .object_properties
+            .iter()
+            .map(|p| (p.key.as_str(), p.required))
+            .collect();
+        assert_eq!(props, [("endpoint", true), ("public_key", false)]);
     }
 
     #[test]
     fn every_setting_is_optional_shipping_this_schema_flips_no_runtime_behavior() {
-        let schema = as_config_schema(share_policy_config_schema("capsule-emit-mesh"));
+        let schema = as_config_schema(share_policy_config_schema("capsules"));
         assert!(schema.settings.iter().all(|s| !s.required));
     }
 
     #[test]
-    fn record_at_completion_is_off_only_for_the_explicit_off_value() {
-        assert!(record_at_completion_is_off_for(Some("off")));
-    }
-
-    #[test]
-    fn record_at_completion_defaults_on_when_unset() {
-        assert!(!record_at_completion_is_off_for(None));
-    }
-
-    #[test]
-    fn record_at_completion_defaults_on_for_any_other_value() {
+    fn record_at_completion_is_on_only_for_counterparty() {
         assert!(!record_at_completion_is_off_for(Some("counterparty")));
-        assert!(!record_at_completion_is_off_for(Some("garbage")));
+        assert!(!record_at_completion_is_off_for(Some(" counterparty ")));
+        assert!(record_at_completion_is_off_for(None));
+        assert!(record_at_completion_is_off_for(Some("off")));
+        assert!(record_at_completion_is_off_for(Some("garbage")));
+    }
+
+    /// A typo, odd case, stray spaces or an empty value never widen who may
+    /// read records back.
+    #[test]
+    fn history_segments_never_widen_on_a_typo() {
+        assert_eq!(history_segments_for(None), "prospective");
+        assert_eq!(
+            history_segments_for(Some("")),
+            "prospective",
+            "empty is unset"
+        );
+        assert_eq!(history_segments_for(Some("Off ")), "off");
+        assert_eq!(
+            history_segments_for(Some(" COUNTERPARTIES")),
+            "counterparties"
+        );
+        assert_eq!(
+            history_segments_for(Some("counterparty")),
+            "off",
+            "unknown is off"
+        );
+        assert_eq!(history_segments_for(Some("peeers")), "off");
+        assert!(!record_at_completion_is_off_for(Some(" Counterparty")));
+    }
+
+    #[test]
+    fn verdict_delivery_is_on_only_for_deliver_to_subjects() {
+        assert!(adjudications_delivered_for(Some("deliver_to_subjects")));
+        assert!(!adjudications_delivered_for(None));
+        assert!(!adjudications_delivered_for(Some("off")));
+        assert!(!adjudications_delivered_for(Some("garbage")));
     }
 }

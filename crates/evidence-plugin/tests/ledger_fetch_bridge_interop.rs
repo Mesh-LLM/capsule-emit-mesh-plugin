@@ -19,7 +19,7 @@ use tokio::net::UnixListener;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-const PLUGIN_BIN: &str = env!("CARGO_BIN_EXE_capsule-emit-mesh");
+const PLUGIN_BIN: &str = env!("CARGO_BIN_EXE_capsules");
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 const LEDGER_FETCH_CHANNEL: &str = "ledger-fetch/1";
 /// Mirrors `ledger_fetch_bridge`'s private `LEDGER_FETCH_METADATA_TAG` --
@@ -46,9 +46,9 @@ impl Harness {
         let mut cmd = Command::new(PLUGIN_BIN);
         cmd.env("MESH_LLM_PLUGIN_ENDPOINT", &socket_path)
             .env("MESH_LLM_PLUGIN_TRANSPORT", "unix")
-            .env("CAPSULE_EMIT_MESH_BLOCKED_MODELS", "blocked-test-model")
-            .env("CAPSULE_EMIT_MESH_LEDGER_FETCH_TIMEOUT_MS", "1500")
-            .env("CAPSULE_EMIT_MESH_DATA_DIR", &data_dir)
+            .env("CAPSULES_BLOCKED_MODELS", "blocked-test-model")
+            .env("CAPSULES_LEDGER_FETCH_TIMEOUT_MS", "1500")
+            .env("CAPSULES_DATA_DIR", &data_dir)
             // Same `/tmp` override `mesh_evidence_bridge_interop.rs` uses --
             // keeps the derived local-listener socket path under
             // `sockaddr_un`'s ~104-byte `sun_path` limit on macOS.
@@ -56,7 +56,7 @@ impl Harness {
         for (key, value) in extra_env {
             cmd.env(key, value);
         }
-        let child = cmd.spawn().expect("spawn the capsule-emit-mesh plugin");
+        let child = cmd.spawn().expect("spawn the capsules plugin");
 
         let stream = timeout(
             TEST_TIMEOUT,
@@ -85,7 +85,7 @@ impl Harness {
             &mut self.stream,
             &proto::Envelope {
                 protocol_version: PROTOCOL_VERSION,
-                plugin_id: "capsule-emit-mesh".to_string(),
+                plugin_id: "capsules".to_string(),
                 request_id,
                 payload: Some(payload),
             },
@@ -106,6 +106,7 @@ impl Harness {
         let request_id = self
             .send(Payload::InitializeRequest(proto::InitializeRequest {
                 host_protocol_version: PROTOCOL_VERSION,
+                host_capabilities: Vec::new(),
                 host_version: "ledger-fetch-interop-test".to_string(),
                 host_info_json: "{}".to_string(),
                 mesh_visibility: proto::MeshVisibility::Private as i32,
@@ -238,7 +239,7 @@ impl Harness {
             &mut self.stream,
             &proto::Envelope {
                 protocol_version: PROTOCOL_VERSION,
-                plugin_id: "capsule-emit-mesh".to_string(),
+                plugin_id: "capsules".to_string(),
                 request_id: mesh_stream_envelope.request_id,
                 payload: Some(Payload::OpenMeshStreamResponse(mesh_stream_response)),
             },
@@ -329,8 +330,7 @@ async fn responder_declines_a_record_naming_no_other_side_by_default() {
 async fn responder_answers_a_real_sealed_capsule_over_the_real_wire() {
     // This capsule names no other side (the fake host sends no requester),
     // so only the `peers` tier serves it; the default declines it (below).
-    let mut harness =
-        Harness::spawn(&[("CAPSULE_EMIT_MESH_SHARE_HISTORY_SEGMENTS", "peers")]).await;
+    let mut harness = Harness::spawn(&[("CAPSULES_SHARE_HISTORY_SEGMENTS", "peers")]).await;
     let manifest = harness.initialize().await;
     let capsule_id = harness.seal_one_real_capsule(&manifest).await;
 
@@ -527,7 +527,7 @@ async fn requester_tool_call_round_trips_a_real_dialed_stream() {
 /// (E) Clean failure, never a hang: a peer that never declares the channel
 /// has its stream dropped by the real host with no reply -- simulated here
 /// by the fake host accepting the mesh-stream open but never dialing/writing
-/// anything back. Bounded by `CAPSULE_EMIT_MESH_LEDGER_FETCH_TIMEOUT_MS` (set
+/// anything back. Bounded by `CAPSULES_LEDGER_FETCH_TIMEOUT_MS` (set
 /// to 1500ms for this harness), so this test proves the bound, not merely
 /// that failure is possible.
 #[tokio::test]

@@ -22,7 +22,7 @@ import { setPluginHost } from '@/plugin-host/host'
 import { createStandaloneHost } from '@/plugin-host/standalone-host'
 import { CHAIN_BAR_INFO, INTEGRITY_TILE_INFO } from '@/features/capsules/lib/integrity-view'
 import { formatExchangeTimestamp } from '@/features/capsules/lib/local-time'
-import { HERO_DESCRIPTION, TRUST_MAP_URL } from '@/features/capsules/lib/tooltip-copy'
+import { HERO_DESCRIPTION, DOCS_URL } from '@/features/capsules/lib/tooltip-copy'
 
 // ---------------------------------------------------------------------------
 // Mock all network fetchers — tests must never hit the real network.
@@ -51,10 +51,10 @@ vi.mock('@/features/capsules/api/recordsClient', async (importOriginal) => {
   return {
     ...actual,
     fetchRecordsStatus: vi.fn().mockResolvedValue({
-      records_path: '/data/capsule-emit-mesh/ledger',
+      records_path: '/data/capsules/ledger',
       record_count: 5,
       head: null,
-      log_id: 'capsule-emit-mesh',
+      log_id: 'capsules',
       stored_text_count: 0,
       new_history_pending: null,
       sharing: {
@@ -162,9 +162,9 @@ describe('LedgerPageContent', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('shows the premise line, with "docs" linking the trust map', () => {
+  it('shows the premise line, with "docs" linking what the page can and cannot show', () => {
     render(<LedgerPageContent />, { wrapper: makeWrapper() })
-    expect(screen.getByRole('link', { name: 'docs' })).toHaveAttribute('href', TRUST_MAP_URL)
+    expect(screen.getByRole('link', { name: 'docs' })).toHaveAttribute('href', DOCS_URL)
     expect(screen.queryByText(/Everything here is checked on this machine/)).not.toBeInTheDocument()
 
     expect(
@@ -608,7 +608,7 @@ describe('LedgerPageContent', () => {
 
     await user.click(await screen.findByTestId('hero-your-records'))
     const facts = await screen.findByTestId('your-records-facts')
-    expect(await within(facts).findByText('/data/capsule-emit-mesh/ledger')).toBeInTheDocument()
+    expect(await within(facts).findByText('/data/capsules/ledger')).toBeInTheDocument()
     expect(facts).toHaveTextContent('5 records')
     expect(facts).toHaveTextContent(
       `Covers 3 records, made no later than ${formatExchangeTimestamp('2026-09-28T16:16:00.000Z')}.`
@@ -1336,7 +1336,14 @@ describe('LedgerPageContent — Part T6: Integrity section completion', () => {
       rows: [],
       card: {
         checkpoint_count: 4,
-        witnesses: [{ operated_by_producer: true }, { operated_by_producer: false }],
+        witnesses: [
+          { ts_url: 'https://a.example', operated_by_producer: true, checked: true },
+          { ts_url: 'https://b.example', operated_by_producer: false, checked: true }
+        ],
+        witness_status: [
+          { name: 'a.example', url: 'https://a.example', state: 'latest', held_count: 4, checked_count: 4 },
+          { name: 'c.example', url: 'https://c.example', state: 'pending', held_count: 0, checked_count: 0 }
+        ],
         registered_no_later_than: '2026-09-10'
       }
     })
@@ -1345,7 +1352,13 @@ describe('LedgerPageContent — Part T6: Integrity section completion', () => {
     render(<LedgerPageContent />, { wrapper: makeWrapper() })
     await user.click(screen.getByRole('tab', { name: /integrity/i }))
 
-    expect(await screen.findByText('Held by 2 witnesses (1 not operated by this node)')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Held by 2 witnesses: a.example, b.example (1 not operated by this node)')
+    ).toBeInTheDocument()
+    const witnessList = screen.getByTestId('witness-list')
+    expect(within(witnessList).getByText('holds the latest checkpoint')).toBeInTheDocument()
+    expect(within(witnessList).getByText('c.example')).toBeInTheDocument()
+    expect(within(witnessList).getByText('none held yet')).toBeInTheDocument()
     expect(screen.getByText(`witnessed no later than ${formatExchangeTimestamp('2026-09-10')}`)).toBeInTheDocument()
     // Step 1 no longer shows the "what it does not buy" sentence once done.
     expect(screen.queryByText(/does not make your records true/)).not.toBeInTheDocument()
@@ -1436,7 +1449,7 @@ describe('LedgerPageContent — Part T6: Integrity section completion', () => {
       card: {
         checkpoint_count: 2,
         continuity: 'unbroken',
-        witnesses: [{ operated_by_producer: false }],
+        witnesses: [{ operated_by_producer: false, checked: true }],
         registered_no_later_than: '2026-09-10'
       }
     })
@@ -1750,7 +1763,7 @@ describe('LedgerPageContent — real twin bracket + Twins-only filter', () => {
 
   it('brackets two adjacent rows sharing a real twin_bracket_id with a TWIN header, and renders the disclosure sentence', async () => {
     const { fetchPaneCList } = await import('@/features/capsules/api/sidecarClient')
-    vi.mocked(fetchPaneCList).mockResolvedValue({ ...twinBracketPayload(), twin_sample_rate_denominator: 50 })
+    vi.mocked(fetchPaneCList).mockResolvedValue(twinBracketPayload())
 
     const user = userEvent.setup()
     render(<LedgerPageContent />, { wrapper: makeWrapper() })
@@ -1760,7 +1773,7 @@ describe('LedgerPageContent — real twin bracket + Twins-only filter', () => {
     expect(screen.getByRole('group', { name: 'Exchange twin-exch-0' })).toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Exchange twin-exch-1' })).toBeInTheDocument()
     expect(
-      screen.getByText('This comparison ran automatically — 1 in 50 exchanges is sent to a second peer.')
+      screen.getByText('A client marked these two requests as one pair (x-mesh-twin-bracket).')
     ).toBeInTheDocument()
     // Never a computed verdict.
     expect(screen.getByText('not adjudicated')).toBeInTheDocument()
@@ -1780,23 +1793,9 @@ describe('LedgerPageContent — real twin bracket + Twins-only filter', () => {
     expect(screen.queryByText(/Side-by-side check/)).not.toBeInTheDocument()
   })
 
-  it('the disclosure sentence uses the LIVE configured rate from the payload, not a hardcoded 1 in 50', async () => {
-    const { fetchPaneCList } = await import('@/features/capsules/api/sidecarClient')
-    vi.mocked(fetchPaneCList).mockResolvedValue({ ...twinBracketPayload(), twin_sample_rate_denominator: 2 })
-
-    const user = userEvent.setup()
-    render(<LedgerPageContent />, { wrapper: makeWrapper() })
-    await user.click(screen.getByRole('tab', { name: /exchanges/i }))
-
-    expect(
-      await screen.findByText('This comparison ran automatically — 1 in 2 exchanges is sent to a second peer.')
-    ).toBeInTheDocument()
-    expect(screen.queryByText(/1 in 50/)).not.toBeInTheDocument()
-  })
-
   it('"Twins only" actually filters to bracket rows now that a real bracket id exists', async () => {
     const { fetchPaneCList } = await import('@/features/capsules/api/sidecarClient')
-    vi.mocked(fetchPaneCList).mockResolvedValue({ ...twinBracketPayload(), twin_sample_rate_denominator: 50 })
+    vi.mocked(fetchPaneCList).mockResolvedValue(twinBracketPayload())
 
     const user = userEvent.setup()
     render(<LedgerPageContent />, { wrapper: makeWrapper() })

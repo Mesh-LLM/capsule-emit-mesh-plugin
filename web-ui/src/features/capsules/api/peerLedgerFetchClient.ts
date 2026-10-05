@@ -1,7 +1,7 @@
 // piece 4: the browser-side call for piece 2's
 // `ledger-fetch/1` bridge, reached through the plugin's own tool route
 // (`tools/mesh_ledger_fetch`, which the console host serves at
-// `/api/plugins/capsule-emit-mesh/tools/mesh_ledger_fetch`) via the host's
+// `/api/plugins/capsules/tools/mesh_ledger_fetch`) via the host's
 // plugin-scoped fetch. The plugin's `mesh_ledger_fetch` tool answers with its
 // own tagged `LedgerFetchResponse` JSON on success
 // (`status: "found" | "not_found" | "not_authorized" | "archived" | "error"`) unchanged; a transport-level

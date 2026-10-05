@@ -1,4 +1,4 @@
-// capsule-emit-mesh's mesh-llm plugin web UI bundle.
+// The capsules plugin's mesh-llm plugin web UI bundle.
 //
 // The console imports this module from the installed package (manifest
 // `web_ui` block: bundle `main` rooted at `bundle/`, page `evidence`) and calls
@@ -10,14 +10,19 @@ import { createRoot } from 'react-dom/client'
 import evidenceCss from '@/styles/evidence.css?inline'
 import { EvidencePage, focusExchangeKeyFrom } from '@/features/capsules/pages/EvidencePage'
 import { setPluginHost } from '@/plugin-host/host'
+import { EvidenceChip } from '@/features/capsules/contributions/EvidenceChip'
 import type {
   MeshPluginUiBundleModule,
+  MeshPluginUiContributionMountContext,
   MeshPluginUiMountContext,
   MeshPluginUiMountHandle
 } from '@/plugin-host/host-contract'
 
 export const EVIDENCE_PAGE_ID = 'evidence'
-const STYLE_ELEMENT_ID = 'capsule-emit-mesh-evidence-styles'
+/** The manifest's contribution ids (`web_ui_manifest.rs`). */
+export const CHAT_CONTRIBUTION_ID = 'evidence-chat'
+export const LOGS_CONTRIBUTION_ID = 'evidence-logs'
+const STYLE_ELEMENT_ID = 'capsules-evidence-styles'
 
 function injectStyles(): HTMLStyleElement {
   const existing = document.getElementById(STYLE_ELEMENT_ID)
@@ -46,9 +51,27 @@ export function mountEvidencePage({ element, host }: MeshPluginUiMountContext): 
   }
 }
 
+/** One line under a chat answer or in a Logs request. It uses the host it is
+ *  handed, never the page's: the page need not be open. */
+export function mountEvidenceChip({ element, host, subject }: MeshPluginUiContributionMountContext): MeshPluginUiMountHandle {
+  const container = document.createElement('span')
+  element.replaceChildren(container)
+  const root = createRoot(container)
+  root.render(<EvidenceChip host={host} subject={subject} />)
+  return {
+    unmount() {
+      root.unmount()
+      container.remove()
+    }
+  }
+}
+
 const moduleRegistration: MeshPluginUiBundleModule = {
   registerMeshPluginUi() {
-    return { pages: { [EVIDENCE_PAGE_ID]: mountEvidencePage } }
+    return {
+      pages: { [EVIDENCE_PAGE_ID]: mountEvidencePage },
+      contributions: { [CHAT_CONTRIBUTION_ID]: mountEvidenceChip, [LOGS_CONTRIBUTION_ID]: mountEvidenceChip }
+    }
   }
 }
 

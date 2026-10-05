@@ -9,7 +9,7 @@ import {
 describe('the not-adjudicated reason lines', () => {
   it('a host with no twin bracket ids says so, word for word', () => {
     expect(notAdjudicatedLine({ state: 'not_adjudicated', reason: 'host_does_not_mark_twins' })).toBe(
-      'Not adjudicated: this host does not mark twins.'
+      'Not adjudicated: no client marked these as a pair.'
     )
   })
 

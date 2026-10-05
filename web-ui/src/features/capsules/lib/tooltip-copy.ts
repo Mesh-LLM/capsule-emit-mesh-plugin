@@ -35,15 +35,17 @@ export const OWNER_NOT_LINKED_PHRASE = 'not linked to an owner'
 export const SAMPLE_DATA_UNAVAILABLE = 'Not available on sample data.'
 
 /** The InfoBanner description under the tab title: what the page holds, and
- *  what can be shown about it. "docs" links the trust map (`TRUST_MAP_URL`). */
+ *  what can be shown about it. "docs" links what the page can and cannot
+ *  show (`DOCS_URL`). */
 export const HERO_DESCRIPTION_BEFORE_LINK =
   'Evidence: every exchange this node sealed at the moment it happened. A sealed record cannot change without it showing. Depending on what is turned on, it can also be shown to sit in a signed checkpoint, be witnessed by an outside log, and match the other side’s record. The chips on each row say which of these were checked here. See the '
 export const HERO_DESCRIPTION_LINK_TEXT = 'docs'
-export const HERO_DESCRIPTION_AFTER_LINK = ' for the full trust map.'
+export const HERO_DESCRIPTION_AFTER_LINK = ' for what this page can and cannot show.'
 export const HERO_DESCRIPTION = `${HERO_DESCRIPTION_BEFORE_LINK}${HERO_DESCRIPTION_LINK_TEXT}${HERO_DESCRIPTION_AFTER_LINK}`
 
-/** Where "docs" in the hero points: this plugin's trust model. */
-export const TRUST_MAP_URL = 'https://github.com/action-state-group/capsule-emit-mesh/blob/main/docs/TRUST-MODEL.md'
+/** Where "docs" in the hero points: this plugin's own account of what each
+ *  check proves and does not prove. */
+export const DOCS_URL = 'https://github.com/Mesh-LLM/capsules/blob/main/docs/VERIFICATION-CHAIN.md'
 
 /** Peers table column headers. */
 export const PEER_COLUMN_TOOLTIPS = {

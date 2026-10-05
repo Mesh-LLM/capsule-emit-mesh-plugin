@@ -12,7 +12,7 @@ This page says when a referee is asked, who can be asked, and which one is.
 
 Only when all of these hold:
 
-- the host marked the two exchanges as twins (a twin bracket id);
+- a client marked the two exchanges as one pair (the `x-mesh-twin-bracket` header, which the host passes on as a twin bracket id);
 - both twins answered the same request, at temperature 0;
 - both served the same model and the same weights, as their signed records say;
 - their answers differ. Any difference counts: there is no similarity
@@ -23,7 +23,7 @@ machines, so re-sealed records of the same exchange are the same pair. A call
 that was made and not answered has used the pair's one call; it is not
 retried, and another referee is not tried.
 
-The operator can turn this off (`adjudicate_differing_twins: off`).
+It is off by default; the operator turns it on (`adjudicate_differing_twins: on`).
 
 ## 2. Who is eligible
 
@@ -66,7 +66,7 @@ either twin:
 | Reason | The line |
 | --- | --- |
 | the check is off | Not adjudicated: the independent check is turned off on this node. |
-| no twin bracket id | Not adjudicated: this host does not mark twins. |
+| no twin bracket id | Not adjudicated: no client marked these as a pair. |
 | the answers agree | Not adjudicated: the two answers agree. |
 | sampled, another or unnamed model, other or unknown weights | Not adjudicated: not comparable, with why. |
 | nobody eligible | Not adjudicated: no eligible referee. |
@@ -99,18 +99,20 @@ and no further call follows on its own.
 ## 5. What this is not
 
 These are yes/no rules applied to this node's own verified records. Nothing is
-ordered by merit, weighted or combined into a number, and nothing is sent to
-other nodes. A verdict is a ruling on one pair of answers; it proves nothing
+ordered by merit, weighted or combined into a number, and choosing sends
+nothing to other nodes. Asking the chosen referee does: it receives the twins'
+request, including the prompt, and both twins' answers (off by default:
+`adjudicate_differing_twins`). A verdict is a ruling on one pair of answers; it proves nothing
 about a node's future answers.
 
 ## 6. Settings
 
 | Setting | Environment variable | Default |
 | --- | --- | --- |
-| `adjudicate_differing_twins` | `CAPSULE_EMIT_MESH_ADJUDICATE_DIFFERING_TWINS` | on |
-| `referee_bar_days` | `CAPSULE_EMIT_MESH_REFEREE_BAR_DAYS` | 30 |
-| `stop_routing_after_contradictions` | `CAPSULE_EMIT_MESH_STOP_ROUTING_AFTER_CONTRADICTIONS` | off |
-| `stop_routing_window_days` | `CAPSULE_EMIT_MESH_STOP_ROUTING_WINDOW_DAYS` | 30 |
+| `adjudicate_differing_twins` | `CAPSULES_ADJUDICATE_DIFFERING_TWINS` | off (`on`, `1`, `true` or `yes` turns it on) |
+| `referee_bar_days` | `CAPSULES_REFEREE_BAR_DAYS` | 30 |
+| `stop_routing_after_contradictions` | `CAPSULES_STOP_ROUTING_AFTER_CONTRADICTIONS` | off |
+| `stop_routing_window_days` | `CAPSULES_STOP_ROUTING_WINDOW_DAYS` | 30 |
 
 The last two are the opt-in stop-routing rule: with N set, this node stops
 routing to a peer after N referee-signed contradictions within D days, at most
@@ -119,7 +121,7 @@ Undo it the same way as a manual block; the verdicts that met the rule never
 count toward it again.
 
 The referee's re-answer goes through the host's OpenAI-compatible API
-(`CAPSULE_EMIT_MESH_OPENAI_API_URL`, default `http://127.0.0.1:9337`), routed to
+(`CAPSULES_OPENAI_API_URL`, default `http://127.0.0.1:9337`), routed to
 the chosen node.
 
 ## Where this is checked

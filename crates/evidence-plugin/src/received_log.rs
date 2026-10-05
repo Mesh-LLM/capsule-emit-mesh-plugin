@@ -6,7 +6,9 @@
 //! `{ts, path, requester_id, subject_kind, status, reason}` object per line,
 //! in the directory `evidence_routes::EvidenceSource::received_log_dir`
 //! resolves. **Opt-in, as before:** nothing is written unless that directory
-//! exists. Never the ledger directory: this log is not evidence.
+//! existed when the plugin started and this process holds a lock covering it
+//! (`data_dir::lock`); otherwise the log is off for the run. Never the ledger
+//! directory: this log is not evidence.
 //!
 //! **Best-effort.** An answer is decided before it is logged, and a logging
 //! failure never changes it.
@@ -68,11 +70,39 @@ impl Entry<'_> {
     }
 }
 
-/// Append `entry` to `<dir>/received_log.jsonl` when `dir` is given and
-/// exists and the log is under [`MAX_RECEIVED_LOG_BYTES`]. Failures are
-/// logged and swallowed.
+/// The one directory this run may write the log to, decided when the data
+/// directory is locked (`data_dir::lock`): `None` when the log is off for this
+/// run (no directory at start, or one this process could not lock).
+static WRITABLE: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+
+/// Set once, at start, by `data_dir::lock`. Not in unit tests, which take
+/// many locks in one process; they check [`writable_under`] directly.
+pub(crate) fn set_writable(dir: Option<std::path::PathBuf>) {
+    if !cfg!(test) {
+        let _ = WRITABLE.set(dir);
+    }
+}
+
+fn writable(dir: &Path) -> bool {
+    writable_under(WRITABLE.get(), dir)
+}
+
+/// Whether `dir` is the directory this run locked for the log (`decided`).
+/// A directory made after start, or any other, is never written. Undecided
+/// (no lock taken in this process: a unit test), any existing directory is.
+fn writable_under(decided: Option<&Option<std::path::PathBuf>>, dir: &Path) -> bool {
+    match decided {
+        Some(Some(locked)) => std::fs::canonicalize(dir).is_ok_and(|real| &real == locked),
+        Some(None) => false,
+        None => cfg!(test),
+    }
+}
+
+/// Append `entry` to `<dir>/received_log.jsonl` when `dir` is given, is the
+/// directory locked for the log at start, and the log is under
+/// [`MAX_RECEIVED_LOG_BYTES`]. Failures are logged and swallowed.
 pub fn append(dir: Option<&Path>, entry: &Entry<'_>) {
-    append_capped(dir, entry, MAX_RECEIVED_LOG_BYTES);
+    append_capped(dir.filter(|d| writable(d)), entry, MAX_RECEIVED_LOG_BYTES);
 }
 
 fn append_capped(dir: Option<&Path>, entry: &Entry<'_>, max_bytes: u64) {
@@ -106,6 +136,22 @@ fn append_capped(dir: Option<&Path>, entry: &Entry<'_>, max_bytes: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_directory_locked_at_start_is_written() {
+        let base = std::env::temp_dir().join(format!("received-writable-{}", std::process::id()));
+        let (locked, other) = (base.join("locked"), base.join("made-later"));
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let decided = Some(std::fs::canonicalize(&locked).unwrap());
+        assert!(writable_under(Some(&decided), &locked));
+        assert!(
+            !writable_under(Some(&decided), &other),
+            "a directory made after start"
+        );
+        assert!(!writable_under(Some(&None), &locked), "off for this run");
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     fn entry() -> Entry<'static> {
         Entry {

@@ -20,7 +20,7 @@ function status(overrides: Partial<RecordsStatus> = {}): RecordsStatus {
     records_path: '/data/ledger',
     record_count: 8,
     head: 'a'.repeat(64),
-    log_id: 'capsule-emit-mesh',
+    log_id: 'capsules',
     stored_text_count: 0,
     new_history_pending: null,
     sharing: {
@@ -144,6 +144,14 @@ describe('Local only', () => {
 
   it('holds only when every switch is off', () => {
     expect(nothingIsShared(allOff)).toBe(true)
+  })
+
+  it('does not hold with the referee on: it sends a prompt to a peer', () => {
+    const refereeOn = {
+      ...allOff,
+      sharing: { ...allOff.sharing, adjudicate_differing_twins: { value: 'on', source: 'set' } }
+    } as typeof allOff
+    expect(nothingIsShared(refereeOn)).toBe(false)
   })
 
   it('does not hold with the defaults, with any one switch on, or without a status', () => {

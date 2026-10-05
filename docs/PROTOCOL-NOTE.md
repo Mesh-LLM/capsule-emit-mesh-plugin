@@ -63,7 +63,7 @@ decision a plugin returns. This is a materially different shape from the
 exemplar's phase-based model, not a renaming exercise, and this repository's
 plugin is built that way deliberately (see its
 `blocked_models()` doc comment). From 0.1.2 that admission endpoint is
-opt-in: it exists only when `CAPSULE_EMIT_MESH_BLOCKED_MODELS` names models.
+opt-in: it exists only when `CAPSULES_BLOCKED_MODELS` names models.
 A node that names none registers no inference provider, declares no
 `admission_policy.v1` capability and serves no models; it seals records and
 serves the Evidence page, nothing else.

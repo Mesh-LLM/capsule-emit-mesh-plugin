@@ -26,7 +26,7 @@ import {
   TWIN_ANSWER_LABEL,
   twinAnswerState,
   twinComparisonParametersLine,
-  twinDisclosureSentence,
+  TWIN_PAIR_SENTENCE,
   twinResponseTexts,
   twinVerdict
 } from '@/features/capsules/lib/twin-bracket'
@@ -71,18 +71,14 @@ function twinVerdictLabel(verdict: NonNullable<ReturnType<typeof twinVerdict>['v
 export type TwinBracketProps = {
   bracketId: string
   rows: readonly ExchangeLedgerRow[]
-  /** The LIVE configured "1 in N" ambient-twin rate -- see
-   *  `twinDisclosureSentence`'s own doc for why this must never default to
-   *  a hardcoded constant inside this component either. */
-  twinSampleRateDenominator: number | null
   children: React.ReactNode
 }
 
-export function TwinBracket({ bracketId, rows, twinSampleRateDenominator, children }: TwinBracketProps) {
+export function TwinBracket({ bracketId, rows, children }: TwinBracketProps) {
   const [compareOpen, setCompareOpen] = useState(false)
   const [verdictOpen, setVerdictOpen] = useState(false)
   const parametersLine = twinComparisonParametersLine(rows)
-  const disclosure = twinDisclosureSentence(twinSampleRateDenominator)
+  const disclosure = TWIN_PAIR_SENTENCE
   const [textA, textB] = twinResponseTexts(rows)
   const canCompare = textA !== null && textB !== null
   const answer = twinAnswerState(rows)

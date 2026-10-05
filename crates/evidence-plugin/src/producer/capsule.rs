@@ -153,7 +153,7 @@ pub struct ServingProvenance {
     /// terminal envelope (`mesh-llm-host-runtime`'s
     /// `CapsuleIdProvenance::PeerAsserted`) -- an unauthenticated,
     /// relay-injectable value observed on the peer's raw response header
-    /// while ROUTING, never itself verified or countersigned here. `None`
+    /// while ROUTING, never itself verified or signed by anyone here. `None`
     /// on every `role: "served"` record (there is no peer half to name) and
     /// on a `requested` record where no value was observed.
     pub peer_capsule_id: Option<String>,
@@ -161,9 +161,9 @@ pub struct ServingProvenance {
     /// `CapsuleIdProvenance` (`"peer_asserted"` today; `"unknown"` for a
     /// value this mirror predates). `None` exactly when `peer_capsule_id`
     /// is `None`. Graded self-attested/peer-asserted, never promoted to a
-    /// verified or countersigned claim by this field's mere presence.
+    /// verified or signed claim by this field's mere presence.
     pub peer_capsule_id_provenance: Option<String>,
-    /// The id shared by BOTH halves of an ambient twin comparison, forwarded
+    /// The id shared by BOTH halves of a client-marked twin pair, forwarded
     /// verbatim from the terminal `openai.exchange.v1` envelope's own
     /// `twin_bracket_id` (host-minted; this plugin never mints or derives
     /// one). `None` -- and then ABSENT from the sealed capsule, never a
@@ -1485,17 +1485,51 @@ pub fn seal_adjudication_received_record(
     )
 }
 
-/// `chain.relation` of a referee's verdict record: it adjudicates the pair
-/// whose first half it chains to.
-pub const CHAIN_RELATION_ADJUDICATES: &str = "adjudicates";
+/// `chain.relation` of a referee's verdict record, chained to the pair's first
+/// half: the registered non-terminal `confirms` (it observes that half; the
+/// half's own state remains), as capsule-emit's adjudication writes. What
+/// marks the record as a verdict is its `compute_attestation` (the
+/// `adjudication` epistemic type and block), not the relation: see
+/// [`is_adjudication`].
+pub const CHAIN_RELATION_ADJUDICATES: &str = "confirms";
+/// The unregistered token earlier releases wrote (the AAC registry lists it as
+/// a legacy alias of `confirms`). Read by [`is_adjudication`], never written.
+pub const CHAIN_RELATION_ADJUDICATES_LEGACY: &str = "adjudicates";
+/// The registered `chain.relation` values (AAC REGISTRY section 6). Every
+/// relation this crate writes is one of them.
+pub const REGISTERED_CHAIN_RELATIONS: [&str; 5] = [
+    "follows",
+    "confirms",
+    "supersedes",
+    "epoch_opens",
+    "duplicates",
+];
 /// `compute_attestation.epistemic_type` of a verdict record: the referee's own
 /// judgment over the two halves.
 pub const EPISTEMIC_TYPE_ADJUDICATION: &str = "adjudication";
 /// The ruling block a referee's verdict record carries.
 pub const ADJUDICATION_BLOCK: &str = "adjudication";
 
+/// Whether `record` is a referee's verdict record: its `compute_attestation`
+/// carries the `adjudication` epistemic type and an `adjudication` block, or it
+/// is a record from an earlier release with the legacy `chain.relation ==
+/// "adjudicates"`. The relation alone no longer marks one: verdicts now write
+/// the registered `confirms`, which other records write too.
+pub fn is_adjudication(record: &Value) -> bool {
+    if record.pointer("/chain/relation").and_then(Value::as_str)
+        == Some(CHAIN_RELATION_ADJUDICATES_LEGACY)
+    {
+        return true;
+    }
+    let Some(ca) = record.pointer("/model_attestation/compute_attestation") else {
+        return false;
+    };
+    ca.get("epistemic_type").and_then(Value::as_str) == Some(EPISTEMIC_TYPE_ADJUDICATION)
+        && ca.get(ADJUDICATION_BLOCK).is_some_and(Value::is_object)
+}
+
 /// Seal a REFEREE's signed verdict: the ruling `block`, chained to the pair's
-/// first half (`adjudicates`), signed with the referee's own key. It is held
+/// first half (`confirms`), signed with the referee's own key. It is held
 /// beside the ledger and delivered as it is, never written into a chain;
 /// each chain cites it by its capsule id.
 pub fn seal_verdict_record(
@@ -1627,6 +1661,39 @@ pub fn seal_adjudication_ack_refused_record(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_verdict_record_writes_the_registered_confirms_and_reads_as_an_adjudication() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let mut block = Map::new();
+        block.insert("verdict".into(), json!("corroborated"));
+        let record = seal_verdict_record(block, &"a".repeat(64), &key).unwrap();
+        assert_eq!(record["chain"]["relation"], json!("confirms"));
+        assert!(is_adjudication(&record));
+    }
+
+    #[test]
+    fn is_adjudication_reads_legacy_records_and_not_a_plain_confirms() {
+        let legacy = json!({"chain": {"relation": "adjudicates"}});
+        assert!(is_adjudication(&legacy));
+        let plain = json!({"chain": {"relation": "confirms"},
+            "model_attestation": {"compute_attestation": {"epistemic_type": "producer_claim"}}});
+        assert!(!is_adjudication(&plain));
+        let no_block = json!({"chain": {"relation": "confirms"},
+            "model_attestation": {"compute_attestation": {"epistemic_type": "adjudication"}}});
+        assert!(!is_adjudication(&no_block));
+    }
+
+    #[test]
+    fn every_relation_this_crate_writes_is_registered() {
+        for relation in [CHAIN_RELATION_FOLLOWS, CHAIN_RELATION_ADJUDICATES] {
+            assert!(
+                REGISTERED_CHAIN_RELATIONS.contains(&relation),
+                "{relation} is not registered"
+            );
+        }
+        assert!(!REGISTERED_CHAIN_RELATIONS.contains(&CHAIN_RELATION_ADJUDICATES_LEGACY));
+    }
 
     #[test]
     fn committed_latency_rounds_up_to_the_bucket() {
@@ -1764,7 +1831,7 @@ mod tests {
 
     /// The inline `key_id` is the RAW 32-byte Ed25519 public key, hex (64
     /// chars) -- exactly `capsule_emit.seal()`'s `capsule["key_id"]` and what
-    /// the announced-key registry (`CAPSULE_EMIT_MESH_PEER_KEYS`) keys off. NOT this crate's own short
+    /// the announced-key registry (`CAPSULES_PEER_KEYS`) keys off. NOT this crate's own short
     /// SHA-256-based `keys::key_id` (16 chars).
     #[test]
     fn attached_key_id_is_the_raw_public_key_hex_not_the_short_key_id() {

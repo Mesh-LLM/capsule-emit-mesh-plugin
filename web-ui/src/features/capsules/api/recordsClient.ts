@@ -22,6 +22,17 @@ export type RecordsStatus = {
   stored_text_count: number
   new_history_pending: { requested_at: string; closing_record_id: string } | null
   sharing: Record<SharingSwitchKey, SharingSwitchState>
+  /** Set when the ledger's last line was torn (a write cut short) and was
+   *  cut back to the last whole record when the plugin opened it. */
+  torn_write_cut_at?: number | null
+  /** Every cut of a torn last line this log has had, kept across restarts. */
+  ledger_repairs?: Array<{ at: string; torn_write_cut_at: number }>
+  /** Why mesh's config file is not being read as written: the sharing
+   *  switches are then its last values that parsed, or all off. */
+  config_problem?: string | null
+  /** Sharing switches set to a value the plugin does not know; each is
+   *  read as off. */
+  setting_problems?: string[]
   /** Whether this plugin keeps the exchange text it is handed, and for how
    *  long. Absent from a plugin that predates it. */
   exchange_text?: { kept: boolean; retention_days: number }

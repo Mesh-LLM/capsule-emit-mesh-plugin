@@ -93,10 +93,26 @@ export function YourRecordsDialog({
             </p>
           ) : null}
 
+          {(status?.ledger_repairs ?? []).length > 0 ? (
+            <p className="text-[var(--color-bad-text)]" data-testid="torn-write" role="status">
+              {`This log's last line was cut short (a write that did not finish) ${status?.ledger_repairs?.length === 1 ? 'once' : `${status?.ledger_repairs?.length} times`}, most recently at ${status?.ledger_repairs?.[status.ledger_repairs.length - 1]?.at}; each time it was removed back to the last whole record, and every record before it still checks.`}
+            </p>
+          ) : null}
+
           <section aria-labelledby="what-you-share-title" className="flex flex-col gap-2">
             <h3 className="type-label text-fg-faint" id="what-you-share-title">
               What you share
             </h3>
+            {(status?.setting_problems ?? []).map((problem) => (
+              <p className="text-[var(--color-bad-text)]" data-testid="setting-problem" key={problem} role="status">
+                {problem}
+              </p>
+            ))}
+            {status?.config_problem ? (
+              <p className="text-[var(--color-bad-text)]" data-testid="config-problem" role="status">
+                {status.config_problem}
+              </p>
+            ) : null}
             <ul className="flex flex-col divide-y divide-border-soft" data-testid="what-you-share">
               {sharingRows(status).map((row) => (
                 <li className="flex flex-col gap-1 py-2" data-sharing-switch={row.key} key={row.key}>

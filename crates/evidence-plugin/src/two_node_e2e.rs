@@ -8,7 +8,7 @@
 //!
 //! ```sh
 //! E2E_REQUESTER_DIR=<copy> E2E_PROVIDER_DIR=<copy> E2E_EXCHANGES=<n> \
-//!   cargo test --locked --bin capsule-emit-mesh -- --ignored --test-threads=1 two_node_e2e::
+//!   cargo test --locked --bin capsules -- --ignored --test-threads=1 two_node_e2e::
 //! ```
 //!
 //! Every check calls the plugin's own code (the ledger reload, the receiver,
@@ -16,14 +16,15 @@
 //! mutation happens on a scratch copy; the collected directories are never
 //! changed.
 //!
-//! **Needs the host to name the other side.** A stock mesh-llm tells neither
-//! node who the other side was, so neither sends its record to the other and
-//! no exchange can be confirmed.
-//! [`each_side_holds_only_its_own_record_until_the_host_names_the_other_side`]
-//! asserts that honest one-sided state. When the pinned mesh-llm starts naming
-//! the other side (`requested_by_node_id`, `served_by_node_id`) it fails and
-//! says so: that is the moment to turn it into the confirmed / CLOSED
-//! assertions.
+//! **The host names the other side** (mesh-llm 0.78 and later): the
+//! provider's events carry `requested_by_node_id`, the requester's carry
+//! `served_by_node_id`, with matching digests. The script turns record push
+//! on at both ends and gives the requester the provider's key, so
+//! [`the_host_names_both_sides_and_the_requester_holds_the_providers_record`]
+//! checks the confirmed rows on the requester. The provider cannot hold the
+//! requester's record: the requester is a client node, whose id is new each
+//! time it starts, so no key can be configured for it; that test checks the
+//! provider refused it for exactly that reason.
 //!
 //! Ignored by default: they need the data directories of a real run.
 
@@ -442,74 +443,122 @@ fn attack_d_a_half_naming_other_weights_is_refused() {
     );
 }
 
-/// Expected-blocked until the host names the other side: a confirmed exchange
-/// (each side holding
-/// the other's record, the row CLOSED) cannot happen on a host that does not
-/// say who the other side was. This asserts the honest one-sided state:
+/// What a run on a host that names the other side holds:
 ///
-/// - the host named no counterparty: no `requested_by_node_id` on the
-///   provider's events, no `served_by_node_id` on the requester's;
-/// - so no record was sent either way: neither node holds a received half;
-/// - the Evidence page confirms nothing on either node;
-/// - a provider that lies consistently about its weights (every weights
-///   field changed) is not caught at receipt, because the requester's own
-///   half names no weights to compare with.
-///
-/// If the pinned host names the other side, this fails: replace it with the
-/// confirmed /
-/// CLOSED assertions.
+/// - the host named both sides: every served event on the provider names the
+///   requester (`requested_by_node_id`), every routed event on the requester
+///   names the provider (`served_by_node_id`), and the two sides' request and
+///   response digests are the same;
+/// - the requester holds the provider's record of every exchange, and its
+///   Evidence page shows each as confirmed, the digests verified;
+/// - the provider holds nothing from the requester: a client node's id is new
+///   each start, so no key names it, and every push from it was refused
+///   `signature_unverified`;
+/// - a provider that lies consistently about its weights is still not caught
+///   at receipt: the requester's own half names no weights to compare with.
 #[test]
 #[ignore = "needs the data directories of a real two-node run (scripts/e2e-two-node.sh)"]
-fn each_side_holds_only_its_own_record_until_the_host_names_the_other_side() {
+fn the_host_names_both_sides_and_the_requester_holds_the_providers_record() {
     let run = Run::from_env();
-    let blocked = "the pinned mesh-llm names the other side of an exchange: turn this test into the confirmed / CLOSED assertions";
-
-    let named = |events: &[Value], field: &str| {
-        events.iter().any(|event| {
-            event
-                .pointer(&format!("/serving_provenance/{field}"))
-                .and_then(Value::as_str)
-                .is_some_and(|id| !id.is_empty() && id != "unknown")
-        })
+    let exchanges = run.exchanges;
+    let (requester_id, provider_id) = (run.requester.peer_id(), run.provider.peer_id());
+    let terminal = |events: Vec<Value>, path: &str| -> Vec<Value> {
+        events
+            .into_iter()
+            .filter(|e| e["phase"] == json!("terminal") && e["dispatch_path"] == json!(path))
+            .collect()
     };
-    let provider_events = run.provider.lifecycle_events();
-    let requester_events = run.requester.lifecycle_events();
-    assert!(!provider_events.is_empty() && !requester_events.is_empty());
-    assert!(
-        !named(&provider_events, "requested_by_node_id"),
-        "{blocked}"
-    );
-    assert!(
-        !requester_events
+    let served = terminal(run.provider.lifecycle_events(), "raw_proxy");
+    let routed = terminal(run.requester.lifecycle_events(), "remote_mesh");
+    assert!(served.len() >= exchanges && routed.len() >= exchanges);
+    for event in &served {
+        assert_eq!(
+            event["serving_provenance"]["requested_by_node_id"],
+            json!(requester_id),
+            "the provider's event names the requester"
+        );
+    }
+    for event in &routed {
+        assert_eq!(
+            event["serving_provenance"]["served_by_node_id"],
+            json!(provider_id),
+            "the requester's event names the provider"
+        );
+    }
+    let digests = |events: &[Value]| -> std::collections::BTreeSet<(String, String)> {
+        events
             .iter()
-            .filter(|event| event["dispatch_path"] == json!("remote_mesh"))
-            .any(|event| event
-                .pointer("/serving_provenance/served_by_node_id")
-                .and_then(Value::as_str)
-                .is_some_and(|id| !id.is_empty() && id != "unknown")),
-        "{blocked}"
+            .map(|e| {
+                (
+                    e["request_digest"].as_str().unwrap_or_default().to_string(),
+                    e["response_digest"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        digests(&served),
+        digests(&routed),
+        "both sides saw the same exchanges"
     );
 
-    for (side, node) in [("requester", &run.requester), ("provider", &run.provider)] {
-        assert!(
-            read_jsonl(&node.ledger_dir().join("received-capsules.jsonl")).is_empty(),
-            "{side} holds a record from the other side: {blocked}"
+    let held = read_jsonl(&run.requester.ledger_dir().join("received-capsules.jsonl"));
+    assert_eq!(
+        held.len(),
+        exchanges,
+        "the requester holds the provider's record of each exchange"
+    );
+    let pane = crate::evidence_panes::build_pane_json("pane-b", &run.requester.ledger_dir(), None)
+        .expect("the requester's peers pane");
+    let confirmed: Vec<&Value> = pane["rows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|row| row["confirmed_siblings"].as_array().into_iter().flatten())
+        .collect();
+    assert_eq!(
+        confirmed.len(),
+        exchanges,
+        "each exchange is confirmed on the requester's page"
+    );
+    for sibling in confirmed {
+        assert_eq!(
+            sibling["digest_match"]["state"],
+            json!("verified"),
+            "{sibling}"
         );
-        let pane = crate::evidence_panes::build_pane_json("pane-b", &node.ledger_dir(), None)
-            .expect("the peers pane");
-        for row in pane["rows"].as_array().into_iter().flatten() {
-            assert_eq!(
-                row["confirmed_siblings"],
-                json!([]),
-                "{side}: a peer row confirms an exchange: {blocked}"
-            );
-        }
+    }
+
+    assert!(
+        read_jsonl(&run.provider.ledger_dir().join("received-capsules.jsonl")).is_empty(),
+        "the provider holds nothing from a client node"
+    );
+    let refused = read_jsonl(
+        &run.provider
+            .ledger_dir()
+            .join(crate::record_push_receive::REJECTED_PUSHES_FILENAME),
+    );
+    assert_eq!(
+        refused.len(),
+        exchanges,
+        "every push from the requester was refused"
+    );
+    for line in &refused {
+        assert_eq!(line["reason"], json!(REASON_SIGNATURE_UNVERIFIED), "{line}");
+        assert_eq!(
+            line["claimed_sender_peer_id"],
+            json!(requester_id),
+            "{line}"
+        );
     }
 
     for half in run.requester.halves("requested") {
         assert!(
             crate::record_push_receive::weights_claims(&half).is_empty(),
-            "the requester's own half names weights: a consistent liar can now be caught ({blocked})"
+            "the requester's own half names weights: a consistent liar can now be caught at receipt; check this note"
         );
     }
 }

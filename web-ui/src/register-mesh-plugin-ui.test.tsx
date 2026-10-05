@@ -1,6 +1,11 @@
 import { act } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { EVIDENCE_PAGE_ID, registerMeshPluginUi } from '@/register-mesh-plugin-ui'
+import {
+  CHAT_CONTRIBUTION_ID,
+  EVIDENCE_PAGE_ID,
+  LOGS_CONTRIBUTION_ID,
+  registerMeshPluginUi
+} from '@/register-mesh-plugin-ui'
 import { pluginHost, setPluginHost } from '@/plugin-host/host'
 import { createStandaloneHost } from '@/plugin-host/standalone-host'
 
@@ -14,7 +19,7 @@ vi.mock('@/features/capsules/pages/EvidencePage', async (importOriginal) => {
   }
 })
 
-const STYLE_ID = 'capsule-emit-mesh-evidence-styles'
+const STYLE_ID = 'capsules-evidence-styles'
 
 afterEach(() => {
   // Every other test runs with the setup file's standalone host mounted.
@@ -26,6 +31,7 @@ describe('registerMeshPluginUi', () => {
   it('registers exactly one page, `evidence`, and no config sections', async () => {
     const registration = await registerMeshPluginUi(createStandaloneHost())
     expect(Object.keys(registration.pages)).toEqual([EVIDENCE_PAGE_ID])
+    expect(Object.keys(registration.contributions ?? {})).toEqual([CHAT_CONTRIBUTION_ID, LOGS_CONTRIBUTION_ID])
     expect(registration.configSections).toBeUndefined()
   })
 
@@ -65,7 +71,7 @@ describe('registerMeshPluginUi', () => {
   })
 
   it('reads the per-row deep link from the page URL (`?focusExchangeKey=`)', async () => {
-    window.history.replaceState(null, '', '/plugins/capsule-emit-mesh/evidence?focusExchangeKey=exch-1')
+    window.history.replaceState(null, '', '/plugins/capsules/evidence?focusExchangeKey=exch-1')
     const host = createStandaloneHost()
     const element = document.createElement('div')
     const registration = await registerMeshPluginUi(host)

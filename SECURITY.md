@@ -5,7 +5,7 @@ Please report a suspected vulnerability privately, through this repository's
 reporting), not in a public issue or pull request.
 
 Useful to include: the plugin version (`mesh-llm plugins info
-capsule-emit-mesh`), the mesh-llm version, what you did, what you expected,
+capsules`), the mesh-llm version, what you did, what you expected,
 and what happened. A record, log line or checkpoint that shows the problem
 helps. Never include a node's private key.
 

@@ -17,6 +17,7 @@ mod ledger_fetch_bridge;
 mod lifecycle_channel;
 mod mesh_evidence_bridge;
 mod owner_maintenance;
+mod peer_blocks_seen;
 mod peer_keys;
 /// Not wired into `on_mesh_event` yet -- see the module doc for why
 /// (`mesh-llm-plugin = "0.75"` predates the `checkpoint` field this needs to
@@ -47,6 +48,7 @@ mod strict_json;
 mod two_node_e2e;
 mod verdict_counts;
 mod web_ui_manifest;
+mod witness_status;
 
 use crate::producer::capsule::TokenUsage;
 use axum::{
@@ -74,7 +76,11 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::TcpListener;
 
-const PLUGIN_ID: &str = "capsule-emit-mesh";
+const PLUGIN_ID: &str = "capsules";
+/// The plugin's name before it was renamed `capsules`, and the log id every
+/// node shared before log ids were node-unique. A log checkpointed under it
+/// keeps it (see `owner_maintenance::resolve_log_id`).
+const OLD_SHARED_LOG_ID: &str = "capsule-emit-mesh";
 const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
 const ENDPOINT_ID: &str = "admission-policy-openai";
 /// Declared only alongside the admission endpoint (see `plugin_builder`).
@@ -91,14 +97,14 @@ const ADMISSION_CAPABILITY: &str = "admission_policy.v1";
 /// for why that's a real architectural difference from the private spike).
 fn blocked_models() -> Vec<String> {
     blocked_models_for(
-        crate::settings::var("CAPSULE_EMIT_MESH_BLOCKED_MODELS")
+        crate::settings::var("CAPSULES_BLOCKED_MODELS")
             .ok()
             .as_deref(),
     )
 }
 
 /// The blocked model names this node advertises: only those the operator (or
-/// a test) lists in `CAPSULE_EMIT_MESH_BLOCKED_MODELS`. Unset, empty, `none`
+/// a test) lists in `CAPSULES_BLOCKED_MODELS`. Unset, empty, `none`
 /// or `off` advertises none. A real node must never offer a model that always
 /// answers 403: a client that takes the first listed model, or "Mesh
 /// automatic" routing, would pick it.
@@ -149,7 +155,7 @@ struct AppState {
     /// cadence task is enabled (`checkpoint_cadence::is_enabled`) --
     /// the checkpoint-head source's sending half reads this to feed
     /// `PeerAnnouncement.checkpoint`. On by default; `None` when the
-    /// operator has opted out (`CAPSULE_EMIT_MESH_CHECKPOINT_CADENCE=off`)
+    /// operator has opted out (`CAPSULES_CHECKPOINT_CADENCE=off`)
     /// or hasn't produced a checkpoint since startup.
     #[allow(dead_code)]
     checkpoint_head: Option<checkpoint_cadence::LatestHead>,
@@ -530,7 +536,7 @@ async fn push_at_completion_if_configured(
     {
         tracing::warn!(
             %peer_id,
-            "record-push at completion skipped: this node's own peer id is unknown (the host has not reported it on a mesh event yet and CAPSULE_EMIT_MESH_SELF_PEER_ID is unset)"
+            "record-push at completion skipped: this node's own peer id is unknown (the host has not reported it on a mesh event yet and CAPSULES_SELF_PEER_ID is unset)"
         );
         return;
     }
@@ -918,7 +924,7 @@ fn with_evidence_operations(
     builder = builder.mcp_item(
         mcp::tool(EVIDENCE_REQUEST_OPERATION)
             .description(
-                "Ask a mesh peer's capsule-emit-mesh plugin for evidence (a \
+                "Ask a mesh peer's capsules plugin for evidence (a \
                  draft-mih-agent-evidence-request-00 request map) over the plugin mesh stream. \
                  Returns the peer's own artifact or signed refusal unchanged, beside its \
                  verification against the peer's announced key (verify: false returns it alone).",
@@ -993,7 +999,7 @@ fn with_evidence_operations(
     builder = builder.mcp_item(
         mcp::tool(LEDGER_FETCH_OPERATION)
             .description(
-                "Ask a mesh peer's capsule-emit-mesh plugin for one of ITS sealed ledger entries by \
+                "Ask a mesh peer's capsules plugin for one of ITS sealed ledger entries by \
                  capsule_id -- the witness-level fetch half of the two-sided ledger. Returns the raw \
                  unsigned {capsule, signed_statement_b64, node_pub_key_pem} for independent recompute; \
                  never a second attestation.",
@@ -1086,12 +1092,12 @@ fn with_owner_maintenance(
 /// mesh channels and events, the Evidence page, its config and HTTP routes
 /// (added by the caller). With `admission` (the address of the
 /// OpenAI-compatible admission endpoint, present only when
-/// `CAPSULE_EMIT_MESH_BLOCKED_MODELS` names models) it also registers that
+/// `CAPSULES_BLOCKED_MODELS` names models) it also registers that
 /// endpoint as an inference provider and declares `admission_policy.v1`.
 fn plugin_builder(admission: Option<&str>) -> DeclarativePluginBuilder {
     let description = match admission {
-        None => "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page. It serves no models; its admission-policy test endpoint is opt-in (CAPSULE_EMIT_MESH_BLOCKED_MODELS).",
-        Some(_) => "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page. As configured (CAPSULE_EMIT_MESH_BLOCKED_MODELS), it also serves an OpenAI-compatible admission-policy endpoint that denies the listed models.",
+        None => "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page. It serves no models; its admission-policy test endpoint is opt-in (CAPSULES_BLOCKED_MODELS).",
+        Some(_) => "Seals a signed, hash-chained record of every exchange this node takes part in and serves the Evidence page. As configured (CAPSULES_BLOCKED_MODELS), it also serves an OpenAI-compatible admission-policy endpoint that denies the listed models.",
     };
     let builder = DeclarativePluginBuilder::new(PluginMetadata::new(
         PLUGIN_ID,
@@ -1111,6 +1117,9 @@ fn plugin_builder(admission: Option<&str>) -> DeclarativePluginBuilder {
     .mesh_item(mesh_channel(record_push_bridge::RECORD_PUSH_CHANNEL))
     .mesh_item(mesh_channel(LEDGER_FETCH_CHANNEL))
     .mesh_item(mesh_channel(settlement_channel::PAYMENT_LIFECYCLE_CHANNEL))
+    // The host's routing choices (blocks and unblocks), so a blocked peer is
+    // never chosen as a referee or asked to be blocked again.
+    .mesh_item(mesh_channel(peer_blocks_seen::ROUTING_CHOICE_CHANNEL))
     // Any mesh event carries this node's own peer id; the host sends these
     // kinds as a snapshot right after the plugin loads (see `self_peer`).
     .event_item(events::local_accepting())
@@ -1161,6 +1170,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Absolute, never the working directory's; see `data_dir`.
     let data_dir = data_dir::data_dir()?;
+    // One process per data directory, held until exit: before the key, the
+    // ledger or the checkpoint cadence opens anything in it.
+    let _data_dir_lock = data_dir::lock(&data_dir)?;
     tracing::info!(data_dir = %data_dir.display(), "plugin data directory");
     // The log id is node-unique by default (the node's signing key id), and a
     // new history the owner asked for last run starts HERE, before the
@@ -1169,6 +1181,7 @@ async fn main() -> anyhow::Result<()> {
     let log_id = owner_maintenance::resolve_log_id(
         &data_dir,
         PLUGIN_ID,
+        OLD_SHARED_LOG_ID,
         &node_key_id,
         settings::var(owner_maintenance::LOG_ID_SETTING)
             .ok()
@@ -1184,7 +1197,6 @@ async fn main() -> anyhow::Result<()> {
     );
     // The opt-in stop-routing rule (off unless its N is set) also runs once
     // at start, for verdicts recorded while it was off.
-    routing_rule::spawn_evaluate(capsules.clone());
     let lifecycle_events = Arc::new(ObservedLifecycleEvents::open(&data_dir)?);
     let self_peer = self_peer::SelfPeer::new(&data_dir);
     let self_peer_for_events = self_peer.clone();
@@ -1305,7 +1317,7 @@ async fn main() -> anyhow::Result<()> {
                             &[],
                         )
                         .await;
-                        // A twin of a pair the host marked: when both twins'
+                        // A twin of a pair a client marked: when both twins'
                         // halves are held here, the referee rules apply
                         // (`referee::request`). No bracket id, nothing runs.
                         if let (Some(bracket), Some(self_id)) =
@@ -1313,6 +1325,21 @@ async fn main() -> anyhow::Result<()> {
                         {
                             referee::live::consider(context, &capsules, bracket, &self_id, false).await;
                         }
+                    }
+                } else if message.channel == peer_blocks_seen::ROUTING_CHOICE_CHANNEL {
+                    // The host's own routing choices only; a frame relayed
+                    // from a peer is refused like a payment event.
+                    if settlement_channel::is_local_host_broadcast(
+                        &message.source_peer_id,
+                        &message.target_peer_id,
+                    ) {
+                        if let Err(error) =
+                            peer_blocks_seen::record(capsules.ledger_dir(), &message.body)
+                        {
+                            tracing::warn!(%error, "a routing choice from the host was not kept");
+                        }
+                    } else {
+                        tracing::warn!("refused routing.choice.v1 message not from the local host");
                     }
                 } else if message.channel == settlement_channel::PAYMENT_LIFECYCLE_CHANNEL
                     && !settlement_channel::is_local_host_broadcast(
@@ -1360,6 +1387,9 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
+                // The stop-routing rule, when it is on and a verdict landed:
+                // it asks the host through this handler's context.
+                routing_rule::evaluate_if_due(context, &capsules).await;
                 Ok(())
             })
         })
@@ -1380,15 +1410,19 @@ async fn main() -> anyhow::Result<()> {
                 // doc), so the single `on_open_stream` slot dispatches on
                 // `content_type`, the one field both carriers set to a
                 // distinct, stable value for exactly this purpose.
-                if request.content_type.as_deref() == Some(record_push_bridge::RECORD_PUSH_CONTENT_TYPE) {
-                    record_push_bridge::handle_open_stream(request, context, capsules, collector).await
+                let answered = if request.content_type.as_deref() == Some(record_push_bridge::RECORD_PUSH_CONTENT_TYPE) {
+                    record_push_bridge::handle_open_stream(request, context, capsules.clone(), collector).await
                 } else if ledger_fetch_bridge::is_ledger_fetch_request(&request) {
                     // See `ledger_fetch_bridge`'s module doc for why
                     // `metadata_json` is its dispatch key.
-                    ledger_fetch_bridge::handle_open_stream(request, context, capsules).await
+                    ledger_fetch_bridge::handle_open_stream(request, context, capsules.clone()).await
                 } else {
-                    mesh_evidence_bridge::handle_open_stream(request, context, capsules).await
-                }
+                    mesh_evidence_bridge::handle_open_stream(request, context, capsules.clone()).await
+                };
+                // A verdict delivered over a stream lands here: the rule
+                // (when on) is evaluated with this handler's context.
+                routing_rule::evaluate_if_due(context, &capsules).await;
+                answered
             })
         })
     })

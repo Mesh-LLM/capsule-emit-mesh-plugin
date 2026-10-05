@@ -38,7 +38,7 @@ use serde_json::Value;
 /// served by any host).
 pub const SKIPPY_STAGE_CHANNEL: &str = "skippy.stage.v1";
 /// How long the coordinator waits for stage records before it seals, in ms.
-pub const ENV_STAGE_DEADLINE_MS: &str = "CAPSULE_EMIT_MESH_SPLIT_STAGE_DEADLINE_MS";
+pub const ENV_STAGE_DEADLINE_MS: &str = "CAPSULES_SPLIT_STAGE_DEADLINE_MS";
 const DEFAULT_STAGE_DEADLINE_MS: u64 = 2_000;
 /// Splits held at once. A peer can push stage records for splits that never
 /// complete here; past this, the oldest split opened by records alone is

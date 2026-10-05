@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   twinComparisonParametersLine,
-  twinDisclosureSentence,
+  TWIN_PAIR_SENTENCE,
   twinResponseTexts
 } from '@/features/capsules/lib/twin-bracket'
 import type { ExchangeLedgerRow } from '@/features/capsules/lib/exchange-ledger'
@@ -37,18 +37,10 @@ function twinRow(overrides: Partial<PaneCRow> = {}): ExchangeLedgerRow {
   }
 }
 
-describe('twinDisclosureSentence — v3 §5 "Ambient twins are unannounced, and the ledger says so"', () => {
-  it('uses the LIVE rate passed in, not a hardcoded 50 -- two different N values produce two different sentences', () => {
-    expect(twinDisclosureSentence(50)).toBe(
-      'This comparison ran automatically — 1 in 50 exchanges is sent to a second peer.'
-    )
-    expect(twinDisclosureSentence(2)).toBe(
-      'This comparison ran automatically — 1 in 2 exchanges is sent to a second peer.'
-    )
-  })
-
-  it('degrades honestly (never fabricates an N) when the live rate is unavailable', () => {
-    expect(twinDisclosureSentence(null)).toBe('This comparison ran automatically — sent to a second peer.')
+describe('the twin pair sentence', () => {
+  it('says a client marked the pair, never that it ran automatically or at a rate', () => {
+    expect(TWIN_PAIR_SENTENCE).toBe('A client marked these two requests as one pair (x-mesh-twin-bracket).')
+    expect(TWIN_PAIR_SENTENCE).not.toMatch(/automatic|1 in|sampl/i)
   })
 })
 

@@ -1,4 +1,4 @@
-//! Real interop test: drives the compiled `capsule-emit-mesh` binary
+//! Real interop test: drives the compiled `capsules` binary
 //! over mesh-llm's actual wire protocol (length-prefixed `proto::Envelope`
 //! frames over a Unix domain socket — see `mesh-llm-plugin/src/io.rs`), the
 //! same way `mesh-llm-host-runtime::plugin::runtime::ExternalPlugin` does,
@@ -24,7 +24,7 @@ use tokio::net::UnixListener;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-const PLUGIN_BIN: &str = env!("CARGO_BIN_EXE_capsule-emit-mesh");
+const PLUGIN_BIN: &str = env!("CARGO_BIN_EXE_capsules");
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct Harness {
@@ -40,8 +40,7 @@ impl Harness {
 
     /// As `spawn`, with `unset` removed from the plugin's environment.
     async fn spawn_without(extra_env: &[(&str, &str)], unset: &[&str]) -> Self {
-        let socket_path =
-            std::env::temp_dir().join(format!("capsule-emit-mesh-interop-{}.sock", nonce()));
+        let socket_path = std::env::temp_dir().join(format!("capsules-interop-{}.sock", nonce()));
         let _ = std::fs::remove_file(&socket_path);
         let listener = UnixListener::bind(&socket_path).expect("bind fake-host socket");
 
@@ -50,17 +49,17 @@ impl Harness {
             .env("MESH_LLM_PLUGIN_TRANSPORT", "unix")
             // An isolated data dir per run: never the operator's own.
             .env(
-                "CAPSULE_EMIT_MESH_DATA_DIR",
-                std::env::temp_dir().join(format!("capsule-emit-mesh-interop-data-{}", nonce())),
+                "CAPSULES_DATA_DIR",
+                std::env::temp_dir().join(format!("capsules-interop-data-{}", nonce())),
             )
-            .env("CAPSULE_EMIT_MESH_BLOCKED_MODELS", "blocked-test-model");
+            .env("CAPSULES_BLOCKED_MODELS", "blocked-test-model");
         for (key, value) in extra_env {
             cmd.env(key, value);
         }
         for key in unset {
             cmd.env_remove(key);
         }
-        let child = cmd.spawn().expect("spawn the capsule-emit-mesh plugin");
+        let child = cmd.spawn().expect("spawn the capsules plugin");
 
         let stream = timeout(
             TEST_TIMEOUT,
@@ -89,7 +88,7 @@ impl Harness {
             &mut self.stream,
             &proto::Envelope {
                 protocol_version: PROTOCOL_VERSION,
-                plugin_id: "capsule-emit-mesh".to_string(),
+                plugin_id: "capsules".to_string(),
                 request_id,
                 payload: Some(payload),
             },
@@ -110,6 +109,7 @@ impl Harness {
         let request_id = self
             .send(Payload::InitializeRequest(proto::InitializeRequest {
                 host_protocol_version: PROTOCOL_VERSION,
+                host_capabilities: Vec::new(),
                 host_version: "interop-test".to_string(),
                 host_info_json: "{}".to_string(),
                 mesh_visibility: proto::MeshVisibility::Private as i32,
@@ -184,7 +184,7 @@ async fn initialize_declares_real_inference_provider_endpoint() {
     let mut harness = Harness::spawn(&[]).await;
     let response = harness.initialize().await;
 
-    assert_eq!(response.plugin_id, "capsule-emit-mesh");
+    assert_eq!(response.plugin_id, "capsules");
     let manifest = response.manifest.expect("plugin declares a manifest");
     let endpoint = inference_endpoint(&manifest);
     assert!(
@@ -237,7 +237,7 @@ async fn v1_models_advertises_only_the_blocked_model() {
 /// when blocked models are named.
 #[tokio::test]
 async fn with_no_blocked_models_the_plugin_registers_no_provider_and_no_admission_capability() {
-    const KEY: &str = "CAPSULE_EMIT_MESH_BLOCKED_MODELS";
+    const KEY: &str = "CAPSULES_BLOCKED_MODELS";
     for value in [None, Some(""), Some("none"), Some("off")] {
         let mut harness = match value {
             None => Harness::spawn_without(&[], &[KEY]).await,
@@ -266,6 +266,53 @@ async fn with_no_blocked_models_the_plugin_registers_no_provider_and_no_admissio
         );
         harness.shutdown().await;
     }
+}
+
+/// One plugin process per data directory: a second process on the same
+/// directory refuses to start with one line naming the directory and the
+/// holder's pid, before it touches the ledger. Once the holder exits, cleanly
+/// or killed, the next process starts on the same directory.
+#[tokio::test]
+async fn a_second_process_on_the_same_data_dir_refuses_and_the_dir_frees_on_exit() {
+    let dir = std::env::temp_dir().join(format!("capsules-lock-{}", nonce()));
+    let dir_env = dir.to_str().expect("utf-8 temp dir").to_string();
+    let first = Harness::spawn(&[("CAPSULES_DATA_DIR", &dir_env)]).await;
+    let holder = first.child.id().expect("first plugin pid");
+
+    // The second never reaches the host: it must refuse before connecting.
+    let second = timeout(
+        TEST_TIMEOUT,
+        Command::new(PLUGIN_BIN)
+            .env("MESH_LLM_PLUGIN_ENDPOINT", dir.join("no-host.sock"))
+            .env("MESH_LLM_PLUGIN_TRANSPORT", "unix")
+            .env("CAPSULES_DATA_DIR", &dir_env)
+            .env("CAPSULES_BLOCKED_MODELS", "blocked-test-model")
+            .output(),
+    )
+    .await
+    .expect("second process exited before timeout")
+    .expect("run the second process");
+    assert!(!second.status.success(), "the second process must refuse");
+    let stderr = String::from_utf8_lossy(&second.stderr);
+    assert!(
+        stderr.contains("is in use by another capsules plugin process"),
+        "{stderr}"
+    );
+    assert!(stderr.contains(&dir_env), "{stderr}");
+    assert!(stderr.contains(&format!("pid {holder}")), "{stderr}");
+
+    // Clean exit frees the directory.
+    first.shutdown().await;
+    let mut killed = Harness::spawn(&[("CAPSULES_DATA_DIR", &dir_env)]).await;
+    assert!(killed.initialize().await.manifest.is_some());
+
+    // A crash frees it too: the lock file stays behind, the lock does not.
+    killed.child.kill().await.expect("kill the plugin");
+    let _ = killed.child.wait().await;
+    assert!(dir.join("capsules.lock").exists());
+    let mut after_crash = Harness::spawn(&[("CAPSULES_DATA_DIR", &dir_env)]).await;
+    assert!(after_crash.initialize().await.manifest.is_some());
+    after_crash.shutdown().await;
 }
 
 /// (C) Deny: a real HTTP POST for the blocked model is denied with a

@@ -1,9 +1,9 @@
 //! When a referee is asked, and at most once per pair.
 //!
-//! A referee is asked only when two twins of a pair the host marked (a twin
+//! A referee is asked only when two twins of a pair a client marked (a twin
 //! bracket id) answered the same request at temperature 0, on the same model
-//! and weights, and their answers differ. It is on unless the operator turns
-//! it off (`adjudicate_differing_twins`). At most one call per pair, never
+//! and weights, and their answers differ. It is off unless the operator turns
+//! it on (`adjudicate_differing_twins`). At most one call per pair, never
 //! retried: a pair is the bracket id, the twins' request digest and the two
 //! node ids, so re-sealed halves of one exchange are the same pair. A call
 //! that was made and not answered has used the pair's one call.
@@ -26,8 +26,8 @@ use serde_json::{json, Value};
 
 use super::verdict::compare_transcripts;
 
-/// The operator's switch. Unset: on.
-pub const ENV_ADJUDICATE_DIFFERING_TWINS: &str = "CAPSULE_EMIT_MESH_ADJUDICATE_DIFFERING_TWINS";
+/// The operator's switch. Unset: off.
+pub const ENV_ADJUDICATE_DIFFERING_TWINS: &str = "CAPSULES_ADJUDICATE_DIFFERING_TWINS";
 
 /// Decided: a pair that found no eligible referee is not retried on its own;
 /// only the operator asking again looks for a referee again.
@@ -40,6 +40,8 @@ pub const STATE_ADJUDICATED: &str = "adjudicated";
 pub const STATE_NOT_ADJUDICATED: &str = "not_adjudicated";
 
 pub const REASON_OFF: &str = "off";
+/// No client marked any pair on this list. The value is the legacy wire id,
+/// kept so stored rows and the page keep reading it.
 pub const REASON_HOST_DOES_NOT_MARK_TWINS: &str = "host_does_not_mark_twins";
 pub const REASON_TWINS_AGREE: &str = "twins_agree";
 pub const REASON_NOT_COMPARABLE: &str = "not_comparable";
@@ -55,12 +57,13 @@ pub const BECAUSE_MODEL_HASH_UNKNOWN: &str = "model_hash_unknown";
 pub const BECAUSE_WEIGHTS_UNKNOWN: &str = "weights_unknown";
 pub const BECAUSE_WEIGHTS_DIFFER: &str = "weights_differ";
 
-/// The switch's value: off only when the operator says so (`0`, `off`,
-/// `false`, `no`); anything else, or unset, is on.
+/// The switch's value: on only when the operator says so (`1`, `on`,
+/// `true`, `yes`); anything else, or unset, is off. A referee answers with
+/// a third node's inference, so a client's pair marking alone never starts one.
 pub fn adjudicate_differing_twins_from(raw: Option<&str>) -> bool {
-    !matches!(
+    matches!(
         raw.map(|r| r.trim().to_ascii_lowercase()).as_deref(),
-        Some("0" | "off" | "false" | "no")
+        Some("1" | "on" | "true" | "yes")
     )
 }
 
@@ -88,7 +91,7 @@ pub struct Twin {
 /// Two twins of one request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pair {
-    /// The host's twin bracket id; `None` when the host does not mark twins.
+    /// The twin bracket id a client sent; `None` when no client marked a pair.
     pub twin_bracket_id: Option<String>,
     pub request_digest: String,
     pub twins: [Twin; 2],
@@ -446,10 +449,10 @@ pub fn rows_by_bracket(ledger_dir: &Path) -> HashMap<String, Value> {
 }
 
 /// Put each twin row's pair outcome on it (`twin.referee_row`, `null` while
-/// the pair has none), and say on the list whether this host marks twins at
-/// all (`referee.twins_marked`) and whether the check is on. With no twin
-/// bracket on any row, the page reads "Not adjudicated: this host does not
-/// mark twins": no pair is ever guessed from timing.
+/// the pair has none), and say on the list whether any client marked a pair
+/// (`referee.twins_marked`) and whether the check is on. With no twin bracket
+/// on any row, the page reads "Not adjudicated: no client marked these as a
+/// pair": no pair is ever guessed from timing.
 pub fn attach_rows(pane: &mut Value, ledger_dir: &Path) {
     let rows = rows_by_bracket(ledger_dir);
     let mut marked = false;
@@ -590,10 +593,12 @@ mod tests {
     }
 
     #[test]
-    fn the_switch_is_on_unless_turned_off() {
-        assert!(adjudicate_differing_twins_from(None));
-        assert!(adjudicate_differing_twins_from(Some("1")));
-        for off in ["0", "off", "false", "No"] {
+    fn the_switch_is_off_unless_turned_on() {
+        assert!(!adjudicate_differing_twins_from(None));
+        for on in ["1", "on", "true", "Yes", " on "] {
+            assert!(adjudicate_differing_twins_from(Some(on)), "{on}");
+        }
+        for off in ["0", "off", "false", "No", "", "garbage"] {
             assert!(!adjudicate_differing_twins_from(Some(off)), "{off}");
         }
     }

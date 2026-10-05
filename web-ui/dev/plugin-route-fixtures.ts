@@ -1,7 +1,7 @@
 // Fixture mode for the plugin page (dev server only; never in the bundle).
 //
 // `VITE_EVIDENCE_FIXTURES=<dir>` answers the page's plugin routes
-// (`/api/plugins/capsule-emit-mesh/<route>`) and the two console routes it reads
+// (`/api/plugins/capsules/<route>`) and the two console routes it reads
 // (`/api/status`, `/api/models`) from a fixture set captured by the fork
 // console's `scripts/capture-evidence-fixtures.mjs` -- e.g.
 // `<captures>/freeze-candidate`. Those sets are keyed by
@@ -17,7 +17,7 @@ import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { PluginOption } from 'vite'
 
-export const PLUGIN_API_PREFIX = '/api/plugins/capsule-emit-mesh/'
+export const PLUGIN_API_PREFIX = '/api/plugins/capsules/'
 
 type FixtureEntry = { file: string; status: number; contentType: string }
 type FixtureManifest = { entries: Record<string, FixtureEntry> }
@@ -120,7 +120,7 @@ export function directoryReader(dir: string): CaptureReader {
 
 export function pluginRouteFixtures(dir: string | undefined): PluginOption {
   return {
-    name: 'capsule-emit-mesh:plugin-route-fixtures',
+    name: 'capsules:plugin-route-fixtures',
     configureServer(server) {
       if (!dir) return
       const resolved = path.resolve(dir)

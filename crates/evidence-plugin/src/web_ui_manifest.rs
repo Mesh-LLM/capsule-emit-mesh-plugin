@@ -2,9 +2,11 @@
 //! Contract", `docs/plugins/README.md` in Mesh-LLM/mesh-llm): ONE page,
 //! labelled `Evidence`, served from ONE bundle rooted at `bundle/` in the
 //! installed package. The console mounts it at
-//! `/plugins/capsule-emit-mesh/evidence`, and because it is the plugin's only
+//! `/plugins/capsules/evidence`, and because it is the plugin's only
 //! page the console gives it a direct navigation item rather than a
-//! `Plugins` menu entry.
+//! `Plugins` menu entry. The page asks for a primary tab; the console promotes
+//! it only when the operator turns on this plugin's `web_ui_primary_tab`:
+//! the operator decides (mesh-llm 0.78.0 starts with it off).
 //!
 //! The bundle is built from `web-ui/` (`pnpm build` writes
 //! `bundle/register-mesh-plugin-ui.js`); the release workflow builds it and
@@ -13,8 +15,8 @@
 //! lives on the console side; host code never carries it.
 
 use mesh_llm_plugin::{
-    package_manifest_json, plugin_server_info, web_ui, web_ui_bundle, web_ui_page,
-    DeclarativePluginBuilder, ManifestEntry, Plugin, PluginMetadata,
+    package_manifest_json, plugin_server_info, web_ui, web_ui_bundle, web_ui_contribution,
+    web_ui_page, DeclarativePluginBuilder, ManifestEntry, Plugin, PluginMetadata,
 };
 
 pub const WEB_UI_BUNDLE_ID: &str = "main";
@@ -27,6 +29,11 @@ pub const EVIDENCE_PAGE_LABEL: &str = "Evidence";
 pub const EVIDENCE_PAGE_ROUTE: &str = "evidence";
 /// The one file `web-ui/vite.config.ts` writes, relative to the bundle root.
 pub const WEB_UI_ENTRY_SCRIPT: &str = "register-mesh-plugin-ui.js";
+/// Under each finished assistant message in the console's chat: whether this
+/// node sealed that exchange, and a link to its record.
+pub const CHAT_CONTRIBUTION_ID: &str = "evidence-chat";
+/// In the console's Logs request inspector: the same, for that request.
+pub const LOGS_CONTRIBUTION_ID: &str = "evidence-logs";
 
 pub fn evidence_web_ui() -> ManifestEntry {
     web_ui()
@@ -36,6 +43,28 @@ pub fn evidence_web_ui() -> ManifestEntry {
                 EVIDENCE_PAGE_ID,
                 EVIDENCE_PAGE_LABEL,
                 EVIDENCE_PAGE_ROUTE,
+                WEB_UI_ENTRY_SCRIPT,
+            )
+            .bundle_id(WEB_UI_BUNDLE_ID)
+            .primary_placement()
+            // The page draws its own "Evidence" header and banner; the host's
+            // generic page header above it only repeated the name.
+            .host_header(false),
+        )
+        .contribution(
+            web_ui_contribution(
+                CHAT_CONTRIBUTION_ID,
+                "chat_message",
+                EVIDENCE_PAGE_LABEL,
+                WEB_UI_ENTRY_SCRIPT,
+            )
+            .bundle_id(WEB_UI_BUNDLE_ID),
+        )
+        .contribution(
+            web_ui_contribution(
+                LOGS_CONTRIBUTION_ID,
+                "logs_request",
+                EVIDENCE_PAGE_LABEL,
                 WEB_UI_ENTRY_SCRIPT,
             )
             .bundle_id(WEB_UI_BUNDLE_ID),
@@ -71,7 +100,7 @@ mod tests {
     use serde_json::{json, Value};
     use std::path::Path;
 
-    const PLUGIN_ID: &str = "capsule-emit-mesh";
+    const PLUGIN_ID: &str = "capsules";
 
     fn packaged() -> Value {
         let text = package_manifest_json_for(
@@ -84,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn declares_exactly_one_evidence_page_in_one_bundle() {
+    fn declares_the_evidence_page_and_its_chat_and_logs_contributions_in_one_bundle() {
         assert_eq!(
             packaged()["web_ui"],
             json!({
@@ -93,8 +122,26 @@ mod tests {
                     "label": "Evidence",
                     "route": "evidence",
                     "bundle_id": "main",
-                    "entry_script": "register-mesh-plugin-ui.js"
+                    "entry_script": "register-mesh-plugin-ui.js",
+                    "placement": "primary",
+                    "host_header": false
                 }],
+                "contributions": [
+                    {
+                        "id": "evidence-chat",
+                        "slot": "chat_message",
+                        "label": "Evidence",
+                        "bundle_id": "main",
+                        "entry_script": "register-mesh-plugin-ui.js"
+                    },
+                    {
+                        "id": "evidence-logs",
+                        "slot": "logs_request",
+                        "label": "Evidence",
+                        "bundle_id": "main",
+                        "entry_script": "register-mesh-plugin-ui.js"
+                    }
+                ],
                 "bundles": [{ "id": "main", "root_path": "bundle" }]
             })
         );

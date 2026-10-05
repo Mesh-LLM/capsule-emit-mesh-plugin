@@ -19,7 +19,7 @@ export function setPluginHost(host: MeshPluginUiHost | null): void {
  *  call with no host has nowhere honest to go, and must not fall back to a
  *  guessed URL. */
 export function pluginHost(): MeshPluginUiHost {
-  if (!mountedHost) throw new Error('capsule-emit-mesh page: no mesh-llm host is mounted')
+  if (!mountedHost) throw new Error('capsules page: no mesh-llm host is mounted')
   return mountedHost
 }
 

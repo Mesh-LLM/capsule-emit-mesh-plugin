@@ -1,7 +1,7 @@
-//! `mesh_local_routing_choice`: the host's block store asks this plugin to
-//! seal a record of a local routing choice (block or unblock a peer). When the
-//! opt-in operator rule asked the host for the block (`routing_rule`), the
-//! record also names the rule and cites the verdicts that met it.
+//! `mesh_local_routing_choice`: a host's block store may ask this plugin to
+//! seal a record of a local routing choice (block or unblock a peer) that its
+//! operator made. A block the opt-in operator rule asked for is sealed by the
+//! rule itself (`routing_rule`), so a record sealed here names no rule.
 //!
 //! The host owns the choice and enforces it in its router; this plugin only
 //! seals the record onto the node's one chain. The record names the peer by a
@@ -66,17 +66,8 @@ pub fn handle_local_routing_choice(
         .ok()
         .and_then(|bytes| bytes.try_into().ok())
         .ok_or_else(|| PluginError::invalid_params("salt must be 32 bytes of hex"))?;
-    // A block the operator rule asked for (`routing_rule`) names the rule and
-    // cites the verdicts that met it; a manual block finds no citation.
-    let pending = matches!(args.change, ChangeArg::Block)
-        .then(|| crate::routing_rule::take_pending(peer_id))
-        .flatten();
-    let citation = pending.as_ref().map(|p| RoutingRuleCitation {
-        rule: crate::routing_rule::RULE_NAME,
-        after: p.rule.after,
-        window_days: p.rule.window_days,
-        verdict_capsule_ids: &p.verdict_capsule_ids,
-    });
+    // The operator's choice: it names no rule (`routing_rule` seals its own).
+    let citation: Option<RoutingRuleCitation> = None;
     let emitted = capsules
         .emit_local_routing_choice(
             args.change.into(),

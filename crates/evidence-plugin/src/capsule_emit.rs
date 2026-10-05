@@ -267,7 +267,7 @@ fn output_sub_digests(response_bytes: &[u8]) -> (Option<String>, Option<String>)
 /// Operator opt-in for sealing the serving host's name. The sealed body is
 /// pushed at completion to every counterparty, so the machine name is
 /// withheld unless the operator sets this to `1`, `true` or `on`.
-pub const ENV_SEAL_HOSTNAME: &str = "CAPSULE_EMIT_MESH_SEAL_HOSTNAME";
+pub const ENV_SEAL_HOSTNAME: &str = "CAPSULES_SEAL_HOSTNAME";
 
 fn hostname_opt_in() -> bool {
     hostname_opt_in_for(crate::settings::var(ENV_SEAL_HOSTNAME).ok().as_deref())
@@ -300,7 +300,7 @@ static CAPSULE_CONTENT_TYPE: LazyLock<String> = LazyLock::new(|| {
 /// domain fix), beside the ledger at `<data_dir>/learned_self_node_id.json`
 /// (same restart-safe, best-effort convention as `SequenceCounterStore`).
 ///
-/// `PLUGIN_ID` (`"capsule-emit-mesh"`) is a compile-time plugin-TYPE label,
+/// `PLUGIN_ID` (`"capsules"`) is a compile-time plugin-TYPE label,
 /// not a mesh node id, and this plugin has no other source for its own real
 /// mesh identity -- the host never sends one directly. But the host DOES
 /// tell us, on every locally-served terminal event
@@ -378,6 +378,9 @@ impl LearnedSelfNodeId {
 /// guarded state stays consistent across a mid-seal panic: `Ledger::append`
 /// orders its writes (statement fsync before the jsonl line) exactly so a
 /// torn stop is recoverable, and reload re-validates everything on open.
+/// Beside the ledger: one line per cut of a torn last line.
+const REPAIRS_FILE: &str = "repairs.jsonl";
+
 pub struct CapsuleState {
     keys: KeyPair,
     ledger: Mutex<Ledger>,
@@ -395,6 +398,10 @@ pub struct CapsuleState {
     /// label used for the ledger issuer / sequence-counter key), which is
     /// NEVER used as a stand-in for the mesh node id domain.
     learned_self_node_id: Mutex<LearnedSelfNodeId>,
+    /// The byte offset the ledger was cut back to when it was opened, when
+    /// its last line was torn (a write cut short, e.g. by a crash): that line
+    /// is gone. Logged, and shown in the records status.
+    torn_write_cut_at: Option<u64>,
     /// Settlement-records legs waiting on the other side (in memory only).
     settlement_legs: crate::settlement_legs::Legs,
     /// See [`CapsuleState::observed_not_sealed`].
@@ -466,6 +473,26 @@ impl CapsuleState {
         let ledger_dir = data_dir.join("ledger");
         let (ledger, report) = crate::producer::index::open_ledger(&ledger_dir)?;
         tracing::info!(recovered_entries = report.valid_entries, "ledger opened");
+        if let Some(offset) = report.truncated_torn_write_at {
+            tracing::warn!(
+                offset,
+                "the ledger's last line was torn (a write cut short); it was cut back to the last whole record"
+            );
+            // Kept beside the ledger, so the page still says so after the
+            // next restart.
+            let line = serde_json::json!({
+                "at": crate::producer::timestamp::utc_now_iso8601(),
+                "torn_write_cut_at": offset,
+            });
+            if let Err(error) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(ledger_dir.join(REPAIRS_FILE))
+                .and_then(|mut f| std::io::Write::write_all(&mut f, format!("{line}\n").as_bytes()))
+            {
+                tracing::warn!(%error, "the ledger repair was not noted");
+            }
+        }
         let sequence_counters = SequenceCounterStore::open(data_dir.join("sequence_counters.json"));
         let learned_self_node_id =
             LearnedSelfNodeId::open(data_dir.join("learned_self_node_id.json"));
@@ -478,7 +505,24 @@ impl CapsuleState {
             learned_self_node_id: Mutex::new(learned_self_node_id),
             settlement_legs: crate::settlement_legs::Legs::default(),
             observed_not_sealed: std::sync::atomic::AtomicU64::new(0),
+            torn_write_cut_at: report.truncated_torn_write_at,
         })
+    }
+
+    /// Where the ledger was cut back to when it was opened, if its last line
+    /// was torn.
+    pub fn torn_write_cut_at(&self) -> Option<u64> {
+        self.torn_write_cut_at
+    }
+
+    /// Every cut of a torn last line this ledger has had, oldest first:
+    /// `{at, torn_write_cut_at}`.
+    pub fn ledger_repairs(&self) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(self.ledger_dir.join(REPAIRS_FILE))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect()
     }
 
     /// This node's settlement-records state ([`crate::settlement_legs`]).
@@ -720,7 +764,7 @@ impl CapsuleState {
                     peer_capsule_id_provenance: None,
                     // This path is admitted directly by this plugin's own
                     // `/v1` handler -- there is no mesh terminal envelope to
-                    // read an ambient twin bracket off of, so this is never
+                    // read a twin bracket off of, so this is never
                     // twinned on this path.
                     twin_bracket_id: None,
                     response_text_digest: None,
@@ -896,7 +940,7 @@ pub struct ObservedHostExchange<'a> {
     /// `peer_capsule_id` (`lifecycle_channel::capsule_id_provenance_wire_value`)
     /// -- `None` exactly when `peer_capsule_id` is `None`.
     pub peer_capsule_id_provenance: Option<&'a str>,
-    /// The id shared by BOTH halves of an ambient twin comparison, forwarded
+    /// The id shared by BOTH halves of a client-marked twin pair, forwarded
     /// verbatim off the terminal envelope's own `twin_bracket_id` -- this
     /// plugin never mints or derives one, only relays what the host already
     /// minted. `None` on every exchange the envelope reports as not twinned

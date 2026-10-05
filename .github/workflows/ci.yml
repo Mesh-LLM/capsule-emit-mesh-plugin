@@ -86,8 +86,8 @@ jobs:
       - name: Record-push parity catches a receiver that drops a check
         shell: bash
         run: |
-          cargo test --locked --bin capsule-emit-mesh --features mutant-record-push-skips-claims --no-run
-          if out=$(cargo test --locked --bin capsule-emit-mesh --features mutant-record-push-skips-claims -- record_push_parity:: 2>&1); then
+          cargo test --locked --bin capsules --features mutant-record-push-skips-claims --no-run
+          if out=$(cargo test --locked --bin capsules --features mutant-record-push-skips-claims -- record_push_parity:: 2>&1); then
             echo "::error::the parity run passed a receiver that skips the claim checks"
             exit 1
           fi
@@ -96,8 +96,8 @@ jobs:
       - name: Evidence-request parity catches a responder that drops a check
         shell: bash
         run: |
-          cargo test --locked --bin capsule-emit-mesh --features mutant-evidence-skips-policy-gate --no-run
-          if out=$(cargo test --locked --bin capsule-emit-mesh --features mutant-evidence-skips-policy-gate -- evidence_request_parity:: 2>&1); then
+          cargo test --locked --bin capsules --features mutant-evidence-skips-policy-gate --no-run
+          if out=$(cargo test --locked --bin capsules --features mutant-evidence-skips-policy-gate -- evidence_request_parity:: 2>&1); then
             echo "::error::the parity run passed a responder that skips the sharing-policy gate"
             exit 1
           fi
@@ -232,7 +232,7 @@ jobs:
 
       - name: Build
         run: |
-          cargo build --locked --manifest-path crates/evidence-plugin/Cargo.toml --bin capsule-emit-mesh
+          cargo build --locked --manifest-path crates/evidence-plugin/Cargo.toml --bin capsules
           (cd web-ui && pnpm install --frozen-lockfile && pnpm build)
 
       - name: Package twice and compare
@@ -240,7 +240,7 @@ jobs:
           SOURCE_DATE_EPOCH: "0"
         run: |
           version=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' plugin.toml)
-          bin=crates/evidence-plugin/target/debug/capsule-emit-mesh
+          bin=crates/evidence-plugin/target/debug/capsules
           scripts/package.sh "$version" x86_64-unknown-linux-gnu "$bin" out-a
           scripts/package.sh "$version" x86_64-unknown-linux-gnu "$bin" out-b
           cmp out-a/*.tar.gz out-b/*.tar.gz
