@@ -104,6 +104,10 @@ tempfile = "3"
 # `tests/mesh_evidence_bridge_interop.rs` -- same version mesh-llm-plugin
 # itself pins, so the wire shape matches exactly.
 rmcp = "1.8"
+# Frames the fake host's envelopes in `tests/quiet_default_interop.rs`, whose
+# reader task owns the read half of the plugin socket -- same version
+# mesh-llm-plugin itself pins.
+prost = "0.14"
 
 [profile.release]
 # Ship the release binary without its symbol table: about a quarter smaller
