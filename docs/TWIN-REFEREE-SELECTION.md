@@ -81,6 +81,13 @@ the pair's one call.
 Without a twin bracket id from the host nothing is ever called: pairs are never
 guessed from timing.
 
+The re-answer needs the pair's request, and the referee both answers. A host
+passes no text to plugins, so the client that marked the pair supplies them
+(`referee_supply_twin_texts`). They are kept only when each is the body this
+node's own records sealed (the request's digest is both records'
+`request_digest`, each answer's is one record's `response_digest`) and the
+answers differ; then the pair is considered as above.
+
 A pair is decided once at a time, and its one call is recorded before it is
 made: if this node stops mid-call, the call counts as made and not answered,
 and no further call follows on its own.

@@ -329,7 +329,7 @@ fn referee_answer(
     if !crate::referee::service::is_adjudicate_request(&parsed) {
         return None;
     }
-    let peer_keys = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let peer_keys = crate::peer_keys::registry();
     let referee = crate::referee::service::Referee {
         ledger_dir: capsules.ledger_dir(),
         signing_key: capsules.signing_key(),
@@ -477,7 +477,7 @@ pub async fn handle_mesh_evidence_request(
     if !args.verify {
         return Ok(answer);
     }
-    let registry = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let registry = crate::peer_keys::registry();
     let verification = match crate::peer_keys::announced_key_in(registry.as_deref(), &args.peer_id)
         .and_then(|key_id| verifying_key(&key_id))
     {
