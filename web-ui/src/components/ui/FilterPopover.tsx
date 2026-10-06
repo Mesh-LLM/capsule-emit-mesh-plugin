@@ -1,6 +1,7 @@
 import * as Popover from '@radix-ui/react-popover'
 import { Check, Funnel } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { portalContainer } from '@/lib/scope'
 
 export type FilterCategory<Key extends string> = {
   key: Key
@@ -79,7 +80,7 @@ export function FilterPopover<Key extends string>({
           ) : null}
         </button>
       </Popover.Trigger>
-      <Popover.Portal>
+      <Popover.Portal container={portalContainer()}>
         <Popover.Content
           id={id}
           align="end"

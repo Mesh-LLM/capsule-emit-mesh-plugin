@@ -1,11 +1,14 @@
 import * as RadixTooltip from '@radix-ui/react-tooltip'
 import { useSyncExternalStore } from 'react'
-import type { ReactElement, ReactNode } from 'react'
+import type { ComponentPropsWithoutRef, ReactElement, ReactNode } from 'react'
+import { portalContainer } from '@/lib/scope'
 
 export const TooltipProvider = RadixTooltip.Provider
 export const TooltipRoot = RadixTooltip.Root
 export const TooltipTrigger = RadixTooltip.Trigger
-export const TooltipPortal = RadixTooltip.Portal
+export function TooltipPortal(props: ComponentPropsWithoutRef<typeof RadixTooltip.Portal>) {
+  return <RadixTooltip.Portal container={portalContainer()} {...props} />
+}
 export const TooltipArrow = RadixTooltip.Arrow
 
 export function TooltipContent({
@@ -14,7 +17,7 @@ export function TooltipContent({
   ...props
 }: React.ComponentPropsWithoutRef<typeof RadixTooltip.Content>) {
   return (
-    <RadixTooltip.Portal>
+    <RadixTooltip.Portal container={portalContainer()}>
       <RadixTooltip.Content
         sideOffset={sideOffset}
         className={`surface-menu-panel z-50 max-w-[240px] rounded-[var(--radius)] px-2.5 py-1.5 font-mono text-[length:var(--density-type-annotation)] leading-snug text-fg outline-none ${className ?? ''}`}
