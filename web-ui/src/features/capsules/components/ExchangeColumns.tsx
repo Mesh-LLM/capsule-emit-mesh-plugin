@@ -72,7 +72,7 @@ export function buildExchangeColumns(): ColumnDef<ExchangeLedgerRow>[] {
       cell: ({ row }) => (
         <StatusPill
           dot
-          label={row.original.confirmed ? 'confirmed' : 'not yet confirmed'}
+          label={row.original.confirmed ? 'confirmed' : row.original.localOnly ? 'this node only' : 'not yet confirmed'}
           tone={row.original.confirmed ? 'good' : 'neutral'}
         />
       )

@@ -10,6 +10,7 @@ function row(overrides: Partial<ExchangeLedgerRow>): ExchangeLedgerRow {
     roleTag: 'ASKED',
     counterparty: 'node:aa11bb22',
     confirmed: true,
+    localOnly: false,
     hasIssue: false,
     checksText: '—',
     rightCellState: { kind: 'closed', date: null },

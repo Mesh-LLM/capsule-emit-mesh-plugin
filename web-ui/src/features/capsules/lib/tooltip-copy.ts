@@ -180,6 +180,14 @@ export const ENTRY_CHIP_RESULT_TOOLTIPS = {
   }
 } as const
 
+/** The (i) on a peer's twin pairs line. Facts only, never a judgement. */
+export const PEER_TWINS_TOOLTIP =
+  'Twin pairs: a client sent the same request to this node and to another one, and marked the two as one pair. “Answers differed” compares the two sealed answers byte for byte; it is a comparison, not a ruling. “Not adjudicated” means no referee has ruled on the pair.'
+
+/** The LOCAL badge's (i): a served exchange with no other side recorded. */
+export const LOCAL_ONLY_TOOLTIP =
+  'This node only. This node served the request and no other side is recorded for it, so there is no record of theirs to wait for. It is not counted as open.'
+
 /** A row confirmed from a record this page asked for and fetched: honest
  *  that nothing was saved on the node (console copy). */
 export const CLOSED_FROM_FETCH_NOT_SAVED =

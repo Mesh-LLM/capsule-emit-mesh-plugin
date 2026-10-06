@@ -150,6 +150,7 @@ function makeRow(kind: RightCellStateKind, overrides: Partial<ExchangeLedgerRow>
     roleTag: 'ASKED',
     counterparty: 'node:aa11bb22',
     confirmed: kind === 'closed',
+    localOnly: false,
     hasIssue: kind === 'contradicted',
     checksText: '—',
     rightCellState: {
@@ -185,6 +186,43 @@ function toggleProps() {
     onAskForRecord: vi.fn()
   }
 }
+
+describe('ExchangeStreamRow — a served exchange with no other side', () => {
+  const localRow = () =>
+    makeRow('open_not_asked', { roleTag: 'SERVED', counterparty: null, localOnly: true })
+
+  it('is badged LOCAL ("this node only"), muted, never OPEN', () => {
+    render(
+      <ExchangeStreamRow
+        onAction={vi.fn()}
+        {...toggleProps()}
+        localRecord={RECORD_NAMING_NO_PEER}
+        rail={NO_RAIL}
+        row={localRow()}
+      />
+    )
+    const badge = screen.getByText('LOCAL')
+    expect(badge.closest('[data-row-tone]')).toHaveAttribute('data-row-tone', 'muted')
+    expect(screen.queryByText(/^OPEN/)).not.toBeInTheDocument()
+    expect(screen.getByText('Local — no other side')).toBeInTheDocument()
+    expect(document.querySelector('[data-bracket-strip="true"]')).toHaveTextContent('Theirs ○ no other side')
+    expect(screen.getByRole('button', { name: /the LOCAL state/i })).toBeInTheDocument()
+  })
+
+  it('a served row that names its counterparty stays OPEN', () => {
+    render(
+      <ExchangeStreamRow
+        onAction={vi.fn()}
+        {...toggleProps()}
+        localRecord={RECORD_NAMING_NO_PEER}
+        rail={NO_RAIL}
+        row={makeRow('open_not_asked', { roleTag: 'SERVED' })}
+      />
+    )
+    expect(screen.getByText('OPEN')).toBeInTheDocument()
+    expect(screen.queryByText('LOCAL')).not.toBeInTheDocument()
+  })
+})
 
 describe('ExchangeStreamRow — L-A/L-B alarm styling', () => {
   it('L-B: CONTRADICTED renders the bad tone (alarm)', () => {

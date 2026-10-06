@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildExchangeCounterpartyIndex, buildExchangeLedgerRows } from '@/features/capsules/lib/exchange-ledger'
+import {
+  buildExchangeCounterpartyIndex,
+  buildExchangeLedgerRows,
+  exchangeStateFilterValue
+} from '@/features/capsules/lib/exchange-ledger'
+import type { CapsuleRecord } from '@/features/capsules/api/types'
 import type { PaneBRow, PaneCRow } from '@/features/capsules/api/sidecarTypes'
 import { fixtureMineCell, fixtureTheirsCell } from '@/features/capsules/lib/pushed-half-fixtures'
 
@@ -211,6 +216,81 @@ describe('buildExchangeLedgerRows', () => {
       index
     )
     expect(sameKey.map((r) => r.counterparty)).toEqual(['key:provider-a', 'key:provider-b'])
+  })
+})
+
+describe('a served exchange with no other side is LOCAL', () => {
+  // As served on a live node for a chat sent from its own console: this node
+  // served it, and nothing names or holds another side.
+  const selfServed = (overrides: Partial<PaneCRow> = {}) =>
+    paneCRow({
+      role_tag: 'SERVED',
+      header_state: 'absent',
+      counterparty: null,
+      mine: { state: 'present-unverified', capsule_id: 'mine-local', role: 'served' },
+      theirs: { state: 'absent', capsule_id: null },
+      unilateral: true,
+      ...overrides
+    })
+
+  it('is local only, in its own filter bucket, and neither open nor confirmed', () => {
+    const [row] = buildExchangeLedgerRows([selfServed()], new Map())
+    expect(row.rightCellState.kind).toBe('open_not_asked')
+    expect(row.localOnly).toBe(true)
+    expect(row.confirmed).toBe(false)
+    expect(exchangeStateFilterValue(row)).toBe('local')
+  })
+
+  it.each([
+    ['the row names a counterparty', selfServed({ counterparty: 'key:2b4600' }), new Map<string, string>()],
+    ['Pane B names a counterparty', selfServed(), new Map([['exch-1', 'node:peer']])],
+    ['it is a row this node asked', selfServed({ role_tag: 'ASKED' }), new Map<string, string>()],
+    [
+      'the other side has stated something',
+      selfServed({ theirs: { state: 'absent', capsule_id: null, evidence_outcome: 'unanswered' } }),
+      new Map<string, string>()
+    ],
+    [
+      'a half of theirs was pushed',
+      selfServed({ theirs: { state: 'present-unverified', capsule_id: 'theirs-1', received_from: 'peer-x' } }),
+      new Map<string, string>()
+    ]
+  ])('is not local when %s, and then counts as it did before', (_, paneRow, index) => {
+    const [row] = buildExchangeLedgerRows([paneRow], index)
+    expect(row.localOnly).toBe(false)
+    expect(exchangeStateFilterValue(row)).not.toBe('local')
+  })
+
+  it('is not local when its own record names the node that asked', () => {
+    const record = {
+      capsule_id: 'mine-local',
+      effect: {},
+      model_attestation: {
+        compute_attestation: {
+          'x-mesh-poc-v1': {
+            role: 'served',
+            client_nonce: 'nonce-1',
+            serving_provenance: { requested_by_node_id: 'a'.repeat(64) }
+          }
+        }
+      }
+    } as unknown as CapsuleRecord
+    const [row] = buildExchangeLedgerRows([selfServed()], new Map(), new Map([['mine-local', record]]))
+    expect(row.localOnly).toBe(false)
+    expect(exchangeStateFilterValue(row)).toBe('open')
+  })
+
+  it('the open count leaves it out', () => {
+    const rows = buildExchangeLedgerRows(
+      [selfServed({ exchange_key: 'local' }), selfServed({ exchange_key: 'remote', counterparty: 'key:2b4600' })],
+      new Map()
+    )
+    expect(rows.filter((row) => exchangeStateFilterValue(row) === 'open').map((row) => row.exchangeKey)).toEqual([
+      'remote'
+    ])
+    expect(rows.filter((row) => exchangeStateFilterValue(row) === 'local').map((row) => row.exchangeKey)).toEqual([
+      'local'
+    ])
   })
 })
 

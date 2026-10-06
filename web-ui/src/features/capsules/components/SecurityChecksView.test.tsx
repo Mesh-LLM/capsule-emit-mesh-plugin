@@ -38,6 +38,7 @@ function ledgerRow(raw: PaneCRow): ExchangeLedgerRow {
     roleTag: raw.role_tag,
     counterparty: 'node:aa11bb22',
     confirmed: true,
+    localOnly: false,
     hasIssue: raw.has_issue,
     checksText: '—',
     rightCellState: { kind: 'closed', date: null },

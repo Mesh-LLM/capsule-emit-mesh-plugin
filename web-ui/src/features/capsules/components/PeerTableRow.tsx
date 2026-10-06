@@ -23,7 +23,7 @@ import {
 } from '@/features/capsules/lib/peer-row-view'
 import { HoverChip } from '@/features/capsules/components/HoverChip'
 import { InfoHover } from '@/features/capsules/components/InfoHover'
-import { PEER_ALIAS_TOOLTIP, PEER_PAYMENTS_TOOLTIP } from '@/features/capsules/lib/tooltip-copy'
+import { PEER_ALIAS_TOOLTIP, PEER_PAYMENTS_TOOLTIP, PEER_TWINS_TOOLTIP } from '@/features/capsules/lib/tooltip-copy'
 
 export type PeerTableRowProps = {
   view: PeerTableRowView
@@ -96,6 +96,13 @@ export function PeerTableRow({
               <HoverChip census="peer:payments" label={PEER_PAYMENTS_TOOLTIP}>
                 <span className="text-xs text-fg-dim" data-peer-payments="true">
                   Payments: {view.payments}
+                </span>
+              </HoverChip>
+            ) : null}
+            {view.twins ? (
+              <HoverChip census="peer:twins" label={PEER_TWINS_TOOLTIP}>
+                <span className="text-xs text-fg-dim" data-peer-twins="true">
+                  {view.twins}
                 </span>
               </HoverChip>
             ) : null}
