@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Each paid exchange on the Evidence page shows what it charged and who paid, from the records
+  this node sealed:** the wallet's amount and fee on each settlement (and what it credited, on the
+  provider side), the payer's own recorded total, and the provider's delivered-token watermark.
+  Each value says who stated it; nothing is summed, and no balance is shown.
+- **An exchange this node served for pay shows its own book as the provider,** joined by the
+  exchange id the host names a provider's payment events with: who paid, what its wallet reported
+  receiving, and what it delivered.
+- **"Outcome not reported":** an invoice with no settlement the wallet reported and no final amount
+  says so. The host emits no event when a payment's outcome is uncertain or it failed, so the page
+  doesn't say which, and never says "unpaid". A paid request refused before any payment (for
+  example a payment protocol version the other node doesn't speak) leaves no payment records,
+  and the page says that this can happen.
+- **Settlement records carry the wallet's `credited_msat` and `fee_msat`** when the host's event
+  does; a record from an event without them is unchanged.
+
 ## 0.1.3
 
 ### Changed

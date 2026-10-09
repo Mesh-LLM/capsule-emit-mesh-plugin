@@ -139,7 +139,8 @@ import {
   EXCHANGE_TEXT_DELETE_NOW,
   CLOSE_CARD_COUNTS_TOOLTIP,
   CLOSE_CARD_TOOLTIP,
-  SAMPLE_DATA_UNAVAILABLE
+  SAMPLE_DATA_UNAVAILABLE,
+  SETTLEMENT_REFUSED_NOTE
 } from '@/features/capsules/lib/tooltip-copy'
 import type { PaymentsPresence } from '@/features/capsules/api/sidecarTypes'
 import { NOT_ADJUDICATED_LINES } from '@/features/capsules/lib/referee-row'
@@ -1292,7 +1293,8 @@ function IntegritySection() {
         paneCQuery.data?.settlement_unjoined,
         paneCQuery.data?.settlement_missing_exchange_id ?? 0
       ),
-      providerSettlementText(paneCQuery.data?.settlement_provider_records)
+      providerSettlementText(paneCQuery.data?.settlement_provider_records),
+      paneCQuery.data?.payments === 'on' ? SETTLEMENT_REFUSED_NOTE : null
     ]
       .filter(Boolean)
       .join(' ') || null

@@ -815,6 +815,12 @@ pub struct SettlementObservation<'a> {
     pub observed_by: &'a str,
     /// The provider's delivered-token watermark, on a `delivered` event only.
     pub tokens: Option<u64>,
+    /// A settlement's amounts as the wallet reported them: what it credited
+    /// (provider side) and the fee it charged (payer: paid on top; provider:
+    /// deducted). Copied when the host's event carries them and omitted
+    /// otherwise, so a record sealed from an event without them is unchanged.
+    pub credited_msat: Option<u64>,
+    pub fee_msat: Option<u64>,
 }
 
 /// Seal a SETTLEMENT record: this payer node's own signed, chained record that
@@ -869,6 +875,12 @@ pub fn seal_settlement_record(
     observation.insert("amount_msat".into(), json!(ev.amount_msat));
     if let Some(tokens) = ev.tokens {
         observation.insert("tokens".into(), json!(tokens));
+    }
+    if let Some(credited) = ev.credited_msat {
+        observation.insert("credited_msat".into(), json!(credited));
+    }
+    if let Some(fee) = ev.fee_msat {
+        observation.insert("fee_msat".into(), json!(fee));
     }
 
     // The same local-record path as every other record with no served
@@ -2857,6 +2869,8 @@ mod tests {
             amount_msat: 123457,
             observed_by: "payer",
             tokens: None,
+            credited_msat: None,
+            fee_msat: None,
         }
     }
 
@@ -2886,6 +2900,37 @@ mod tests {
         let payer = block(&sample_settlement(None));
         assert_eq!(payer["observed_by"], json!("payer"));
         assert!(payer.get("tokens").is_none());
+    }
+
+    /// A settlement's amounts as the wallet reported them ride on the record
+    /// when the host's event carries them; a record from an event without
+    /// them is exactly what it was before.
+    #[test]
+    fn seal_settlement_record_carries_the_wallets_credited_and_fee_when_given() {
+        let key = crate::producer::keys::KeyPair::generate();
+        let block = |ev: &SettlementObservation| {
+            seal_settlement_record(ev, None, &key.signing_key).unwrap()["model_attestation"]
+                ["compute_attestation"]["x-mesh-settlement-v1"]
+                .clone()
+        };
+        let with_wallet = SettlementObservation {
+            observed_by: "provider",
+            credited_msat: Some(123450),
+            fee_msat: Some(7),
+            ..sample_settlement(Some("ab"))
+        };
+        let sealed = block(&with_wallet);
+        assert_eq!(sealed["credited_msat"], json!(123450));
+        assert_eq!(sealed["fee_msat"], json!(7));
+        let plain = block(&sample_settlement(Some("ab")));
+        assert!(plain.get("credited_msat").is_none());
+        assert!(plain.get("fee_msat").is_none());
+        let mut keys: Vec<&String> = plain.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            ["amount_msat", "channel", "event_ref", "exchange_id", "observed_by", "payment_hash", "phase", "segment", "settlement", "source", "terms_digest", "v"]
+        );
     }
 
     /// Every observed value lands verbatim under

@@ -10,7 +10,13 @@ import type {
   PeerSettlementCounts,
   SettlementEntry
 } from '@/features/capsules/api/sidecarTypes'
-import { SETTLEMENT_SOURCE_TOOLTIPS, SETTLEMENT_STATE_TOOLTIPS } from '@/features/capsules/lib/tooltip-copy'
+import { shortId } from '@/features/capsules/lib/short-id'
+import {
+  SETTLEMENT_PROVIDER_SOURCE_TOOLTIPS,
+  SETTLEMENT_PROVIDER_STATE_TOOLTIPS,
+  SETTLEMENT_SOURCE_TOOLTIPS,
+  SETTLEMENT_STATE_TOOLTIPS
+} from '@/features/capsules/lib/tooltip-copy'
 
 /** Said wherever settlement appears, until the provider side emits its own
  *  observations: only the payer's records exist on this node. */
@@ -22,6 +28,7 @@ const STATE_LABEL: Record<SettlementStateKey, string> = {
   settled: 'settled · your wallet',
   settled_without_reference: 'settled · your wallet · no reference',
   no_settlement_seen: 'no payment seen',
+  outcome_not_reported: 'outcome not reported',
   terms_only: 'terms only',
   unmatched_settlement: 'payment names no invoice'
 }
@@ -30,6 +37,7 @@ const STATE_TONE: Record<SettlementStateKey, 'good' | 'warn' | 'bad' | 'muted'> 
   settled: 'good',
   settled_without_reference: 'good',
   no_settlement_seen: 'warn',
+  outcome_not_reported: 'warn',
   terms_only: 'muted',
   unmatched_settlement: 'bad'
 }
@@ -51,6 +59,16 @@ export type SettlementRowView = {
   providerBook: string
   /** Said when the records disagree on the terms they name. */
   termsNote: string | null
+  /** The payer's own recorded total, as recorded (`final_accounted`), or
+   *  `null` when there is none. Never a sum made here, never a balance. */
+  total: string | null
+}
+
+/** The payer's recorded total, as recorded. */
+function totalText(settlement: PayerBook): string | null {
+  return typeof settlement.final_accounted_msat === 'number'
+    ? `you recorded ${settlement.final_accounted_msat} msat in total`
+    : null
 }
 
 /** The row face for a paid exchange, or `null` when the row has no payment
@@ -62,6 +80,7 @@ export function settlementRowView(settlement: PayerBook | null | undefined): Set
   const chip = settlement.state === 'terms_only' ? 'terms' : 'paid'
   const chipLabel = chip === 'paid' ? 'paid' : 'terms accepted'
   const termsNote = settlement.terms_digests.length > 1 ? 'these payment records name different terms' : null
+  const total = totalText(settlement)
   // Only the host's own states are read; the page's refinement of `settled`
   // is never accepted from the wire.
   if (!isStateKey(settlement.state) || settlement.state === 'settled_without_reference') {
@@ -75,7 +94,8 @@ export function settlementRowView(settlement: PayerBook | null | undefined): Set
       tooltip: 'A payment state this page does not recognise, shown as recorded.',
       tone: 'muted',
       providerBook,
-      termsNote
+      termsNote,
+      total
     }
   }
   const state: SettlementStateKey =
@@ -90,6 +110,70 @@ export function settlementRowView(settlement: PayerBook | null | undefined): Set
     tooltip: SETTLEMENT_STATE_TOOLTIPS[state],
     tone: STATE_TONE[state],
     providerBook,
+    termsNote,
+    total
+  }
+}
+
+export type ProviderStateKey = keyof typeof SETTLEMENT_PROVIDER_STATE_TOOLTIPS
+
+const PROVIDER_STATE_LABEL: Record<ProviderStateKey, string> = {
+  settled: 'received · your wallet',
+  outcome_not_reported: 'outcome not reported',
+  terms_only: 'terms only',
+  unmatched_settlement: 'payment names no invoice'
+}
+
+const PROVIDER_STATE_TONE: Record<ProviderStateKey, 'good' | 'warn' | 'bad' | 'muted'> = {
+  settled: 'good',
+  outcome_not_reported: 'warn',
+  terms_only: 'muted',
+  unmatched_settlement: 'bad'
+}
+
+export type ProviderSettlementView = {
+  stateKey: ProviderStateKey | 'unrecognised'
+  label: string
+  tooltip: string
+  tone: 'good' | 'warn' | 'bad' | 'muted'
+  /** Who paid: the node that requested the exchange, by its id when the row
+   *  names it. */
+  whoPaid: string
+  /** The delivered-token watermark this node recorded, or `null`. */
+  delivered: string | null
+  termsNote: string | null
+}
+
+/** The face of this node's own book as the provider of a paid exchange, or
+ *  `null` when it has none. */
+export function providerSettlementView(
+  book: PayerBook | null | undefined,
+  requester: string | null | undefined
+): ProviderSettlementView | null {
+  if (!book) return null
+  const whoPaid = requester ? `paid by ${shortId(requester)}` : 'paid by the requester'
+  const delivered =
+    typeof book.delivered_tokens === 'number' ? `${book.delivered_tokens} tokens delivered, as you recorded` : null
+  const termsNote = book.terms_digests.length > 1 ? 'these payment records name different terms' : null
+  if (!Object.hasOwn(PROVIDER_STATE_LABEL, book.state)) {
+    return {
+      stateKey: 'unrecognised',
+      label: book.state,
+      tooltip: 'A payment state this page does not recognise, shown as recorded.',
+      tone: 'muted',
+      whoPaid,
+      delivered,
+      termsNote
+    }
+  }
+  const state = book.state as ProviderStateKey
+  return {
+    stateKey: state,
+    label: PROVIDER_STATE_LABEL[state],
+    tooltip: SETTLEMENT_PROVIDER_STATE_TOOLTIPS[state],
+    tone: PROVIDER_STATE_TONE[state],
+    whoPaid,
+    delivered,
     termsNote
   }
 }
@@ -100,12 +184,21 @@ const PHASE_LABEL: Record<string, string> = {
   input_settlement_observed: 'Request invoice paid',
   output_invoice_issued: 'Invoice for the answer',
   output_settlement_observed: 'Answer invoice paid',
-  final_accounted: 'Final amount'
+  final_accounted: 'Final amount',
+  delivered: 'Delivered'
 }
 
 const SOURCE_LABEL: Record<keyof typeof SETTLEMENT_SOURCE_TOOLTIPS, string> = {
   payer_asserted: 'you recorded',
   provider_asserted: 'they stated',
+  wallet_reported: 'your wallet reported'
+}
+
+/** On this node's own provider book, "they" and "you" swap for what each
+ *  side asserted. */
+const PROVIDER_SOURCE_LABEL: Record<keyof typeof SETTLEMENT_SOURCE_TOOLTIPS, string> = {
+  payer_asserted: 'they recorded',
+  provider_asserted: 'you stated',
   wallet_reported: 'your wallet reported'
 }
 
@@ -120,14 +213,30 @@ export type SettlementEntryView = {
   paymentHash: string | null
   /** Said when a payment step carries no payment reference to match on. */
   referenceNote: string | null
+  /** The wallet's credited amount and fee, and a delivered watermark, as
+   *  recorded -- `null` when the record carries none. */
+  walletNote: string | null
   timestamp: string | null
+}
+
+function walletNote(entry: SettlementEntry): string | null {
+  const parts: string[] = []
+  if (typeof entry.credited_msat === 'number') parts.push(`credited ${entry.credited_msat} msat`)
+  if (typeof entry.fee_msat === 'number') parts.push(`fee ${entry.fee_msat} msat`)
+  if (typeof entry.tokens === 'number') parts.push(`${entry.tokens} tokens`)
+  return parts.length > 0 ? parts.join(' · ') : null
 }
 
 function isSourceKey(source: string | null): source is keyof typeof SETTLEMENT_SOURCE_TOOLTIPS {
   return source !== null && Object.hasOwn(SOURCE_LABEL, source)
 }
 
-export function settlementEntryViews(entries: readonly SettlementEntry[]): SettlementEntryView[] {
+export function settlementEntryViews(
+  entries: readonly SettlementEntry[],
+  perspective: 'payer' | 'provider' = 'payer'
+): SettlementEntryView[] {
+  const labels = perspective === 'provider' ? PROVIDER_SOURCE_LABEL : SOURCE_LABEL
+  const tooltips = perspective === 'provider' ? SETTLEMENT_PROVIDER_SOURCE_TOOLTIPS : SETTLEMENT_SOURCE_TOOLTIPS
   return entries.map((entry, index) => {
     const source = typeof entry.source === 'string' ? entry.source : null
     const known = isSourceKey(source)
@@ -135,14 +244,15 @@ export function settlementEntryViews(entries: readonly SettlementEntry[]): Settl
       key: entry.capsule_id ?? `${entry.phase}-${index}`,
       phase: PHASE_LABEL[entry.phase] ?? entry.phase,
       sourceKey: known ? source : null,
-      sourceLabel: known ? SOURCE_LABEL[source] : (source ?? 'source not recorded'),
-      sourceTooltip: known ? SETTLEMENT_SOURCE_TOOLTIPS[source] : 'Who stated this value was not recorded.',
+      sourceLabel: known ? labels[source] : (source ?? 'source not recorded'),
+      sourceTooltip: known ? tooltips[source] : 'Who stated this value was not recorded.',
       amount: typeof entry.amount_msat === 'number' ? `recorded ${entry.amount_msat} msat` : null,
       paymentHash: entry.payment_hash,
       referenceNote:
         entry.payment_hash === null && entry.phase.endsWith('_settlement_observed')
           ? 'no payment reference recorded'
           : null,
+      walletNote: walletNote(entry),
       timestamp: entry.timestamp
     }
   })
@@ -155,6 +265,7 @@ export function peerSettlementText(counts: PeerSettlementCounts | undefined): st
   if (!counts || counts.paid_exchanges === 0) return null
   const parts = [`${counts.paid_exchanges} paid`, `${counts.settled_payer_observed} settled by your wallet`]
   if (counts.no_settlement_seen > 0) parts.push(`${counts.no_settlement_seen} no payment seen`)
+  if ((counts.outcome_not_reported ?? 0) > 0) parts.push(`${counts.outcome_not_reported} outcome not reported`)
   parts.push(PROVIDER_BOOK_NOT_AVAILABLE_TEXT)
   return parts.join(' · ')
 }

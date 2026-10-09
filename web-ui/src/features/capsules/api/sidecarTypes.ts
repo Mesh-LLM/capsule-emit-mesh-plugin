@@ -290,6 +290,7 @@ export type SettlementPhase =
   | 'input_settlement_observed'
   | 'output_settlement_observed'
   | 'final_accounted'
+  | 'delivered'
 
 /** One sealed observation, values as recorded (amounts are never summed). */
 export type SettlementEntry = {
@@ -300,23 +301,48 @@ export type SettlementEntry = {
   segment: number | null
   payment_hash: string | null
   amount_msat: number | null
+  /** On a settlement, what the receiving wallet credited, when the host
+   *  passed it (provider side). */
+  credited_msat?: number
+  /** On a settlement, the wallet's fee, when the host passed it (payer: paid
+   *  on top; provider: deducted). */
+  fee_msat?: number
+  /** On a provider's `delivered` step, the delivered-token watermark. */
+  tokens?: number
 }
 
 /** The payer's book for one exchange: every invoice settled by this node's
  *  wallet (`settled`), an invoice with no settlement seen, terms with no
  *  invoice, or a settlement that names no invoice of this exchange. */
-export type PayerBookState = 'settled' | 'no_settlement_seen' | 'terms_only' | 'unmatched_settlement'
+export type PayerBookState =
+  | 'settled'
+  | 'no_settlement_seen'
+  | 'outcome_not_reported'
+  | 'terms_only'
+  | 'unmatched_settlement'
 
+/** A book of one exchange's payment records: the payer's (`settlement`) or,
+ *  on an exchange this node served for pay, its own as the provider
+ *  (`provider_settlement`). */
 export type PayerBook = {
-  observed_by: 'payer'
+  observed_by: 'payer' | 'provider'
+  /** `this_node` on a payer book; `requester` on a provider book (the row's
+   *  counterparty). */
+  who_paid?: 'this_node' | 'requester' | string
+  /** The payer's own recorded total for the exchange, wallet amounts plus
+   *  fees, copied from its `final_accounted` record; `null` when there is
+   *  none (and always on a provider book, or a row of several exchanges). */
+  final_accounted_msat?: number | null
+  /** The provider's delivered-token watermark, on a provider book. */
+  delivered_tokens?: number | null
   state: PayerBookState | string
   terms_digests: string[]
   entries: SettlementEntry[]
   /** True when a settlement carried no payment hash and could only be matched
    *  to its segment's invoice. */
   matched_by_segment_only?: boolean
-  /** `not_available` until the provider side emits its own observations. */
-  provider_book: string
+  /** On a payer book: `not_available`, the provider's book is on its node. */
+  provider_book?: string
   /** The exchange ids whose books this summary covers; the row's state is the
    *  worst of them. */
   exchange_ids?: string[]
@@ -332,6 +358,9 @@ export type PeerSettlementCounts = {
   terms_only?: number
   settled_payer_observed: number
   no_settlement_seen: number
+  /** Exchanges invoiced with no settlement and no final amount: the host
+   *  reported no outcome. */
+  outcome_not_reported?: number
   provider_book: string
 }
 
@@ -501,6 +530,9 @@ export type PaneCRow = {
    *  join. `null`/absent means no payment lifecycle was recorded for it --
    *  free, payments off, or failed before authorization -- never unpaid. */
   settlement?: PayerBook | null
+  /** On an exchange this node served for pay: its own book as the provider,
+   *  joined by the exchange id the host named its lifecycle events with. */
+  provider_settlement?: PayerBook | null
 }
 
 export type TwinRowFacts = {
@@ -578,6 +610,8 @@ export type PaneCListJson = {
   settlement_missing_exchange_id?: number
   /** Settlement records this node sealed as the provider of a paid exchange. */
   settlement_provider_records?: number
+  /** Provider exchange ids no row carries. */
+  settlement_provider_unjoined?: string[]
 }
 
 export type PaneCDrilldownJson =
