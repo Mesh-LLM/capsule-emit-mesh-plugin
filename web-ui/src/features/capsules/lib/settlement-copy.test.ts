@@ -51,7 +51,7 @@ function withoutComments(code: string): string {
 const HERE = resolve(__dirname, '..')
 const SOURCES = ['lib/settlement-view.ts', 'components/SettlementRow.tsx']
 
-const STATES = ['settled', 'no_settlement_seen', 'terms_only', 'unmatched_settlement', 'something_new']
+const STATES = ['settled', 'no_settlement_seen', 'outcome_not_reported', 'terms_only', 'unmatched_settlement', 'something_new']
 
 function book(state: string, entries: SettlementEntry[] = []): PayerBook {
   return {

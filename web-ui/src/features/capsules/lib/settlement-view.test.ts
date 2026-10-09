@@ -218,6 +218,16 @@ describe('unjoinedSettlementText', () => {
   })
 })
 
+const settled_entry = () => ({
+  capsule_id: 'p',
+  timestamp: null,
+  phase: 'input_settlement_observed',
+  source: 'wallet_reported',
+  segment: 0,
+  payment_hash: 'aa',
+  amount_msat: 120
+})
+
 describe('the paid-exchange view: what was charged, who paid, and outcomes the host did not report', () => {
   it('an invoice with no reported outcome says so, as a warning, never as unpaid', () => {
     const view = settlementRowView({ ...book('outcome_not_reported'), final_accounted_msat: null })
@@ -225,15 +235,15 @@ describe('the paid-exchange view: what was charged, who paid, and outcomes the h
     expect(view?.label).toBe('outcome not reported')
     expect(view?.tone).toBe('warn')
     expect(view?.tooltip).toMatch(/uncertain/)
-    expect(view?.tooltip).toMatch(/don’t say it was unpaid/)
-    expect(view?.total).toBeNull()
+    expect(view?.tooltip).toMatch(/can’t say which/)
+    expect(view?.finalAmount).toBeNull()
     expect(view?.label).not.toMatch(/unpaid/)
     expect(`${view?.label} ${view?.tooltip}`).not.toMatch(/balance/)
   })
 
-  it('shows the payer’s own recorded total as recorded, never a sum made here', () => {
+  it('shows the payer’s own final amount as recorded, never a sum made here', () => {
     const view = settlementRowView({ ...book('settled'), final_accounted_msat: 579 })
-    expect(view?.total).toBe('you recorded 579 msat in total')
+    expect(view?.finalAmount).toBe('final amount, as you recorded it: 579 msat')
   })
 
   it('lists the wallet’s credited amount, fee and a delivered watermark on each step that carries them', () => {
@@ -243,7 +253,8 @@ describe('the paid-exchange view: what was charged, who paid, and outcomes the h
       { capsule_id: 'c', timestamp: null, phase: 'delivered', source: 'provider_asserted', segment: null, payment_hash: null, amount_msat: 0, tokens: 42 }
     ], 'provider')
     expect(plain.walletNote).toBeNull()
-    expect(settled.walletNote).toBe('credited 119 msat · fee 1 msat')
+    expect(settled.walletNote).toBe('credited 119 msat · 1 msat deducted')
+    expect(settlementEntryViews([{ ...settled_entry(), fee_msat: 2 }])[0].walletNote).toBe('2 msat to route it')
     expect(delivered.walletNote).toBe('42 tokens')
     expect(delivered.phase).toBe('Delivered')
     // On the provider's own book, the provider is "you".

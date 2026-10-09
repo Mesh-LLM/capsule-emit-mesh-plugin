@@ -2929,7 +2929,20 @@ mod tests {
         keys.sort();
         assert_eq!(
             keys,
-            ["amount_msat", "channel", "event_ref", "exchange_id", "observed_by", "payment_hash", "phase", "segment", "settlement", "source", "terms_digest", "v"]
+            [
+                "amount_msat",
+                "channel",
+                "event_ref",
+                "exchange_id",
+                "observed_by",
+                "payment_hash",
+                "phase",
+                "segment",
+                "settlement",
+                "source",
+                "terms_digest",
+                "v"
+            ]
         );
     }
 

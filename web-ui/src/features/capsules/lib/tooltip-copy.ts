@@ -389,7 +389,7 @@ export const SETTLEMENT_STATE_TOOLTIPS = {
     'Your wallet reported each invoice’s part of this exchange paid, but at least one report carried no payment reference to match on.',
   no_settlement_seen: 'At least one invoice has no payment reported by your wallet. Your records alone can’t say why.',
   outcome_not_reported:
-    'An invoice was issued, your wallet reported no payment for it, and no final amount was recorded. The host reports no outcome here: the payment may be uncertain (its result unknown after a lost wallet reply), it may have failed, or the exchange was interrupted or is still running. These records can’t say which, and they don’t say it was unpaid.',
+    'An invoice was issued, your wallet reported no payment for it, and no final amount was recorded. The host reports no outcome here: the payment may be uncertain (its result unknown after a lost wallet reply), it may have failed, or the exchange was interrupted or is still running. These records can’t say which.',
   terms_only: 'You accepted the terms, and no invoice was recorded.',
   unmatched_settlement: 'Your wallet reported a payment that no invoice for this exchange names.'
 } as const

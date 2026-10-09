@@ -204,7 +204,10 @@ impl SettlementIndex {
     }
 
     /// Provider exchange ids no pane row carries.
-    pub(super) fn provider_unjoined<'a>(&self, joined: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    pub(super) fn provider_unjoined<'a>(
+        &self,
+        joined: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<String> {
         let joined: BTreeSet<&str> = joined.into_iter().collect();
         let mut ids: Vec<String> = self
             .provider_by_exchange
@@ -441,7 +444,10 @@ fn provider_book(entries: &[&Value]) -> Value {
         let Some(block) = settlement_block(record) else {
             continue;
         };
-        let phase = block.get("phase").and_then(Value::as_str).unwrap_or_default();
+        let phase = block
+            .get("phase")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let segment = block.get("segment").and_then(Value::as_u64);
         let payment_hash = block
             .get("payment_hash")
@@ -458,7 +464,11 @@ fn provider_book(entries: &[&Value]) -> Value {
         if phase == "delivered" {
             delivered_tokens = block.get("tokens").filter(|v| v.is_u64()).cloned();
         }
-        if let Some(digest) = block.get("terms_digest").and_then(Value::as_str).filter(|d| !d.is_empty()) {
+        if let Some(digest) = block
+            .get("terms_digest")
+            .and_then(Value::as_str)
+            .filter(|d| !d.is_empty())
+        {
             terms_digests.insert(digest.to_string());
         }
         rows.push(entry_row(record, block, phase, segment, payment_hash));
@@ -976,7 +986,11 @@ mod tests {
             .cloned()
             .map(as_provider)
             .collect();
-        records[2] = with(with(records[2].clone(), "credited_msat", json!(119)), "fee_msat", json!(1));
+        records[2] = with(
+            with(records[2].clone(), "credited_msat", json!(119)),
+            "fee_msat",
+            json!(1),
+        );
         records.push(as_provider(with(
             event("ex-s", "delivered", "provider_asserted", None, None, 0),
             "tokens",

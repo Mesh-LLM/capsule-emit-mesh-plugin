@@ -59,15 +59,15 @@ export type SettlementRowView = {
   providerBook: string
   /** Said when the records disagree on the terms they name. */
   termsNote: string | null
-  /** The payer's own recorded total, as recorded (`final_accounted`), or
+  /** The payer's own final amount, as recorded (`final_accounted`), or
    *  `null` when there is none. Never a sum made here, never a balance. */
-  total: string | null
+  finalAmount: string | null
 }
 
-/** The payer's recorded total, as recorded. */
-function totalText(settlement: PayerBook): string | null {
+/** The payer's final amount, as it recorded it. */
+function finalAmountText(settlement: PayerBook): string | null {
   return typeof settlement.final_accounted_msat === 'number'
-    ? `you recorded ${settlement.final_accounted_msat} msat in total`
+    ? `final amount, as you recorded it: ${settlement.final_accounted_msat} msat`
     : null
 }
 
@@ -80,7 +80,7 @@ export function settlementRowView(settlement: PayerBook | null | undefined): Set
   const chip = settlement.state === 'terms_only' ? 'terms' : 'paid'
   const chipLabel = chip === 'paid' ? 'paid' : 'terms accepted'
   const termsNote = settlement.terms_digests.length > 1 ? 'these payment records name different terms' : null
-  const total = totalText(settlement)
+  const finalAmount = finalAmountText(settlement)
   // Only the host's own states are read; the page's refinement of `settled`
   // is never accepted from the wire.
   if (!isStateKey(settlement.state) || settlement.state === 'settled_without_reference') {
@@ -95,7 +95,7 @@ export function settlementRowView(settlement: PayerBook | null | undefined): Set
       tone: 'muted',
       providerBook,
       termsNote,
-      total
+      finalAmount
     }
   }
   const state: SettlementStateKey =
@@ -111,7 +111,7 @@ export function settlementRowView(settlement: PayerBook | null | undefined): Set
     tone: STATE_TONE[state],
     providerBook,
     termsNote,
-    total
+    finalAmount
   }
 }
 
@@ -219,10 +219,15 @@ export type SettlementEntryView = {
   timestamp: string | null
 }
 
-function walletNote(entry: SettlementEntry): string | null {
+/** The wallet's own numbers on a step: what it credited, and what routing
+ *  the payment took from the payer (paid on top) or the provider (deducted). */
+function walletNote(entry: SettlementEntry, perspective: 'payer' | 'provider'): string | null {
   const parts: string[] = []
   if (typeof entry.credited_msat === 'number') parts.push(`credited ${entry.credited_msat} msat`)
-  if (typeof entry.fee_msat === 'number') parts.push(`fee ${entry.fee_msat} msat`)
+  if (typeof entry.fee_msat === 'number')
+    parts.push(
+      perspective === 'provider' ? `${entry.fee_msat} msat deducted` : `${entry.fee_msat} msat to route it`
+    )
   if (typeof entry.tokens === 'number') parts.push(`${entry.tokens} tokens`)
   return parts.length > 0 ? parts.join(' · ') : null
 }
@@ -252,7 +257,7 @@ export function settlementEntryViews(
         entry.payment_hash === null && entry.phase.endsWith('_settlement_observed')
           ? 'no payment reference recorded'
           : null,
-      walletNote: walletNote(entry),
+      walletNote: walletNote(entry, perspective),
       timestamp: entry.timestamp
     }
   })

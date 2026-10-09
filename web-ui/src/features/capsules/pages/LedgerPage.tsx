@@ -1215,6 +1215,11 @@ function CloseCard({
         {settlementCloseLine(counts, payments)}
       </p>
       {unjoined ? <p className="type-caption text-fg-faint">{unjoined}</p> : null}
+      {payments === 'on' ? (
+        <p className="type-caption text-fg-faint" data-close-refused-note="true">
+          {SETTLEMENT_REFUSED_NOTE}
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -1293,8 +1298,7 @@ function IntegritySection() {
         paneCQuery.data?.settlement_unjoined,
         paneCQuery.data?.settlement_missing_exchange_id ?? 0
       ),
-      providerSettlementText(paneCQuery.data?.settlement_provider_records),
-      paneCQuery.data?.payments === 'on' ? SETTLEMENT_REFUSED_NOTE : null
+      providerSettlementText(paneCQuery.data?.settlement_provider_records)
     ]
       .filter(Boolean)
       .join(' ') || null

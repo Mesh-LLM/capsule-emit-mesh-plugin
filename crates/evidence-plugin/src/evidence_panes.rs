@@ -2270,7 +2270,8 @@ fn build_pane_c_list_with_settlements(
         // This node's own book as the provider of the exchange it served under
         // these ids: the host names a provider's lifecycle events with the id
         // of the exchange it served.
-        let provider_settlement = settlements.provider_summary_for(row_exchange_ids.iter().copied());
+        let provider_settlement =
+            settlements.provider_summary_for(row_exchange_ids.iter().copied());
 
         rows.push(json!({
             "exchange_key": exchange_key,

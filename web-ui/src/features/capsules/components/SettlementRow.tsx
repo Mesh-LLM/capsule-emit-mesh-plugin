@@ -48,7 +48,7 @@ export function SettlementStrip({ settlement }: { settlement: PayerBook | null |
       <HoverChip census="settlement:provider_book" label={SETTLEMENT_PROVIDER_BOOK_TOOLTIP}>
         <span className="text-fg-faint">{view.providerBook}</span>
       </HoverChip>
-      {view.total ? <span className="font-mono tabular-nums text-fg-dim">{view.total}</span> : null}
+      {view.finalAmount ? <span className="font-mono tabular-nums text-fg-dim">{view.finalAmount}</span> : null}
       {view.termsNote ? <span className="text-fg-faint">{view.termsNote}</span> : null}
     </div>
   )
