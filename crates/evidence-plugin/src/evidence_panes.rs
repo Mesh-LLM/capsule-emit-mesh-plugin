@@ -6047,8 +6047,16 @@ mod tests {
             .find(|r| r.to_string().contains("cap-refused"))
             .expect("the refused request has its row");
         let refused = refused.as_object().unwrap();
-        assert_eq!(refused.get("settlement"), Some(&Value::Null), "present, and null");
-        assert_eq!(refused.get("provider_settlement"), Some(&Value::Null), "present, and null");
+        assert_eq!(
+            refused.get("settlement"),
+            Some(&Value::Null),
+            "present, and null"
+        );
+        assert_eq!(
+            refused.get("provider_settlement"),
+            Some(&Value::Null),
+            "present, and null"
+        );
         let paid = rows
             .iter()
             .find(|r| r.to_string().contains("cap-paid"))
