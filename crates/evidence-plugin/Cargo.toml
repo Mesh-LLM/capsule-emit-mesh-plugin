@@ -104,6 +104,10 @@ tempfile = "3"
 # `tests/mesh_evidence_bridge_interop.rs` -- same version mesh-llm-plugin
 # itself pins, so the wire shape matches exactly.
 rmcp = "1.8"
+# Frames the fake host's envelopes in `tests/quiet_default_interop.rs`, whose
+# reader task owns the read half of the plugin socket -- same version
+# mesh-llm-plugin itself pins.
+prost = "0.14"
 
 [profile.release]
 # Ship the release binary without its symbol table: about a quarter smaller
@@ -111,3 +115,11 @@ rmcp = "1.8"
 # still prints its message and location; a backtrace shows addresses instead
 # of function names.
 strip = true
+
+# Debug builds hash with an optimised SHA-256. The plugin reads and hashes its
+# own executable once per process (its runtime measurement), and an
+# unoptimised SHA-256 over a debug binary of about 190 MB takes about 19 s on
+# arm64, which every test that starts the plugin and seals a record would wait
+# for. Release builds and every output are unchanged.
+[profile.dev.package.sha2]
+opt-level = 3
