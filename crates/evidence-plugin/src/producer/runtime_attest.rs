@@ -69,6 +69,8 @@ use ed25519_dalek::Signer;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 /// How the binary digest in a [`BinaryAttestation`] was obtained — the honesty
 /// grade of the rung. Serialized verbatim into the signed record's
@@ -390,6 +392,62 @@ fn build_attestation(
     }
 }
 
+/// This process's executable as it was read and hashed at its first
+/// measurement: the path it ran from, its SHA-256 and its size.
+struct ExeMeasurement {
+    path: PathBuf,
+    sha256: String,
+    size: u64,
+}
+
+/// Set once, by the first measurement that succeeds; reused for the life of
+/// the process.
+static SELF_EXE: OnceLock<ExeMeasurement> = OnceLock::new();
+/// Serialises the first measurement, so concurrent first seals read once.
+static SELF_EXE_INIT: Mutex<()> = Mutex::new(());
+/// How many times this process has read its own executable (see
+/// [`exe_reads`]).
+static EXE_READS: AtomicUsize = AtomicUsize::new(0);
+
+/// How many times this process has read its own executable to measure it:
+/// 1 once anything was sealed, and never more.
+pub fn exe_reads() -> usize {
+    EXE_READS.load(Ordering::SeqCst)
+}
+
+/// This process's executable, read and hashed once: at the first
+/// measurement, then reused. Reading the whole executable is the expensive
+/// part of a measurement (it scales with the binary's size), and the bytes a
+/// running process was loaded from do not change under it, so there is
+/// nothing to gain by reading it again for every record.
+///
+/// What is measured is the file at first use. Replacing the executable on
+/// disk while the process runs is not seen until the process restarts, which
+/// is also when the new binary would actually run.
+///
+/// A first read that fails (path unresolvable, file unreadable) is not kept:
+/// the next measurement tries again.
+fn self_exe() -> Option<&'static ExeMeasurement> {
+    if let Some(exe) = SELF_EXE.get() {
+        return Some(exe);
+    }
+    let _first = SELF_EXE_INIT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(exe) = SELF_EXE.get() {
+        return Some(exe);
+    }
+    let path = std::env::current_exe().ok()?;
+    EXE_READS.fetch_add(1, Ordering::SeqCst);
+    let bytes = std::fs::read(&path).ok()?;
+    let _ = SELF_EXE.set(ExeMeasurement {
+        sha256: hex::encode(Sha256::digest(&bytes)),
+        size: bytes.len() as u64,
+        path,
+    });
+    SELF_EXE.get()
+}
+
 /// Measure and sign the RUNNING serving binary — `os_measured` when the
 /// kernel can be queried for this process's own signing state, else
 /// `self_measured`.
@@ -397,7 +455,10 @@ fn build_attestation(
 /// Resolves this process's own executable ([`std::env::current_exe`]), reads
 /// and SHA-256-hashes it (always — the `self_measured` claim ships even
 /// alongside `os_measured`), then tries the kernel measurement
-/// ([`kernel_attest::measure_own_process`]). Returns:
+/// ([`kernel_attest::measure_own_process`]). The executable is read and
+/// hashed once per process ([`self_exe`]); the kernel is asked on every call,
+/// because whether it still vouches for this process's pages can change
+/// while the process runs. Returns:
 ///   * `Some(BinaryAttestation)` on success — `os_measured` when the kernel
 ///     query succeeded, else `self_measured`. Both are real, signed
 ///     references to the binary this node runs; neither is ever fabricated.
@@ -410,9 +471,7 @@ fn build_attestation(
 pub fn measure_self(keys: &KeyPair, measured_at: String) -> Option<BinaryAttestation> {
     // current_exe() can fail (sandbox denies it, /proc unavailable, exe
     // unlinked). Degrade: no attestation, never a fabricated one.
-    let path: PathBuf = std::env::current_exe().ok()?;
-    let bytes = std::fs::read(&path).ok()?;
-    let binary_sha256 = hex::encode(Sha256::digest(&bytes));
+    let exe = self_exe()?;
     let kernel_signing = kernel_attest::measure_own_process();
     let measurement_class = if kernel_signing.is_some() {
         MeasurementClass::OsMeasured
@@ -422,9 +481,9 @@ pub fn measure_self(keys: &KeyPair, measured_at: String) -> Option<BinaryAttesta
     Some(build_attestation(
         keys,
         measurement_class,
-        &path,
-        binary_sha256,
-        bytes.len() as u64,
+        &exe.path,
+        exe.sha256.clone(),
+        exe.size,
         kernel_signing,
         measured_at,
     ))
@@ -666,6 +725,26 @@ mod tests {
         assert_eq!(att.to_value()["measurement_class"], "self_measured");
 
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    /// Measuring many times reads the executable once and gives the same
+    /// file measurement every time; only `measured_at` and what depends on it
+    /// differ.
+    #[test]
+    fn measure_self_reads_the_executable_once() {
+        let keys = KeyPair::generate();
+        let first = measure_self(&keys, "2026-10-05T00:00:00Z".to_string()).expect("measurable");
+        for n in 1..6 {
+            let again = measure_self(&keys, format!("2026-10-05T00:0{n}:00Z")).expect("measurable");
+            assert_eq!(again.binary_sha256, first.binary_sha256);
+            assert_eq!(again.binary_size_bytes, first.binary_size_bytes);
+            assert_eq!(again.binary_path, first.binary_path);
+            assert_eq!(
+                again.signature, first.signature,
+                "the signature covers the hash, not the time"
+            );
+        }
+        assert_eq!(exe_reads(), 1);
     }
 
     /// REAL kernel attestation, on the REAL kernel of this Apple-Silicon lab

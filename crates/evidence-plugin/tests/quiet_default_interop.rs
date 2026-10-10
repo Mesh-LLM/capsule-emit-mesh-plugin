@@ -17,13 +17,19 @@
 //! loudly.
 
 use mesh_llm_plugin::proto::{self, envelope::Payload};
-use mesh_llm_plugin::{
-    read_envelope, write_envelope, LocalListener, LocalStream, PROTOCOL_VERSION,
-};
+use mesh_llm_plugin::{LocalListener, PROTOCOL_VERSION};
+use prost::Message;
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::process::Command;
+use tokio::sync::mpsc;
 use tokio::time::timeout;
+
+/// The two halves of the plugin's socket, as `LocalStream::into_split` gives
+/// them.
+type LocalReadHalf = Box<dyn AsyncRead + Send + Unpin>;
+type LocalWriteHalf = Box<dyn AsyncWrite + Send + Unpin>;
 
 const PLUGIN_BIN: &str = env!("CARGO_BIN_EXE_capsules");
 const SELF_PEER: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
@@ -46,7 +52,10 @@ fn nonce() -> String {
 
 struct Host {
     child: tokio::process::Child,
-    stream: LocalStream,
+    /// The write half of the plugin's socket.
+    writer: LocalWriteHalf,
+    /// Every envelope the plugin sends, in order, from [`read_frames`].
+    inbox: mpsc::UnboundedReceiver<proto::Envelope>,
     next: u64,
     data_dir: std::path::PathBuf,
     /// Everything peer-bound the plugin has sent so far.
@@ -78,9 +87,13 @@ impl Host {
             .await
             .unwrap_or_else(|_| panic!("the plugin did not connect within {STARTUP:?}"))
             .unwrap();
+        let (reader, writer) = stream.into_split();
+        let (frames, inbox) = mpsc::unbounded_channel();
+        tokio::spawn(read_frames(reader, frames));
         let mut host = Self {
             child,
-            stream,
+            writer,
+            inbox,
             next: 1,
             data_dir,
             sent: Vec::new(),
@@ -110,24 +123,25 @@ impl Host {
     async fn send(&mut self, payload: Payload) {
         let request_id = self.next;
         self.next += 1;
-        write_envelope(
-            &mut self.stream,
-            &proto::Envelope {
-                protocol_version: PROTOCOL_VERSION,
-                plugin_id: "capsules".into(),
-                request_id,
-                payload: Some(payload),
-            },
-        )
-        .await
-        .unwrap();
+        let body = proto::Envelope {
+            protocol_version: PROTOCOL_VERSION,
+            plugin_id: "capsules".into(),
+            request_id,
+            payload: Some(payload),
+        }
+        .encode_to_vec();
+        self.writer
+            .write_all(&(body.len() as u32).to_le_bytes())
+            .await
+            .unwrap();
+        self.writer.write_all(&body).await.unwrap();
     }
 
+    /// The plugin's next envelope, if one arrives within `wait`. Waiting on
+    /// the channel is safe to cut short; the socket itself is read only by
+    /// [`read_frames`], which is never cut short.
     async fn recv(&mut self, wait: Duration) -> Option<proto::Envelope> {
-        timeout(wait, read_envelope(&mut self.stream))
-            .await
-            .ok()?
-            .ok()
+        timeout(wait, self.inbox.recv()).await.ok()?
     }
 
     /// Read what the plugin sends for up to `window`, keeping everything
@@ -252,6 +266,32 @@ async fn with_the_push_turned_on_the_counterparty_is_contacted() {
     );
     eprintln!("pushed after {:?}", started.elapsed());
     host.stop().await;
+}
+
+/// Reads the plugin's envelopes (a little-endian u32 length, then the body)
+/// and passes each on, until the socket closes or a frame does not decode.
+///
+/// This task owns the read half and is never cancelled. Reading a frame is
+/// two `read_exact` calls, and neither may be abandoned partway: a timeout
+/// around them would drop the bytes already read, and every later read would
+/// start mid-frame. The waits with timeouts are on the channel instead.
+async fn read_frames(mut reader: LocalReadHalf, frames: mpsc::UnboundedSender<proto::Envelope>) {
+    loop {
+        let mut len = [0u8; 4];
+        if reader.read_exact(&mut len).await.is_err() {
+            return;
+        }
+        let mut body = vec![0u8; u32::from_le_bytes(len) as usize];
+        if reader.read_exact(&mut body).await.is_err() {
+            return;
+        }
+        let Ok(envelope) = proto::Envelope::decode(body.as_slice()) else {
+            return;
+        };
+        if frames.send(envelope).is_err() {
+            return;
+        }
+    }
 }
 
 /// Each request a [`recording_witness`] saw: its request line and `Host`.
