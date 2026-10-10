@@ -275,7 +275,10 @@ describe('the paid-exchange view: what was charged, who paid, and outcomes the h
     expect(view?.label).toBe('received · your wallet')
     expect(view?.whoPaid).toMatch(/^paid by /)
     expect(view?.delivered).toBe('42 tokens delivered, as you recorded')
-    expect(providerSettlementView(provider, null)?.whoPaid).toBe('paid by the requester')
+    // A served row with no recorded counterparty says so; it never guesses.
+    expect(providerSettlementView(provider, null)?.whoPaid).toBe('payer not recorded')
+    expect(providerSettlementView(provider, undefined)?.whoPaid).toBe('payer not recorded')
+    expect(providerSettlementView(provider, '')?.whoPaid).toBe('payer not recorded')
     expect(providerSettlementView({ ...provider, state: 'outcome_not_reported' }, null)?.tone).toBe('warn')
     expect(providerSettlementView({ ...provider, state: 'something_new' }, null)?.stateKey).toBe('unrecognised')
     expect(providerSettlementView(null, null)).toBeNull()

@@ -136,8 +136,8 @@ export type ProviderSettlementView = {
   label: string
   tooltip: string
   tone: 'good' | 'warn' | 'bad' | 'muted'
-  /** Who paid: the node that requested the exchange, by its id when the row
-   *  names it. */
+  /** Who paid: the node that requested the exchange, by its id. When the row
+   *  records no counterparty, it says so rather than guessing. */
   whoPaid: string
   /** The delivered-token watermark this node recorded, or `null`. */
   delivered: string | null
@@ -151,7 +151,7 @@ export function providerSettlementView(
   requester: string | null | undefined
 ): ProviderSettlementView | null {
   if (!book) return null
-  const whoPaid = requester ? `paid by ${shortId(requester)}` : 'paid by the requester'
+  const whoPaid = requester ? `paid by ${shortId(requester)}` : 'payer not recorded'
   const delivered =
     typeof book.delivered_tokens === 'number' ? `${book.delivered_tokens} tokens delivered, as you recorded` : null
   const termsNote = book.terms_digests.length > 1 ? 'these payment records name different terms' : null

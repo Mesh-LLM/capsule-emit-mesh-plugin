@@ -6024,6 +6024,41 @@ mod tests {
         })
     }
 
+    /// A paid request refused before any payment state (a payment protocol
+    /// version the other node doesn't speak) leaves no `payment.lifecycle.v1`
+    /// event, so its row's documented state is "no payment lifecycle
+    /// observed": `settlement` and `provider_settlement` are present and
+    /// `null` (never "unpaid", never another exchange's book), and nothing is
+    /// reported unjoined for it. Another exchange's records stay its own.
+    #[test]
+    fn a_paid_request_refused_before_payment_reads_no_payment_lifecycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let records = vec![
+            asked_record("cap-paid", "req-paid", "ex-paid"),
+            asked_record("cap-refused", "req-refused", "ex-refused"),
+            settlement_record("s1", "ex-paid", "input_invoice_issued", Some(0), Some("aa")),
+        ];
+        write_fixture_ledger(dir.path(), &records);
+
+        let pane_c = build_pane_json("pane-c", dir.path(), None).unwrap();
+        let rows = pane_c["rows"].as_array().unwrap();
+        let refused = rows
+            .iter()
+            .find(|r| r.to_string().contains("cap-refused"))
+            .expect("the refused request has its row");
+        let refused = refused.as_object().unwrap();
+        assert_eq!(refused.get("settlement"), Some(&Value::Null), "present, and null");
+        assert_eq!(refused.get("provider_settlement"), Some(&Value::Null), "present, and null");
+        let paid = rows
+            .iter()
+            .find(|r| r.to_string().contains("cap-paid"))
+            .expect("the paid request has its row");
+        assert_eq!(paid["settlement"]["state"], json!("outcome_not_reported"));
+        assert_eq!(paid["settlement"]["exchange_ids"], json!(["ex-paid"]));
+        assert_eq!(pane_c["settlement_unjoined"], json!([]));
+        assert_eq!(pane_c["settlement_provider_unjoined"], json!([]));
+    }
+
     /// Two paid exchanges with ONE request digest. Exchange 1 is invoiced
     /// seg0 `aa` and settled by a hash-less wallet report; exchange 2 is
     /// invoiced seg0 `bb` and has no settlement. No row may read settled for
