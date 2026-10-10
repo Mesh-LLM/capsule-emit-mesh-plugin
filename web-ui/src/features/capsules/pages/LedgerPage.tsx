@@ -38,6 +38,7 @@ import { peersThroughSplit } from '@/features/capsules/lib/split-stage'
 import {
   buildExchangeCounterpartyIndex,
   buildExchangeLedgerRows,
+  exchangeStateFilterValue,
   type ExchangeLedgerRow
 } from '@/features/capsules/lib/exchange-ledger'
 import { buildRailSegments, sortStreamByTime } from '@/features/capsules/lib/exchange-stream'
@@ -73,11 +74,7 @@ import {
   paginateGroups,
   windowBannerHeadline
 } from '@/features/capsules/lib/exchange-pages'
-import {
-  deriveRightCellState,
-  LEDGER_STATE_FILTER_VALUES,
-  ledgerStateFilterValue
-} from '@/features/capsules/lib/exchange-row-state'
+import { deriveRightCellState, LEDGER_STATE_FILTER_VALUES } from '@/features/capsules/lib/exchange-row-state'
 import {
   exchangeEvidenceBundle,
   exchangeRowsToCsv,
@@ -281,7 +278,9 @@ function PeersSection({ recordsById }: { recordsById: Map<string, CapsuleRecord>
     )
   }
 
-  const dealtWithViews = sortedDealtWithRawRows.map((row) => dealtWithRowView(row, resolveTimestamp))
+  const dealtWithViews = sortedDealtWithRawRows.map((row) =>
+    dealtWithRowView(row, resolveTimestamp, harnessMode ? [] : (paneCQuery.data?.rows ?? []))
+  )
   const advertisedViews = advertisedPeers.map((peer) => advertisedOnlyRowView(peer.shortId ?? peer.id))
 
   // §3E -- the role-aware
@@ -349,7 +348,8 @@ const ALL_CHECKS_VALUES = ['clean', 'exception']
 // v3 §2a: "useful filters are states, not qualities". `twins` isn't a
 // right-cell state -- it's bracket membership, which no payload carries
 // until B6 -- see `rowMatchesStateFilter` below.
-const ALL_STATE_FILTER_VALUES = [...LEDGER_STATE_FILTER_VALUES, 'twins']
+// `local`: a served exchange with no other side (`isLocalOnly`), kept out of `open`.
+const ALL_STATE_FILTER_VALUES = [...LEDGER_STATE_FILTER_VALUES, 'local', 'twins']
 
 function exchangeFilterOptionLabel(value: string): string {
   switch (value) {
@@ -369,6 +369,8 @@ function exchangeFilterOptionLabel(value: string): string {
       return 'Asked, no reply'
     case 'open':
       return 'Open'
+    case 'local':
+      return 'This node only'
     case 'twins':
       return 'Twins only'
     default:
@@ -379,13 +381,13 @@ function exchangeFilterOptionLabel(value: string): string {
 /** `twins` is bracket membership, not a right-cell state -- orthogonal to
  *  (not a replacement for) the state categories, so it's OR'd in as an
  *  extra way for a row to match rather than folded into
- *  `ledgerStateFilterValue`'s single bucket. With every value selected by
+ *  `exchangeStateFilterValue`'s single bucket. With every value selected by
  *  default (today's default), this changes nothing; deselecting every
  *  state except `twins` is what makes this "Twins only" -- exactly what
  *  wires up now that rows can actually carry a
  *  bracket id. */
 function rowMatchesStateFilter(row: ExchangeLedgerRow, selected: ReadonlySet<string>): boolean {
-  if (selected.has(ledgerStateFilterValue(row.rightCellState))) return true
+  if (selected.has(exchangeStateFilterValue(row))) return true
   return row.twinBracketId !== null && selected.has('twins')
 }
 
@@ -466,8 +468,8 @@ function ExchangesSection({
     [paneBQuery.data]
   )
   const allRows = useMemo(
-    () => buildExchangeLedgerRows(query.data?.rows ?? [], counterpartyIndex),
-    [query.data, counterpartyIndex]
+    () => buildExchangeLedgerRows(query.data?.rows ?? [], counterpartyIndex, recordsById),
+    [query.data, counterpartyIndex, recordsById]
   )
 
   const [search, setSearch] = useState('')
@@ -771,7 +773,7 @@ function ExchangesSection({
     value,
     // `twins` always counts 0 today -- honest, not a bug (see
     // `rowMatchesStateFilter`).
-    count: value === 'twins' ? 0 : allRows.filter((r) => ledgerStateFilterValue(r.rightCellState) === value).length
+    count: value === 'twins' ? 0 : allRows.filter((r) => exchangeStateFilterValue(r) === value).length
   }))
   const activeFilterGroups =
     (roleFilter.size < ALL_ROLE_VALUES.length ? 1 : 0) +

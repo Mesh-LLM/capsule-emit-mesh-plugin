@@ -10,6 +10,7 @@ import { createRoot } from 'react-dom/client'
 import evidenceCss from '@/styles/evidence.css?inline'
 import { EvidencePage, focusExchangeKeyFrom } from '@/features/capsules/pages/EvidencePage'
 import { setPluginHost } from '@/plugin-host/host'
+import { SCOPE_ATTRIBUTE } from '@/lib/scope'
 import { EvidenceChip } from '@/features/capsules/contributions/EvidenceChip'
 import type {
   MeshPluginUiBundleModule,
@@ -38,6 +39,7 @@ export function mountEvidencePage({ element, host }: MeshPluginUiMountContext): 
   setPluginHost(host)
   const style = injectStyles()
   const container = document.createElement('div')
+  container.setAttribute(SCOPE_ATTRIBUTE, '')
   element.replaceChildren(container)
   const root = createRoot(container)
   root.render(<EvidencePage focusExchangeKey={focusExchangeKeyFrom(window.location.search)} />)
@@ -55,6 +57,7 @@ export function mountEvidencePage({ element, host }: MeshPluginUiMountContext): 
  *  handed, never the page's: the page need not be open. */
 export function mountEvidenceChip({ element, host, subject }: MeshPluginUiContributionMountContext): MeshPluginUiMountHandle {
   const container = document.createElement('span')
+  container.setAttribute(SCOPE_ATTRIBUTE, '')
   element.replaceChildren(container)
   const root = createRoot(container)
   root.render(<EvidenceChip host={host} subject={subject} />)

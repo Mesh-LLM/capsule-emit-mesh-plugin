@@ -14,6 +14,7 @@ function row(overrides: Partial<ExchangeLedgerRow> = {}): ExchangeLedgerRow {
     roleTag: 'ASKED',
     counterparty: null,
     confirmed: false,
+    localOnly: false,
     hasIssue: false,
     checksText: '—',
     rightCellState: { kind: 'open_not_asked', date: null },

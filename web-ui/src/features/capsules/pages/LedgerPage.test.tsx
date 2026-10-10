@@ -1817,3 +1817,129 @@ describe('LedgerPageContent — real twin bracket + Twins-only filter', () => {
     expect(screen.queryByRole('group', { name: 'Exchange exch-1' })).not.toBeInTheDocument()
   })
 })
+
+// ---------------------------------------------------------------------------
+// A served exchange with no other side (a chat this node served from its own
+// console) is LOCAL: badged so, and in no open count.
+// ---------------------------------------------------------------------------
+
+describe('LedgerPageContent — a served exchange with no other side', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('is badged LOCAL, and the state filter counts it under "This node only", not "Open"', async () => {
+    const { fetchPaneCList } = await import('@/features/capsules/api/sidecarClient')
+    const served = (key: string, counterparty: string | null) => ({
+      exchange_key: key,
+      role_tag: 'SERVED',
+      header_state: 'absent',
+      properties: null,
+      has_issue: false,
+      counterparty,
+      mine: { state: 'present-unverified', capsule_id: `${key}-mine`, role: 'served' },
+      theirs: { state: 'absent', capsule_id: null },
+      unilateral: true,
+      timestamp: '2026-10-05T22:39:00Z'
+    })
+    vi.mocked(fetchPaneCList).mockResolvedValue(
+      b3PaneCPayload([served('local-exch', null), served('remote-exch', 'key:2b4600')] as unknown as ReturnType<
+        typeof makeManyPaneCRows
+      >)
+    )
+
+    const user = userEvent.setup()
+    render(<LedgerPageContent />, { wrapper: makeWrapper() })
+    await user.click(screen.getByRole('tab', { name: /exchanges/i }))
+
+    const local = await screen.findByRole('group', { name: 'Exchange local-exch' })
+    expect(within(local).getByText('LOCAL')).toBeInTheDocument()
+    expect(within(local).queryByText(/^OPEN/)).not.toBeInTheDocument()
+    const remote = screen.getByRole('group', { name: 'Exchange remote-exch' })
+    expect(within(remote).getByText('OPEN')).toBeInTheDocument()
+
+    await user.click(screen.getByLabelText('Filter exchanges'))
+    const stateSection = (await screen.findByText('State')).closest('section')
+    if (!stateSection) throw new Error('State filter section not found')
+    expect(within(stateSection).getByLabelText(/^Open, 1 /)).toBeInTheDocument()
+    expect(within(stateSection).getByLabelText(/^This node only, 1 /)).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Peers: a peer's twin pairs, as facts (how many, how many answers differed,
+// whether a referee ruled), so a peer whose twin answers differed does not
+// read clean on Peers. Never a judgement word.
+// ---------------------------------------------------------------------------
+
+describe('LedgerPageContent — twin pairs on Peers', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function paneBPeer(peerId: string) {
+    return {
+      peer_id: peerId,
+      node: { state: 'present', text: peerId, peer_id: peerId, member_kind: 'member', exchange_count: 3 },
+      rung: { state: 'present', text: 'full_bilateral', rung: 'full_bilateral', distinct_rungs: ['full_bilateral'] },
+      role: {
+        state: 'present',
+        text: 'you_to_them · 3',
+        role: 'you_to_them',
+        you_to_them_count: 3,
+        them_to_you_count: 0,
+        exchange_count: 3
+      },
+      history: { state: 'NOT_CHECKED', text: null },
+      served: { state: 'NOT_CHECKED', text: null },
+      pair: { state: 'absent', text: null, verified: 0, failed: 0, missing: 0, details: [] },
+      verdicts: { state: 'NOT_CHECKED', text: null, tally: { corroborated: 0, contradicted: 0, inconclusive: 0 } },
+      asked: { state: 'absent', text: null, count: 0 },
+      exchange_count: 3,
+      first_seen: null,
+      last_seen: null
+    }
+  }
+
+  function twinHalf(i: number, counterparty: string, otherRow: string) {
+    return {
+      exchange_key: `${counterparty}-${i}`,
+      role_tag: 'ASKED',
+      counterparty,
+      header_state: 'ok',
+      properties: null,
+      has_issue: false,
+      mine: { state: 'present', capsule_id: `${counterparty}-${i}-mine` },
+      theirs: { state: 'present', capsule_id: `${counterparty}-${i}-theirs` },
+      unilateral: false,
+      timestamp: '2026-10-05T21:00:00Z',
+      twin_bracket_id: `b${i}`,
+      twin: { bracket_id: `b${i}`, same_answer: false, other_row: otherRow }
+    }
+  }
+
+  it("shows a peer's twin pairs as facts, and nothing extra for a peer in none", async () => {
+    const { fetchPaneB, fetchPaneCList } = await import('@/features/capsules/api/sidecarClient')
+    vi.mocked(fetchPaneB).mockResolvedValue({
+      rows: [paneBPeer('node:adversary'), paneBPeer('node:other')],
+      peer_count: 2
+    } as unknown as Awaited<ReturnType<typeof fetchPaneB>>)
+    vi.mocked(fetchPaneCList).mockResolvedValue(
+      b3PaneCPayload(
+        [1, 2, 3].flatMap((i) => [
+          twinHalf(i, 'node:adversary', `key:second-${i}`),
+          twinHalf(i, 'key:second', `node:adversary-${i}`)
+        ]) as unknown as ReturnType<typeof makeManyPaneCRows>
+      )
+    )
+
+    const user = userEvent.setup()
+    render(<LedgerPageContent />, { wrapper: makeWrapper() })
+    await user.click(screen.getByRole('tab', { name: /peers/i }))
+
+    expect(await screen.findByText('Twin pairs: 3 · answers differed: 3 · not adjudicated')).toBeInTheDocument()
+    expect(document.querySelectorAll('[data-peer-twins="true"]')).toHaveLength(1)
+    const lines = Array.from(document.querySelectorAll('[data-peer-twins="true"]')).map((el) => el.textContent ?? '')
+    for (const line of lines) expect(line).not.toMatch(/dishonest|honest|bad|flag|lie|cheat|wrong|suspicious/i)
+  })
+})

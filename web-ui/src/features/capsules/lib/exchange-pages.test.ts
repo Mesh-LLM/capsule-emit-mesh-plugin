@@ -23,6 +23,7 @@ function streamRow(overrides: Partial<ExchangeLedgerRow> = {}): ExchangeLedgerRo
     roleTag: 'ASKED',
     counterparty: null,
     confirmed: false,
+    localOnly: false,
     hasIssue: false,
     checksText: '—',
     rightCellState: { kind: 'open_not_asked', date: null },

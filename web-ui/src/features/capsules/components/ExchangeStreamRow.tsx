@@ -67,7 +67,11 @@ import { useClipboardCopy } from '@/lib/useClipboardCopy'
 import { formatExchangeTimestamp } from '@/features/capsules/lib/local-time'
 import { RowVerdictLine } from '@/features/capsules/components/RowVerdictLine'
 import { rowCombinationText } from '@/features/capsules/lib/row-combination'
-import { CLOSED_FROM_FETCH_NOT_SAVED, OWN_RECORD_FAILS_WARNING } from '@/features/capsules/lib/tooltip-copy'
+import {
+  CLOSED_FROM_FETCH_NOT_SAVED,
+  LOCAL_ONLY_TOOLTIP,
+  OWN_RECORD_FAILS_WARNING
+} from '@/features/capsules/lib/tooltip-copy'
 
 /** The gated cell text (Do (2)) when an ask
  *  action's row carries no recorded counterparty. This splits by which of two
@@ -239,6 +243,10 @@ export function ExchangeStreamRow({
   // has one, but it's unknown/unrecorded. Never a single "nothing to ask yet"
   // that hides the difference.
   const gatedByCounterparty = isAskAction(state.kind) && !row.counterparty && !askFor
+  // A served exchange with no other side anywhere: LOCAL, not OPEN, since
+  // nothing of theirs can arrive (`isLocalOnly`). An ask this row sent would
+  // name another side, so it ends this.
+  const localOnly = row.localOnly && !askOutcome
   const gatedText = row.roleTag === 'SERVED' ? NO_OTHER_SIDE_TEXT : OTHER_SIDE_NOT_KNOWN_TEXT
   const cellText = gatedByCounterparty ? gatedText : rightCellText(state)
   // UX §3: with push on, their record normally arrives when the exchange
@@ -281,7 +289,8 @@ export function ExchangeStreamRow({
   const ownRecordFails = entryRowChipMark(checksRows, 'content') === '✗' || entryRowChipMark(checksRows, 'sig') === '✗'
   // The bracket strip, drawn in words (UX §3): `Yours ● sealed —— Theirs ●
   // same`. Same state the badge renders.
-  const strip = bracketStripText(bracketStrip(row.raw, state))
+  const bracket = bracketStrip(row.raw, state)
+  const strip = bracketStripText(localOnly ? { ...bracket, theirs: { glyph: '○', word: 'no other side' } } : bracket)
   // One hover on the strip for what the badge and the chips say together.
   const combination = rowCombinationText({
     state: state.kind,
@@ -432,14 +441,14 @@ export function ExchangeStreamRow({
                 {/* L-A/L-B: only CONTRADICTED gets the alarm dot; the tone
                    (§3A "one colour per state") still varies with CLOSED/
                    refused/absent, never just alarm-vs-muted. */}
-                <StatusBadge dot={alarm} size="caption" tone={tone}>
-                  {rowStatusLabel(state, row.raw.theirs.in_their_log)}
+                <StatusBadge dot={alarm} size="caption" tone={localOnly ? 'muted' : tone}>
+                  {localOnly ? 'LOCAL' : rowStatusLabel(state, row.raw.theirs.in_their_log)}
                 </StatusBadge>
                 {/* Terse state on the face; the fuller story behind the (i). */}
                 <InfoHover
-                  census={`row_state:${state.kind}`}
-                  describes={`the ${rightCellStatusLabel(state)} state`}
-                  label={rightCellDetail(state)}
+                  census={localOnly ? 'row_state:local' : `row_state:${state.kind}`}
+                  describes={localOnly ? 'the LOCAL state' : `the ${rightCellStatusLabel(state)} state`}
+                  label={localOnly ? LOCAL_ONLY_TOOLTIP : rightCellDetail(state)}
                   side="left"
                 />
               </span>

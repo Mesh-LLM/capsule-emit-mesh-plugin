@@ -10,6 +10,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import type { PluginOption } from 'vite'
 import { defineConfig } from 'vitest/config'
+import { scopeToMountRoot } from './scope-css.ts'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -38,7 +39,8 @@ function noSyntaxGrammars(): PluginOption {
 }
 
 export default defineConfig({
-  plugins: [noSyntaxGrammars(), react(), tailwindcss()],
+  // scopeToMountRoot runs after Tailwind's own transform: it needs the compiled CSS.
+  plugins: [noSyntaxGrammars(), react(), tailwindcss(), scopeToMountRoot()],
   resolve: { alias: { '@': path.resolve(dirname, './src') } },
   define: { 'process.env.NODE_ENV': JSON.stringify('production') },
   build: {

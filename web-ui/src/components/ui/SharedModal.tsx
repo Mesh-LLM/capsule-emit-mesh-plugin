@@ -1,6 +1,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import * as React from 'react'
 import { cn } from '@/lib/cn'
+import { portalContainer } from '@/lib/scope'
 
 const SharedModal = DialogPrimitive.Root
 
@@ -23,7 +24,7 @@ const SharedModalContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
 >(({ className, children, ...props }, ref) => (
-  <DialogPrimitive.Portal>
+  <DialogPrimitive.Portal container={portalContainer()}>
     <SharedModalOverlay />
     <DialogPrimitive.Content
       ref={ref}

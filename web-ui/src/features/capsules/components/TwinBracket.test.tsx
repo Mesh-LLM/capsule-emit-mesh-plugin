@@ -28,6 +28,7 @@ function twinRow(exchangeKey: string, overrides: Partial<PaneCRow> = {}): Exchan
     roleTag: raw.role_tag,
     counterparty: null,
     confirmed: false,
+    localOnly: false,
     hasIssue: false,
     checksText: '—',
     rightCellState: { kind: 'closed', date: null },

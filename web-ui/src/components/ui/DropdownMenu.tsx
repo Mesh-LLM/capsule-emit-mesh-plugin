@@ -2,6 +2,7 @@ import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu'
 import { Check } from 'lucide-react'
 import { forwardRef, type ComponentPropsWithoutRef, type ComponentRef } from 'react'
 import { cn } from '@/lib/cn'
+import { portalContainer } from '@/lib/scope'
 
 export function DropdownMenu(props: ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root {...props} />
@@ -14,7 +15,7 @@ export const DropdownMenuTrigger = forwardRef<
 DropdownMenuTrigger.displayName = 'DropdownMenuTrigger'
 
 export function DropdownMenuPortal(props: ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Portal>) {
-  return <DropdownMenuPrimitive.Portal {...props} />
+  return <DropdownMenuPrimitive.Portal container={portalContainer()} {...props} />
 }
 
 export const DropdownMenuSeparator = forwardRef<
@@ -39,7 +40,7 @@ export const DropdownMenuContent = forwardRef<
   ComponentRef<typeof DropdownMenuPrimitive.Content>,
   ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
 >(({ className, align = 'end', collisionPadding = 8, sideOffset = 6, ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal>
+  <DropdownMenuPrimitive.Portal container={portalContainer()}>
     <DropdownMenuPrimitive.Content
       ref={ref}
       align={align}

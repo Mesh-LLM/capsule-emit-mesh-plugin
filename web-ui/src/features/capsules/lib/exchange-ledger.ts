@@ -4,8 +4,15 @@
 // exceptions-first and NEVER a count; Confirmed is the double-entry fact,
 // not registration) are unit-testable without mounting a table.
 import type { PaneBRow, PaneCRow } from '@/features/capsules/api/sidecarTypes'
+import type { CapsuleRecord } from '@/features/capsules/api/types'
+import { askTarget } from '@/features/capsules/lib/ask-for-record'
 import { deriveContentToggleState, type ContentToggleState } from '@/features/capsules/lib/exchange-content-state'
-import { deriveRightCellState, type RightCellState } from '@/features/capsules/lib/exchange-row-state'
+import {
+  deriveRightCellState,
+  ledgerStateFilterValue,
+  type LedgerStateFilterValue,
+  type RightCellState
+} from '@/features/capsules/lib/exchange-row-state'
 import { NINE_PROPERTY_LABELS } from '@/features/capsules/lib/nine-properties'
 import { peerExchangeIds } from '@/features/capsules/lib/peer-exchange-timeline'
 import { peerDisplayId } from '@/features/capsules/lib/peer-row-view'
@@ -21,6 +28,10 @@ export type ExchangeLedgerRow = {
    *  predicate -- the old `theirs.state !== 'absent' && !unilateral` read
    *  was a dormant CLOSED-ish overclaim the gate never authorized. */
   confirmed: boolean
+  /** This node served the exchange and no other side is recorded or named
+   *  anywhere (`isLocalOnly`): there is no record of theirs to wait for, so
+   *  the row is LOCAL, never OPEN, and no open or unconfirmed count holds it. */
+  localOnly: boolean
   hasIssue: boolean
   /** Exceptions-first, NEVER a count — "—" when clean, else the specific
    *  failing property name(s), or the pair-reconciliation fallback when
@@ -97,12 +108,39 @@ function pushedHalfCounterparty(row: PaneCRow): string | null {
   return typeof receivedFrom === 'string' && receivedFrom.length > 0 ? receivedFrom : null
 }
 
+/** A row this node served with no other side anywhere: no counterparty (from
+ *  the row, Pane B or a pushed half), no evidence of theirs of any kind
+ *  (`open_not_asked`), and its own record names no node to ask. The same
+ *  conditions under which the row already reads "Local — no other side". */
+export function isLocalOnly(
+  row: PaneCRow,
+  counterparty: string | null,
+  state: RightCellState,
+  ownRecord: CapsuleRecord | Record<string, unknown> | null | undefined
+): boolean {
+  return (
+    row.role_tag === 'SERVED' && counterparty === null && state.kind === 'open_not_asked' && askTarget(ownRecord) === null
+  )
+}
+
+/** The state filter's bucket for a row: a local-only row has its own,
+ *  `local`, rather than counting as `open`. */
+export type ExchangeStateFilterValue = LedgerStateFilterValue | 'local'
+
+export function exchangeStateFilterValue(row: ExchangeLedgerRow): ExchangeStateFilterValue {
+  return row.localOnly ? 'local' : ledgerStateFilterValue(row.rightCellState)
+}
+
 export function buildExchangeLedgerRows(
   rows: readonly PaneCRow[],
-  counterpartyIndex: ReadonlyMap<string, string>
+  counterpartyIndex: ReadonlyMap<string, string>,
+  /** This node's own records by `capsule_id`, as the rows render them. */
+  recordsById: ReadonlyMap<string, CapsuleRecord> = new Map()
 ): ExchangeLedgerRow[] {
   return rows.map((row) => {
     const rightCellState = deriveRightCellState(row)
+    const counterparty = row.counterparty ?? counterpartyIndex.get(row.exchange_key) ?? pushedHalfCounterparty(row)
+    const ownRecord = (row.mine.capsule_id ? recordsById.get(row.mine.capsule_id) : undefined) ?? row.mine.record
     return {
       exchangeKey: row.exchange_key,
       timestamp: row.timestamp,
@@ -113,12 +151,13 @@ export function buildExchangeLedgerRows(
       // exchange key but not a counterparty); then the Pane B
       // pair-reconciliation join; last, the sender the record-push door
       // recorded for a locally-held counterparty half (older payloads).
-      counterparty: row.counterparty ?? counterpartyIndex.get(row.exchange_key) ?? pushedHalfCounterparty(row),
+      counterparty,
       // Derived from the ONE gate -- `closed` is the only state where their
       // half is held, signed, and cites ours. The retired structural read
       // (`theirs.state !== 'absent' && !unilateral`) was a dormant second
       // CLOSED-ish predicate; nothing may re-grow one.
       confirmed: rightCellState.kind === 'closed',
+      localOnly: isLocalOnly(row, counterparty, rightCellState, ownRecord),
       hasIssue: row.has_issue,
       checksText: checksTextFor(row),
       rightCellState,

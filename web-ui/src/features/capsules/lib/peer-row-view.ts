@@ -6,6 +6,7 @@
 import type { PaneBConfirmedSibling, PaneBRow, PaneCRow } from '@/features/capsules/api/sidecarTypes'
 import { deriveRightCellState } from '@/features/capsules/lib/exchange-row-state'
 import type { PeerMeshStatus } from '@/features/capsules/lib/peer-mesh-status'
+import { peerTwinTally, peerTwinText } from '@/features/capsules/lib/peer-twins'
 import { peerSettlementText } from '@/features/capsules/lib/settlement-view'
 import { PEER_ATTENTION, PEER_COLUMN_TOOLTIPS, SELF_REPORTED_TOOLTIP } from '@/features/capsules/lib/tooltip-copy'
 
@@ -526,12 +527,22 @@ export type PeerTableRowView = {
   /** Payments with this peer, counted (`peerSettlementText`); `null` when
    *  there is no paid exchange on record. */
   payments: string | null
+  /** This peer's twin pairs, as facts (`peerTwinText`); `null` when no twin
+   *  pair names it. */
+  twins: string | null
   row: PaneBRow | null
+}
+
+function twinsText(peerId: string, exchangeRows: readonly PaneCRow[]): string | null {
+  const tally = peerTwinTally(peerId, exchangeRows)
+  return tally ? peerTwinText(tally) : null
 }
 
 export function dealtWithRowView(
   row: PaneBRow,
-  resolveTimestamp?: (capsuleId: string) => string | null
+  resolveTimestamp?: (capsuleId: string) => string | null,
+  /** The Exchanges rows (pane C), for this peer's twin pairs. */
+  exchangeRows: readonly PaneCRow[] = []
 ): PeerTableRowView {
   // `peerDisplayId` returns `null` for a row with no counterparty identity
   // at all (see its own doc comment) -- callers filter those out before
@@ -555,6 +566,7 @@ export function dealtWithRowView(
     alarm: alarmSignal(row, resolveTimestamp),
     attention: peerAttention(row, resolveTimestamp),
     payments: peerSettlementText(row.settlement),
+    twins: twinsText(displayId, exchangeRows),
     row
   }
 }
@@ -604,6 +616,7 @@ export function advertisedOnlyRowView(displayId: string): PeerTableRowView {
     alarm: { present: false, text: '', tone: 'warn' },
     attention: [],
     payments: null,
+    twins: null,
     row: null
   }
 }

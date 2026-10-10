@@ -87,6 +87,9 @@ importers:
       jsdom:
         specifier: 30.0.1
         version: 30.0.1(@noble/hashes@1.8.0)
+      lightningcss:
+        specifier: 1.33.0
+        version: 1.33.0
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
