@@ -423,7 +423,7 @@ async fn receive_pushed_record(
     let capsules = capsules.clone();
     let sender_peer_id = sender_peer_id.to_string();
     let body = body.to_vec();
-    let peer_keys = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let peer_keys = crate::peer_keys::registry();
     let record_at_completion_off = crate::share_policy::record_at_completion_is_off();
     tokio::task::spawn_blocking(move || {
         let receiver = crate::record_push_receive::Receiver {

@@ -405,7 +405,7 @@ pub async fn consider(
         Ok(begun) => begun,
         Err(considered) => return considered,
     };
-    let peer_keys = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let peer_keys = crate::peer_keys::registry();
     let attempted = match gated {
         Some(done) => done,
         None => {
@@ -468,7 +468,7 @@ async fn hold_and_deliver(
 ) {
     let body = json!({ crate::referee::hold::DELIVERY_MARKER: 1, "verdict_capsule": verdict });
     let own_key = hex::encode(capsules.signing_key().verifying_key().to_bytes());
-    let peer_keys = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let peer_keys = crate::peer_keys::registry();
     let door = crate::referee::hold::Node {
         ledger_dir: capsules.ledger_dir(),
         peer_keys: peer_keys.as_deref(),

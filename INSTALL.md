@@ -72,10 +72,12 @@ until you turn it on:
 | One of this node's records, when a peer asks for it by id | the peer that record names as the other side (or one about to be) | on: an answer, never a push | `share_history_segments = "off"` |
 | A signed checkpoint of the log | the witness services you name | **off**: none by default | add witnesses under **Witnesses** |
 
-The referee also needs exchange text kept on this node, which is its own
-setting (`CAPSULES_KEEP_EXCHANGE_TEXT`, off) and which stock mesh-llm cannot
-fill today (it passes no exchange text to plugins); turning the referee on is
-the decision to send a prompt to a third node.
+The referee also needs the pair's text on this node. Stock mesh-llm passes no
+exchange text to plugins, so the client that marked the pair supplies it
+(`referee_supply_twin_texts`: the request and both answers). They are kept
+only when the referee is on, each is the body this node's own records sealed,
+and the answers differ. Turning the referee on, and supplying a pair's text,
+is the decision to send a prompt to a third node.
 
 All peer traffic uses mesh-llm's own peer connections. Nothing goes to any
 third party unless you name a witness. The switches are under Configuration ›
@@ -172,12 +174,23 @@ Confirmation is off by default, because it sends this node's record to the
 other side: turn on `share_record_at_completion` (`counterparty`) on both
 nodes, and give each node the other's key (below).
 
-**Each node must know the other node's public key.** Nodes do not exchange
-keys yet. The plugin accepts a record only from a peer whose key you have
-configured, and refuses the rest. Set `CAPSULES_PEER_KEYS` in the
-node's environment to a JSON object mapping each peer's id to its raw Ed25519
-public key in hex. A node writes its own id to `<data dir>/self-peer-id` and
-its public key to `<data dir>/keys/node-key.pub.pem`.
+**Each node must know the other node's public key.** The plugin accepts a
+record only from a peer whose key it knows, and refuses the rest. It knows a
+key from either of two places:
+
+- **The host,** when mesh-llm announces plugin keys (it lists the
+  `plugin_keys.v1` capability): each directly-connected peer's key for this
+  plugin, bound to that peer by its node key, read from the host's
+  `GET /api/plugin-keys` (`CAPSULES_HOST_CONSOLE_URL`, default
+  `http://127.0.0.1:3131`). This plugin announcing its own key there follows
+  once a mesh-llm plugin release carries the request.
+- **You:** set `CAPSULES_PEER_KEYS` in the node's environment to a JSON object
+  mapping each peer's id to its raw Ed25519 public key in hex. A node writes
+  its own id to `<data dir>/self-peer-id` and its public key to
+  `<data dir>/keys/node-key.pub.pem`.
+
+If the two give a peer different keys, nothing from that peer verifies until
+you remove the stale entry.
 
 **A client-only node (`mesh-llm client`) cannot be named there.** mesh-llm
 gives a client node a new peer id each time it starts, so no entry in

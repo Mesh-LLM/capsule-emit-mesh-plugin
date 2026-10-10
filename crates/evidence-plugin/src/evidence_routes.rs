@@ -30,7 +30,7 @@ use serde_json::{json, Value};
 use crate::evidence_panes::{
     attach_asked_of_you, build_pane_json, read_capsule_records, read_received_log,
 };
-use crate::peer_keys::{announced_key_in, ENV_PEER_KEYS};
+use crate::peer_keys::announced_key_in;
 
 /// The directory this node's log of requests made of it
 /// (`received_log.jsonl`, written by `received_log`) lives in: the drill's
@@ -83,7 +83,8 @@ pub struct PeerKeyArgs {
 /// `peer-key`: what "Ask them for their record" judges a reply under. The
 /// page never takes the key a reply names for itself. The key is read by the
 /// same rule the record-push receiver uses (`peer_keys::announced_key_in`),
-/// from the same operator map (`peer_keys::ENV_PEER_KEYS`).
+/// from the same registry (`peer_keys::registry`: the host's announced keys
+/// and the operator's map).
 pub fn peer_key_json(registry: Option<&str>, peer: &Value) -> Result<Value, PluginError> {
     let Some(peer) = peer
         .as_str()
@@ -313,12 +314,13 @@ pub fn with_routes(
         http::get("/peer-key")
             .binding_id("evidence_peer_key")
             .description(
-                "The key the operator announced for one peer (CAPSULES_PEER_KEYS), or null.",
+                "The key one peer is known to sign with (announced by its host, or set in \
+                 CAPSULES_PEER_KEYS), or null.",
             )
             .input::<PeerKeyArgs>()
             .handle(move |args, _context| {
                 Box::pin(async move {
-                    let registry = crate::settings::var(ENV_PEER_KEYS).ok();
+                    let registry = crate::peer_keys::registry();
                     peer_key_json(registry.as_deref(), &args.peer)
                 })
             }),

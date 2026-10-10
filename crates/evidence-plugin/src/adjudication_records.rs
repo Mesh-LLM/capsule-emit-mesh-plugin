@@ -160,7 +160,7 @@ fn recorded_as(ledger_dir: &std::path::Path, verdict_capsule_id: &str) -> Option
 /// records it (`recorded_as`) are reported beside it. `null` capsule when
 /// none is held.
 pub fn verdict_json(ledger_dir: &std::path::Path, verdict_capsule_id: &str) -> Value {
-    let peer_keys = crate::settings::var(crate::peer_keys::ENV_PEER_KEYS).ok();
+    let peer_keys = crate::peer_keys::registry();
     verdict_json_with(ledger_dir, verdict_capsule_id, peer_keys.as_deref())
 }
 

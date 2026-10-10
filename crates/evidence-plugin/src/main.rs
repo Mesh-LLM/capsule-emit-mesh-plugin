@@ -997,6 +997,26 @@ fn with_evidence_operations(
             }),
     );
     builder = builder.mcp_item(
+        mcp::tool(referee::supplied::SUPPLY_TWIN_TEXTS_OPERATION)
+            .description(
+                "Give this node the request and both answers of a twin pair its client marked (by \
+                 twin bracket id), so a referee can be asked. They are kept only when the referee \
+                 is on, the request and each answer are the bodies this node's own records sealed, \
+                 and the answers differ. A referee that is asked receives the request and both \
+                 answers. Returns whether they were kept, and the pair's row.",
+            )
+            .input::<referee::supplied::SupplyTwinTextsArgs>()
+            .handle({
+                let capsules = capsules_for_delivery.clone();
+                let self_peer = self_peer.clone();
+                move |args, context| {
+                    let capsules = capsules.clone();
+                    let self_id = self_peer.current();
+                    Box::pin(referee::supplied::supply(args, context, capsules, self_id))
+                }
+            }),
+    );
+    builder = builder.mcp_item(
         mcp::tool(LEDGER_FETCH_OPERATION)
             .description(
                 "Ask a mesh peer's capsules plugin for one of ITS sealed ledger entries by \
@@ -1433,6 +1453,17 @@ async fn main() -> anyhow::Result<()> {
                 if self_peer.learn(&event.local_peer_id) {
                     tracing::info!(peer_id = %event.local_peer_id, "own mesh peer id reported by the host");
                 }
+                Ok(())
+            })
+        })
+    })
+    .customize(|plugin| {
+        // Peers' keys for this plugin, when the host announces them
+        // (`peer_keys::announced`); CAPSULES_PEER_KEYS stays the fallback.
+        plugin.on_initialized(|context| {
+            let announces = context.host_supports(peer_keys::announced::CAPABILITY);
+            Box::pin(async move {
+                peer_keys::announced::start(announces, PLUGIN_ID);
                 Ok(())
             })
         })

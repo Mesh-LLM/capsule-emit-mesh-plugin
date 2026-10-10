@@ -11,6 +11,8 @@
 //!   pair's row ("not adjudicated" with its reason, or the verdict).
 //! - [`live`]: the call itself, for a pair this node asked: re-answer,
 //!   adjudicate, hold, deliver.
+//! - [`supplied`]: the request and both answers of a pair, from the client
+//!   that marked it, kept only when they are the bodies this node sealed.
 //! - [`select`], [`bar`]: who is eligible to referee, in which tier, and the
 //!   bar window after a contradiction.
 //! - `crate::verdict_counts`, `crate::routing_rule`: the verdicts on this
@@ -27,6 +29,7 @@ pub mod live;
 pub mod request;
 pub mod select;
 pub mod service;
+pub mod supplied;
 pub mod verdict;
 
 #[cfg(test)]
