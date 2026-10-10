@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **The plugin reads and hashes its own executable once per process**, at the first record it
+  seals, instead of for every record. Each record still carries that measurement, signed with the
+  node key and stamped with the record's own time, so records are unchanged. On macOS the kernel's
+  code-signing status is still asked for every record, because it can change while the process
+  runs. Replacing the plugin's executable on disk while it runs is measured only after a restart,
+  which is also when the new binary starts running.
+
 ## 0.1.3
 
 ### Changed

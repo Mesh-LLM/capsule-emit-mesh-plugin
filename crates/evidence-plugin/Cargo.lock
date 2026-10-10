@@ -596,6 +596,7 @@ dependencies = [
  "hex",
  "libc",
  "mesh-llm-plugin",
+ "prost",
  "reqwest",
  "rmcp 1.8.0",
  "schemars",

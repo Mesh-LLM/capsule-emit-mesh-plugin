@@ -2296,6 +2296,71 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The executable is read and hashed once per process, however many
+    /// records are sealed, on either seal path, and every record carries the
+    /// same measurement. (The read counter is process-wide, so this holds
+    /// across every test in this binary, not only the seals below.)
+    #[test]
+    fn the_executable_is_read_once_per_process_across_many_seals() {
+        let dir = std::env::temp_dir().join(format!("cap-self-hash-once-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let state = CapsuleState::open(&dir, "node-under-test").expect("open state");
+        let digest_of = |capsule: &Value| {
+            capsule
+                .pointer("/model_attestation/compute_attestation/x-mesh-poc-v1/evidence_refs/binary_attestation/digest")
+                .and_then(Value::as_str)
+                .expect("a binary measurement on the record")
+                .to_string()
+        };
+        let mut digests = Vec::new();
+        for n in 0..4 {
+            let id = format!("e-{n}");
+            let exchange = ExchangeRecord {
+                model: "m",
+                client_nonce: Some("nonce"),
+                request_bytes: br#"{"model":"m","messages":[{"role":"user","content":"hi"}]}"#,
+                response_bytes:
+                    br#"{"id":"x","choices":[{"message":{"role":"assistant","content":"hello"}}]}"#,
+                latency_ms: 1.0,
+                exchange_id: Some(id.as_str()),
+                requesting_party: Some("party"),
+                host_provenance: None,
+            };
+            digests.push(digest_of(
+                &state.emit_for_exchange(&exchange).expect("seal").capsule,
+            ));
+            let observed = ObservedHostExchange {
+                model: "m",
+                exchange_id: Some(id.as_str()),
+                request_digest: Some("a".repeat(64).leak()),
+                response_digest: None,
+                tool_calls_digest: None,
+                reasoning_digest: None,
+                usage: None,
+                host_provenance: HostProvenance::default(),
+                dispatch_path: DispatchPath::RawProxy,
+                nonce: None,
+                peer_capsule_id: None,
+                peer_capsule_id_provenance: None,
+                twin_bracket_id: None,
+                response_text_digest: None,
+            };
+            digests.push(digest_of(
+                &state
+                    .emit_for_observed_host_exchange(&observed)
+                    .expect("seal")
+                    .capsule,
+            ));
+        }
+        assert_eq!(digests.len(), 8);
+        assert!(digests.iter().all(|d| d == &digests[0]), "{digests:?}");
+        assert_eq!(
+            crate::producer::runtime_attest::exe_reads(),
+            1,
+            "the executable was read more than once in this process"
+        );
+    }
+
     /// The host-served OBSERVE path holds no request bytes (only a forwarded
     /// digest), so it seals an EMPTY generation-parameter set — never the old
     /// fabricated `temperature=0.0`. Absent facts stay absent.
