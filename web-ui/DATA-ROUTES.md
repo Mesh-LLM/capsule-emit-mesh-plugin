@@ -40,8 +40,21 @@ only through their `exchange_id` join (`src/evidence_panes/settlement.rs`):
 
 - each `panes/pane-c` row carries `settlement`, the payer-book summary of the settlement records
   its own exchange ids join (`api/sidecarTypes.ts` `PayerBook`), or `null` when none does. A
-  free exchange, payments off, and a request that failed before it was invoiced all read `null`:
-  never "unpaid";
+  free exchange, payments off, a request that failed before it was invoiced, and a paid request
+  refused before any payment (for example a payment protocol version the seller doesn't speak;
+  the host emits no event for it) all read `null`: never "unpaid". The book carries
+  `who_paid: "this_node"` and `final_accounted_msat`, the payer's own recorded total copied from its
+  record (`null` without one). An invoice with no settlement the wallet reported and no final
+  amount is `outcome_not_reported`: the host emits no event when a payment's outcome is uncertain
+  (a lost wallet reply) or it failed, so the book can't say which, or whether the exchange was
+  interrupted;
+- each `panes/pane-c` row of an exchange this node served for pay carries `provider_settlement`,
+  its own book as the provider (`observed_by: "provider"`, `who_paid: "requester"`,
+  `delivered_tokens`), joined by the exchange id the host names a provider's lifecycle events
+  with; `null` otherwise. The list carries `settlement_provider_unjoined`, provider exchange ids no
+  row carries;
+- each book's `entries` copy the record's own values, and on a settlement the wallet's
+  `credited_msat` and `fee_msat` when the host passed them, on `delivered` the `tokens`;
 - the list carries `settlement_unjoined` (exchange ids with settlement records that no row
   carries) and `settlement_missing_exchange_id` (records naming no exchange id), so no record is
   dropped;

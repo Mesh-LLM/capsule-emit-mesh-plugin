@@ -172,6 +172,8 @@ impl PaymentLifecycleEvent {
             amount_msat: self.amount_msat,
             observed_by: self.role.unwrap_or(Role::Payer).wire(),
             tokens: self.tokens,
+            credited_msat: self.credited_msat,
+            fee_msat: self.fee_msat,
         }
     }
 }

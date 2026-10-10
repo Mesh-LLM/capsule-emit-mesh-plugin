@@ -2267,6 +2267,11 @@ fn build_pane_c_list_with_settlements(
         let row_exchange_ids: Vec<&str> = mine.into_iter().filter_map(record_exchange_id).collect();
         joined_exchange_ids.extend(row_exchange_ids.iter().map(|id| id.to_string()));
         let settlement = settlements.summary_for(row_exchange_ids.iter().copied());
+        // This node's own book as the provider of the exchange it served under
+        // these ids: the host names a provider's lifecycle events with the id
+        // of the exchange it served.
+        let provider_settlement =
+            settlements.provider_summary_for(row_exchange_ids.iter().copied());
 
         rows.push(json!({
             "exchange_key": exchange_key,
@@ -2300,6 +2305,7 @@ fn build_pane_c_list_with_settlements(
             // settlement record joins this exchange -- which is never a claim
             // that it went unpaid.
             "settlement": settlement,
+            "provider_settlement": provider_settlement,
         }));
         if is_referee_call(anchor) {
             rows.last_mut().expect("just pushed")["referee_call"] = json!(true);
@@ -2331,6 +2337,7 @@ fn build_pane_c_list_with_settlements(
         "settlement_unjoined": settlements.unjoined(joined_exchange_ids.iter().map(String::as_str)),
         "settlement_missing_exchange_id": settlements.missing_exchange_id(),
         "settlement_provider_records": settlements.provider_records(),
+        "settlement_provider_unjoined": settlements.provider_unjoined(joined_exchange_ids.iter().map(String::as_str)),
     })
 }
 
@@ -6017,6 +6024,49 @@ mod tests {
         })
     }
 
+    /// A paid request refused before any payment state (a payment protocol
+    /// version the other node doesn't speak) leaves no `payment.lifecycle.v1`
+    /// event, so its row's documented state is "no payment lifecycle
+    /// observed": `settlement` and `provider_settlement` are present and
+    /// `null` (never "unpaid", never another exchange's book), and nothing is
+    /// reported unjoined for it. Another exchange's records stay its own.
+    #[test]
+    fn a_paid_request_refused_before_payment_reads_no_payment_lifecycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let records = vec![
+            asked_record("cap-paid", "req-paid", "ex-paid"),
+            asked_record("cap-refused", "req-refused", "ex-refused"),
+            settlement_record("s1", "ex-paid", "input_invoice_issued", Some(0), Some("aa")),
+        ];
+        write_fixture_ledger(dir.path(), &records);
+
+        let pane_c = build_pane_json("pane-c", dir.path(), None).unwrap();
+        let rows = pane_c["rows"].as_array().unwrap();
+        let refused = rows
+            .iter()
+            .find(|r| r.to_string().contains("cap-refused"))
+            .expect("the refused request has its row");
+        let refused = refused.as_object().unwrap();
+        assert_eq!(
+            refused.get("settlement"),
+            Some(&Value::Null),
+            "present, and null"
+        );
+        assert_eq!(
+            refused.get("provider_settlement"),
+            Some(&Value::Null),
+            "present, and null"
+        );
+        let paid = rows
+            .iter()
+            .find(|r| r.to_string().contains("cap-paid"))
+            .expect("the paid request has its row");
+        assert_eq!(paid["settlement"]["state"], json!("outcome_not_reported"));
+        assert_eq!(paid["settlement"]["exchange_ids"], json!(["ex-paid"]));
+        assert_eq!(pane_c["settlement_unjoined"], json!([]));
+        assert_eq!(pane_c["settlement_provider_unjoined"], json!([]));
+    }
+
     /// Two paid exchanges with ONE request digest. Exchange 1 is invoiced
     /// seg0 `aa` and settled by a hash-less wallet report; exchange 2 is
     /// invoiced seg0 `bb` and has no settlement. No row may read settled for
@@ -6045,7 +6095,9 @@ mod tests {
                 .map(|r| r["settlement"]["state"].clone())
                 .collect()
         };
-        assert_eq!(state_of("ex-2"), vec![json!("no_settlement_seen")]);
+        // Invoiced, no settlement, no final amount: the host reported no
+        // outcome, and the row says that rather than "no payment".
+        assert_eq!(state_of("ex-2"), vec![json!("outcome_not_reported")]);
         assert_eq!(state_of("ex-1"), vec![json!("settled")]);
         assert!(
             rows.iter()
@@ -6063,7 +6115,8 @@ mod tests {
             .expect("a peer row carries settlement counts");
         assert_eq!(counts["paid_exchanges"], json!(2));
         assert_eq!(counts["settled_payer_observed"], json!(1));
-        assert_eq!(counts["no_settlement_seen"], json!(1));
+        assert_eq!(counts["no_settlement_seen"], json!(0));
+        assert_eq!(counts["outcome_not_reported"], json!(1));
     }
 
     /// `capsule_id` digests the body without `key_id` and `signature`, so a

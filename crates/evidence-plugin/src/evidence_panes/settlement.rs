@@ -14,9 +14,19 @@
 //!   The provider of the same exchange keeps its book on its own node, so a
 //!   payer book always reports it as `not_available`.
 //! - Records this node sealed as a provider (`observed_by: "provider"`) are
-//!   its own book. They never enter a payer book; the host's provider-side
-//!   ids do not join this node's exchange records yet, so they are counted
-//!   (`settlement_provider_records`).
+//!   its own book. They never enter a payer book. The host names a provider's
+//!   lifecycle events with the id of its own served exchange (the paid
+//!   serving path publishes that exchange under the same id), so they join
+//!   that row as its provider book (`provider_settlement`); every one is
+//!   still counted (`settlement_provider_records`).
+//! - An invoice with no settlement this node's wallet reported, and no final
+//!   amount, is `outcome_not_reported`: the host emits no event for a payment
+//!   whose outcome is uncertain (a lost wallet reply), one that failed, or an
+//!   exchange that was interrupted, so the book cannot say which, and says so.
+//!   It is never "unpaid".
+//! - A paid request refused before any payment state (for example a payment
+//!   protocol version the seller does not speak) leaves no lifecycle event at
+//!   all: such a row has no payment summary, like a free exchange.
 //! - The provider's side of a payment is not something the payer's events
 //!   can see, so nothing about it is sent: per-peer counts carry only this
 //!   node's own facts, beside `provider_book: "not_available"`.
@@ -47,6 +57,11 @@ const PAYER_SETTLED: &str = "settled";
 const PAYER_NO_SETTLEMENT_SEEN: &str = "no_settlement_seen";
 /// Terms were accepted but no invoice was recorded.
 const PAYER_TERMS_ONLY: &str = "terms_only";
+/// An invoice has no settlement this node's wallet reported, and the exchange
+/// recorded no final amount: the host reported no outcome (uncertain after a
+/// lost wallet reply, failed, interrupted, or still running). Which one, the
+/// records cannot say.
+const OUTCOME_NOT_REPORTED: &str = "outcome_not_reported";
 /// A settlement names a payment hash no invoice of this exchange named.
 const PAYER_UNMATCHED_SETTLEMENT: &str = "unmatched_settlement";
 
@@ -78,15 +93,23 @@ pub(super) struct SettlementIndex {
     /// them, so they are counted rather than dropped.
     missing_exchange_id: usize,
     /// Records this node sealed as the provider of a paid exchange. They are
-    /// its own book, never part of a payer book, and the host's provider-side
-    /// ids do not join its exchange records, so they are counted.
+    /// its own book, never part of a payer book: every one is counted, and
+    /// those naming an exchange id are kept by it, to join the row of the
+    /// exchange this node served under that id.
     provider_records: usize,
+    provider_by_exchange: HashMap<String, Vec<Value>>,
 }
 
 impl SettlementIndex {
     pub(super) fn push(&mut self, record: Value) {
         if block_str(&record, "observed_by") == Some("provider") {
             self.provider_records += 1;
+            if let Some(exchange_id) = block_str(&record, "exchange_id").map(str::to_string) {
+                self.provider_by_exchange
+                    .entry(exchange_id)
+                    .or_default()
+                    .push(record);
+            }
             return;
         }
         let Some(exchange_id) = block_str(&record, "exchange_id").map(str::to_string) else {
@@ -146,6 +169,56 @@ impl SettlementIndex {
         }
     }
 
+    /// This node's book as the provider of the exchange ids one row carries,
+    /// or `None` when none of them has a provider record. A row carrying more
+    /// than one id shows the worst state, with every entry.
+    pub(super) fn provider_summary_for<'a>(
+        &self,
+        exchange_ids: impl IntoIterator<Item = &'a str>,
+    ) -> Option<Value> {
+        let mut seen = BTreeSet::new();
+        let mut books: Vec<(&str, Value)> = Vec::new();
+        for id in exchange_ids {
+            if !seen.insert(id) {
+                continue;
+            }
+            if let Some(records) = self.provider_by_exchange.get(id) {
+                let entries: Vec<&Value> = records.iter().collect();
+                books.push((id, provider_book(&entries)));
+            }
+        }
+        match books.len() {
+            0 => None,
+            1 => books.pop().map(|(id, mut book)| {
+                book["exchange_ids"] = json!([id]);
+                book
+            }),
+            _ => {
+                let mut row = worst_book(books);
+                row["observed_by"] = json!("provider");
+                row["who_paid"] = json!(WHO_PAID_REQUESTER);
+                row["final_accounted_msat"] = Value::Null;
+                Some(row)
+            }
+        }
+    }
+
+    /// Provider exchange ids no pane row carries.
+    pub(super) fn provider_unjoined<'a>(
+        &self,
+        joined: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<String> {
+        let joined: BTreeSet<&str> = joined.into_iter().collect();
+        let mut ids: Vec<String> = self
+            .provider_by_exchange
+            .keys()
+            .filter(|id| !joined.contains(id.as_str()))
+            .cloned()
+            .collect();
+        ids.sort();
+        ids
+    }
+
     /// Settlement exchange ids no pane row carries, so the page can say the
     /// records exist instead of dropping them.
     pub(super) fn unjoined<'a>(&self, joined: impl IntoIterator<Item = &'a str>) -> Vec<String> {
@@ -165,7 +238,8 @@ fn state_rank(state: &str) -> u8 {
         PAYER_TERMS_ONLY => 0,
         PAYER_SETTLED => 1,
         PAYER_NO_SETTLEMENT_SEEN => 2,
-        _ => 3,
+        OUTCOME_NOT_REPORTED => 3,
+        _ => 4,
     }
 }
 
@@ -183,6 +257,7 @@ fn worst_book(books: Vec<(&str, Value)>) -> Value {
             state = match book_state {
                 PAYER_SETTLED => PAYER_SETTLED,
                 PAYER_NO_SETTLEMENT_SEEN => PAYER_NO_SETTLEMENT_SEEN,
+                OUTCOME_NOT_REPORTED => OUTCOME_NOT_REPORTED,
                 _ => PAYER_UNMATCHED_SETTLEMENT,
             };
         }
@@ -198,12 +273,16 @@ fn worst_book(books: Vec<(&str, Value)>) -> Value {
         }
         exchange_ids.push(id);
     }
+    // A merged row's final amount is not any one exchange's: it is left out
+    // rather than summed.
     json!({
         "observed_by": "payer",
+        "who_paid": WHO_PAID_THIS_NODE,
         "state": state,
         "terms_digests": terms_digests.into_iter().collect::<Vec<_>>(),
         "entries": entries,
         "matched_by_segment_only": state == PAYER_SETTLED && matched_by_segment_only,
+        "final_accounted_msat": Value::Null,
         "provider_book": PROVIDER_BOOK_NOT_AVAILABLE,
         "exchange_ids": exchange_ids,
     })
@@ -260,15 +339,7 @@ fn payer_book(entries: &[&Value]) -> Value {
         {
             terms_digests.insert(digest);
         }
-        rows.push(json!({
-            "capsule_id": record.get("capsule_id").cloned().unwrap_or(Value::Null),
-            "timestamp": record.get("timestamp").cloned().unwrap_or(Value::Null),
-            "phase": phase,
-            "source": block.get("source").cloned().unwrap_or(Value::Null),
-            "segment": segment,
-            "payment_hash": payment_hash,
-            "amount_msat": block.get("amount_msat").cloned().unwrap_or(Value::Null),
-        }));
+        rows.push(entry_row(record, block, phase, segment, payment_hash));
     }
     let invoice_segments: BTreeSet<u64> = invoices.iter().map(|(segment, _)| *segment).collect();
     let mut invoices_per_segment: HashMap<u64, usize> = HashMap::new();
@@ -288,6 +359,14 @@ fn payer_book(entries: &[&Value]) -> Value {
         matched_by_segment_only |= by_segment;
         by_segment
     });
+    // The payer's own total, as it recorded it (wallet amounts plus fees): one
+    // record's value, copied, never computed here.
+    let final_accounted_msat = entries.iter().rev().find_map(|record| {
+        let block = settlement_block(record)?;
+        (block.get("phase").and_then(Value::as_str) == Some("final_accounted"))
+            .then(|| block.get("amount_msat").cloned())
+            .flatten()
+    });
     let state = if !settlements.is_subset(&invoices)
         || !hashless_settlement_segments.is_subset(&invoice_segments)
     {
@@ -296,11 +375,15 @@ fn payer_book(entries: &[&Value]) -> Value {
         PAYER_TERMS_ONLY
     } else if all_invoices_settled {
         PAYER_SETTLED
+    } else if final_accounted_msat.is_none() {
+        OUTCOME_NOT_REPORTED
     } else {
         PAYER_NO_SETTLEMENT_SEEN
     };
     json!({
         "observed_by": "payer",
+        "who_paid": WHO_PAID_THIS_NODE,
+        "final_accounted_msat": final_accounted_msat.unwrap_or(Value::Null),
         "state": state,
         // One digest when every record agrees; all of them otherwise, so a
         // disagreement is shown rather than resolved here.
@@ -308,6 +391,106 @@ fn payer_book(entries: &[&Value]) -> Value {
         "entries": rows,
         "matched_by_segment_only": matched_by_segment_only,
         "provider_book": PROVIDER_BOOK_NOT_AVAILABLE,
+    })
+}
+
+/// Who paid, as a book can say it: on a payer book, this node; on a provider
+/// book, the node that requested the exchange (the page names it from the
+/// row's own exchange record).
+const WHO_PAID_THIS_NODE: &str = "this_node";
+const WHO_PAID_REQUESTER: &str = "requester";
+
+/// One recorded step as a book lists it: the record's own values, copied.
+/// The wallet's credited amount and fee, and the delivered-token watermark,
+/// appear only when the record carries them.
+fn entry_row(
+    record: &Value,
+    block: &Value,
+    phase: &str,
+    segment: Option<u64>,
+    payment_hash: Option<&str>,
+) -> Value {
+    let mut row = json!({
+        "capsule_id": record.get("capsule_id").cloned().unwrap_or(Value::Null),
+        "timestamp": record.get("timestamp").cloned().unwrap_or(Value::Null),
+        "phase": phase,
+        "source": block.get("source").cloned().unwrap_or(Value::Null),
+        "segment": segment,
+        "payment_hash": payment_hash,
+        "amount_msat": block.get("amount_msat").cloned().unwrap_or(Value::Null),
+    });
+    for key in ["credited_msat", "fee_msat", "tokens"] {
+        if let Some(value) = block.get(key).filter(|v| v.is_u64()) {
+            row[key] = value.clone();
+        }
+    }
+    row
+}
+
+/// This node's book as the provider of one exchange, from the records it
+/// sealed as the provider: each invoice it issued, its receiving wallet's
+/// report of each settlement (with what it credited and deducted, when the
+/// host passed them), and the delivered-token watermark. `state` compares
+/// invoices with wallet-reported settlements as the payer book does; an
+/// invoice with no reported settlement is `outcome_not_reported` (a provider
+/// records no final amount).
+fn provider_book(entries: &[&Value]) -> Value {
+    let mut invoices: BTreeSet<(u64, String)> = BTreeSet::new();
+    let mut settled: BTreeSet<(u64, String)> = BTreeSet::new();
+    let mut terms_digests: BTreeSet<String> = BTreeSet::new();
+    let mut delivered_tokens: Option<Value> = None;
+    let mut rows: Vec<Value> = Vec::with_capacity(entries.len());
+    for record in entries {
+        let Some(block) = settlement_block(record) else {
+            continue;
+        };
+        let phase = block
+            .get("phase")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let segment = block.get("segment").and_then(Value::as_u64);
+        let payment_hash = block
+            .get("payment_hash")
+            .and_then(Value::as_str)
+            .filter(|h| !h.is_empty());
+        let wallet = block.get("source").and_then(Value::as_str) == Some("wallet_reported");
+        if let (Some(segment), Some(hash)) = (segment, payment_hash) {
+            if phase.ends_with("_invoice_issued") {
+                invoices.insert((segment, hash.to_string()));
+            } else if wallet && phase.ends_with("_settlement_observed") {
+                settled.insert((segment, hash.to_string()));
+            }
+        }
+        if phase == "delivered" {
+            delivered_tokens = block.get("tokens").filter(|v| v.is_u64()).cloned();
+        }
+        if let Some(digest) = block
+            .get("terms_digest")
+            .and_then(Value::as_str)
+            .filter(|d| !d.is_empty())
+        {
+            terms_digests.insert(digest.to_string());
+        }
+        rows.push(entry_row(record, block, phase, segment, payment_hash));
+    }
+    let state = if !settled.is_subset(&invoices) {
+        PAYER_UNMATCHED_SETTLEMENT
+    } else if invoices.is_empty() {
+        PAYER_TERMS_ONLY
+    } else if invoices.is_subset(&settled) {
+        PAYER_SETTLED
+    } else {
+        OUTCOME_NOT_REPORTED
+    };
+    json!({
+        "observed_by": "provider",
+        "who_paid": WHO_PAID_REQUESTER,
+        "state": state,
+        "terms_digests": terms_digests.into_iter().collect::<Vec<_>>(),
+        "entries": rows,
+        "matched_by_segment_only": false,
+        "final_accounted_msat": Value::Null,
+        "delivered_tokens": delivered_tokens.unwrap_or(Value::Null),
     })
 }
 
@@ -328,6 +511,7 @@ pub(super) fn peer_counts(summaries: &[Value]) -> Value {
         "terms_only": count(PAYER_TERMS_ONLY),
         "settled_payer_observed": count(PAYER_SETTLED),
         "no_settlement_seen": count(PAYER_NO_SETTLEMENT_SEEN),
+        "outcome_not_reported": count(OUTCOME_NOT_REPORTED),
         "provider_book": PROVIDER_BOOK_NOT_AVAILABLE,
     })
 }
@@ -477,7 +661,7 @@ mod tests {
         ];
         let index = index(records);
         let merged = index.summary_for(["ex-1", "ex-2"]).unwrap();
-        assert_eq!(merged["state"], "no_settlement_seen");
+        assert_eq!(merged["state"], "outcome_not_reported");
         assert_eq!(merged["matched_by_segment_only"], false);
         assert_eq!(merged["exchange_ids"], json!(["ex-1", "ex-2"]));
         assert_eq!(merged["entries"].as_array().unwrap().len(), 3);
@@ -487,7 +671,7 @@ mod tests {
         assert_eq!(one["matched_by_segment_only"], true);
         assert_eq!(
             index.summary_for(["ex-2"]).unwrap()["state"],
-            "no_settlement_seen"
+            "outcome_not_reported"
         );
     }
 
@@ -523,7 +707,7 @@ mod tests {
             ),
         ];
         let summary = index(records).summary_for(["ex-r"]).unwrap();
-        assert_eq!(summary["state"], "no_settlement_seen");
+        assert_eq!(summary["state"], "outcome_not_reported");
         assert_eq!(summary["matched_by_segment_only"], false);
     }
 
@@ -732,5 +916,125 @@ mod tests {
         for key in ["lapsed", "debt", "settled_both_books"] {
             assert!(counts.get(key).is_none(), "{key}");
         }
+    }
+
+    /// Set one field of a record's settlement block.
+    fn with(mut record: Value, key: &str, value: Value) -> Value {
+        record["model_attestation"]["compute_attestation"]["x-mesh-settlement-v1"][key] = value;
+        record
+    }
+
+    fn as_provider(record: Value) -> Value {
+        with(record, "observed_by", json!("provider"))
+    }
+
+    /// The hole an uncertain payment leaves: the host emits no event when a
+    /// pay call ends without success (the outcome is uncertain after a lost
+    /// wallet reply, or the payment failed), so the payer's records stop at
+    /// the invoice. The book says the outcome was not reported -- never
+    /// "unpaid", and never which of those it was.
+    #[test]
+    fn an_invoice_with_no_reported_outcome_reads_outcome_not_reported() {
+        let records = paid_and_settled("ex-u")[..2].to_vec();
+        let summary = index(records).summary_for(["ex-u"]).unwrap();
+        assert_eq!(summary["state"], "outcome_not_reported");
+        assert_eq!(summary["final_accounted_msat"], Value::Null);
+        assert_eq!(summary["who_paid"], "this_node");
+        assert_eq!(summary["entries"].as_array().unwrap().len(), 2);
+        assert_eq!(state_rank(OUTCOME_NOT_REPORTED), 3);
+    }
+
+    /// What a completed exchange charged, as recorded: the wallet's amount and
+    /// fee on each settlement, and the payer's own final amount, each copied
+    /// from its record and never added up here.
+    #[test]
+    fn a_settled_exchange_copies_the_wallet_fee_and_the_final_amount() {
+        let mut records = paid_and_settled("ex-f");
+        records[2] = with(records[2].clone(), "fee_msat", json!(1));
+        records[4] = with(records[4].clone(), "fee_msat", json!(2));
+        let final_amount = records[5]["model_attestation"]["compute_attestation"]
+            ["x-mesh-settlement-v1"]["amount_msat"]
+            .clone();
+        let summary = index(records).summary_for(["ex-f"]).unwrap();
+        assert_eq!(summary["state"], "settled");
+        assert_eq!(summary["final_accounted_msat"], final_amount);
+        assert_eq!(summary["entries"][2]["fee_msat"], 1);
+        assert_eq!(summary["entries"][4]["fee_msat"], 2);
+        // A record without the wallet's numbers carries none.
+        assert!(summary["entries"][1].get("fee_msat").is_none());
+        assert!(summary["entries"][1].get("credited_msat").is_none());
+    }
+
+    /// A paid request refused before any payment state (a payment protocol
+    /// version the seller does not speak) leaves no lifecycle event, so its
+    /// row has no payment summary: never "unpaid", never a guess.
+    #[test]
+    fn a_request_refused_before_payment_has_no_payment_summary() {
+        let index = index(paid_and_settled("ex-other"));
+        assert!(index.summary_for(["ex-refused"]).is_none());
+        assert!(index.provider_summary_for(["ex-refused"]).is_none());
+    }
+
+    /// The provider's own book, joined by the id of the exchange it served:
+    /// each invoice, its wallet's report of each settlement with what it
+    /// credited and deducted, and the delivered watermark. It never enters a
+    /// payer book.
+    #[test]
+    fn the_provider_book_joins_its_served_exchange() {
+        let mut records: Vec<Value> = paid_and_settled("ex-s")[..5]
+            .iter()
+            .cloned()
+            .map(as_provider)
+            .collect();
+        records[2] = with(
+            with(records[2].clone(), "credited_msat", json!(119)),
+            "fee_msat",
+            json!(1),
+        );
+        records.push(as_provider(with(
+            event("ex-s", "delivered", "provider_asserted", None, None, 0),
+            "tokens",
+            json!(42),
+        )));
+        let index = index(records);
+        assert!(index.summary_for(["ex-s"]).is_none(), "never a payer book");
+        assert_eq!(index.provider_records(), 6);
+        let book = index.provider_summary_for(["ex-s"]).unwrap();
+        assert_eq!(book["observed_by"], "provider");
+        assert_eq!(book["who_paid"], "requester");
+        assert_eq!(book["state"], "settled");
+        assert_eq!(book["delivered_tokens"], 42);
+        assert_eq!(book["entries"][2]["credited_msat"], 119);
+        assert_eq!(book["entries"][2]["fee_msat"], 1);
+        assert_eq!(book["exchange_ids"], json!(["ex-s"]));
+        assert_eq!(index.provider_unjoined(["ex-s"]), Vec::<String>::new());
+        assert_eq!(index.provider_unjoined([]), vec!["ex-s".to_string()]);
+    }
+
+    #[test]
+    fn a_provider_invoice_with_no_reported_settlement_reads_outcome_not_reported() {
+        let records: Vec<Value> = paid_and_settled("ex-p")[..4]
+            .iter()
+            .cloned()
+            .map(as_provider)
+            .collect();
+        let book = index(records).provider_summary_for(["ex-p"]).unwrap();
+        assert_eq!(book["state"], "outcome_not_reported");
+        assert_eq!(book["delivered_tokens"], Value::Null);
+    }
+
+    #[test]
+    fn peer_counts_count_outcomes_not_reported() {
+        let mut records = paid_and_settled("ex-c1");
+        records.extend(paid_and_settled("ex-c2")[..2].to_vec());
+        let index = index(records);
+        let summaries: Vec<Value> = ["ex-c1", "ex-c2"]
+            .iter()
+            .filter_map(|id| index.summary_for([*id]))
+            .collect();
+        let counts = peer_counts(&summaries);
+        assert_eq!(counts["paid_exchanges"], 2);
+        assert_eq!(counts["outcome_not_reported"], 1);
+        assert_eq!(counts["no_settlement_seen"], 0);
     }
 }

@@ -89,7 +89,11 @@ const REQUIRED = {
     // A paid exchange’s payment chips.
     'settlement:paid',
     'settlement_state:settled',
-    'settlement:provider_book'
+    'settlement_state:outcome_not_reported',
+    'settlement:provider_book',
+    // An exchange this node served for pay: its own book as the provider.
+    'settlement:served_for_pay',
+    'provider_settlement_state:settled'
   ],
   // The checks panel always shows at least these two (they are always
   // checked in the browser); every other chip it shows must carry one too.
@@ -138,7 +142,7 @@ const SPLIT_BUNDLE = JSON.parse(
 )
 
 const PANE_C: PaneCListJson = {
-  row_count: 11,
+  row_count: 13,
   default_sort: 'timestamp',
   filters: ['all', 'served', 'asked', 'issues'],
   next_after_seq: null,
@@ -154,6 +158,29 @@ const PANE_C: PaneCListJson = {
         terms_digests: ['f'.repeat(64)],
         entries: [],
         provider_book: 'not_available'
+      }
+    }),
+    row('exch-uncertain', {
+      timestamp: '2026-09-26T09:00:00Z',
+      settlement: {
+        observed_by: 'payer',
+        state: 'outcome_not_reported',
+        terms_digests: ['f'.repeat(64)],
+        entries: [],
+        final_accounted_msat: null,
+        provider_book: 'not_available'
+      }
+    }),
+    row('exch-served-paid', {
+      role_tag: 'SERVED',
+      timestamp: '2026-09-26T09:30:00Z',
+      provider_settlement: {
+        observed_by: 'provider',
+        who_paid: 'requester',
+        state: 'settled',
+        terms_digests: ['f'.repeat(64)],
+        entries: [],
+        delivered_tokens: 42
       }
     }),
     row('exch-contradicted', { mine: fixtureMineCell(), theirs: fixtureTheirsCell('disagrees'), unilateral: false }),

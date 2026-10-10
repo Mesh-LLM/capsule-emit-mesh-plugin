@@ -16,7 +16,11 @@ import type { CapsuleRecord } from '@/features/capsules/api/types'
 import { SeeInLogsLink } from '@/features/capsules/components/ExchangeIdCell'
 import { ExchangeRowChips } from '@/features/capsules/components/ExchangeRowChips'
 import { SecurityChecksView } from '@/features/capsules/components/SecurityChecksView'
-import { SettlementEntries, SettlementStrip } from '@/features/capsules/components/SettlementRow'
+import {
+  ProviderSettlementStrip,
+  SettlementEntries,
+  SettlementStrip
+} from '@/features/capsules/components/SettlementRow'
 import { buildChecksRows } from '@/features/capsules/lib/security-checks-view'
 import {
   theirContentAction,
@@ -503,6 +507,7 @@ export function ExchangeStreamRow({
            is about the two records of the exchange; settlement is this
            node's own payment records for it. */}
         <SettlementStrip settlement={row.raw.settlement} />
+        <ProviderSettlementStrip requester={row.raw.counterparty} settlement={row.raw.provider_settlement} />
         {/* v3 §2's row footer: two independent
            disclosure toggles, never a modal. Always present, regardless of
            the right-cell state. */}
@@ -598,6 +603,9 @@ export function ExchangeStreamRow({
           </div>
         ) : null}
         {checksExpanded ? <SettlementEntries settlement={row.raw.settlement} /> : null}
+        {checksExpanded ? (
+          <SettlementEntries perspective="provider" settlement={row.raw.provider_settlement} />
+        ) : null}
         {checksExpanded ? (
           <SecurityChecksView
             checksRows={checksRows}

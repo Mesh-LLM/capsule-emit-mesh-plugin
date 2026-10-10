@@ -396,9 +396,27 @@ export const SETTLEMENT_STATE_TOOLTIPS = {
   settled_without_reference:
     'Your wallet reported each invoice’s part of this exchange paid, but at least one report carried no payment reference to match on.',
   no_settlement_seen: 'At least one invoice has no payment reported by your wallet. Your records alone can’t say why.',
+  outcome_not_reported:
+    'An invoice was issued, your wallet reported no payment for it, and no final amount was recorded. The host reports no outcome here: the payment may be uncertain (its result unknown after a lost wallet reply), it may have failed, or the exchange was interrupted or is still running. These records can’t say which.',
   terms_only: 'You accepted the terms, and no invoice was recorded.',
   unmatched_settlement: 'Your wallet reported a payment that no invoice for this exchange names.'
 } as const
+
+/** An exchange this node served for pay: its own records as the provider. */
+export const SETTLEMENT_PROVIDER_PAID_TOOLTIP =
+  'You served this exchange for pay. These are the payment steps this node recorded as the provider; the requester’s own record isn’t shared with this node.'
+
+export const SETTLEMENT_PROVIDER_STATE_TOOLTIPS = {
+  settled: 'Every invoice you issued for this exchange was reported received by your wallet.',
+  outcome_not_reported:
+    'You issued an invoice and your wallet reported no payment for it. The host reports no outcome here: the payment may be uncertain, it may have failed, or the exchange was interrupted or is still running. These records can’t say which.',
+  terms_only: 'Terms were accepted, and no invoice was recorded.',
+  unmatched_settlement: 'Your wallet reported a payment that no invoice of yours for this exchange names.'
+} as const
+
+/** Said once beside the payment counts: what leaves no payment record at all. */
+export const SETTLEMENT_REFUSED_NOTE =
+  'A paid request refused before any payment (for example, a payment protocol version the other node doesn’t speak) leaves no payment records here: it shows as an exchange with its error and no payment chip. The host doesn’t report the reason.'
 
 export const SETTLEMENT_PROVIDER_BOOK_TOOLTIP =
   'The provider’s own record of this payment isn’t shared with this node, so only your side is shown.'
@@ -408,6 +426,13 @@ export const SETTLEMENT_SOURCE_TOOLTIPS = {
   payer_asserted: 'Recorded by this node as what it agreed to or accounted.',
   provider_asserted: 'What the provider stated, as it reached this node.',
   wallet_reported: 'What your wallet reported.'
+} as const
+
+/** Who stated each value on this node's own book as the provider. */
+export const SETTLEMENT_PROVIDER_SOURCE_TOOLTIPS = {
+  payer_asserted: 'What the payer stated, as it reached this node.',
+  provider_asserted: 'Recorded by this node, as the provider, as what it stated or delivered.',
+  wallet_reported: 'What your wallet reported receiving.'
 } as const
 
 /** The Peers row's payments line. */

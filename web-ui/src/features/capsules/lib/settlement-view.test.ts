@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { PaneCRow, PayerBook, PeerSettlementCounts } from '@/features/capsules/api/sidecarTypes'
 import {
   peerSettlementText,
+  providerSettlementView,
   settlementCloseCounts,
   settlementCloseLine,
   settlementEntryViews,
@@ -214,5 +215,85 @@ describe('unjoinedSettlementText', () => {
     expect(unjoinedSettlementText(undefined)).toBeNull()
     expect(unjoinedSettlementText([], 1)).toBe('1 payment record not matched to an exchange here.')
     expect(unjoinedSettlementText(['x'], 2)).toBe('3 payment records not matched to an exchange here.')
+  })
+})
+
+const settled_entry = () => ({
+  capsule_id: 'p',
+  timestamp: null,
+  phase: 'input_settlement_observed',
+  source: 'wallet_reported',
+  segment: 0,
+  payment_hash: 'aa',
+  amount_msat: 120
+})
+
+describe('the paid-exchange view: what was charged, who paid, and outcomes the host did not report', () => {
+  it('an invoice with no reported outcome says so, as a warning, never as unpaid', () => {
+    const view = settlementRowView({ ...book('outcome_not_reported'), final_accounted_msat: null })
+    expect(view?.stateKey).toBe('outcome_not_reported')
+    expect(view?.label).toBe('outcome not reported')
+    expect(view?.tone).toBe('warn')
+    expect(view?.tooltip).toMatch(/uncertain/)
+    expect(view?.tooltip).toMatch(/can’t say which/)
+    expect(view?.finalAmount).toBeNull()
+    expect(view?.label).not.toMatch(/unpaid/)
+    expect(`${view?.label} ${view?.tooltip}`).not.toMatch(/balance/)
+  })
+
+  it('shows the payer’s own final amount as recorded, never a sum made here', () => {
+    const view = settlementRowView({ ...book('settled'), final_accounted_msat: 579 })
+    expect(view?.finalAmount).toBe('final amount, as you recorded it: 579 msat')
+  })
+
+  it('lists the wallet’s credited amount, fee and a delivered watermark on each step that carries them', () => {
+    const [plain, settled, delivered] = settlementEntryViews([
+      { capsule_id: 'a', timestamp: null, phase: 'input_invoice_issued', source: 'provider_asserted', segment: 0, payment_hash: 'aa', amount_msat: 120 },
+      { capsule_id: 'b', timestamp: null, phase: 'input_settlement_observed', source: 'wallet_reported', segment: 0, payment_hash: 'aa', amount_msat: 120, credited_msat: 119, fee_msat: 1 },
+      { capsule_id: 'c', timestamp: null, phase: 'delivered', source: 'provider_asserted', segment: null, payment_hash: null, amount_msat: 0, tokens: 42 }
+    ], 'provider')
+    expect(plain.walletNote).toBeNull()
+    expect(settled.walletNote).toBe('credited 119 msat · 1 msat deducted')
+    expect(settlementEntryViews([{ ...settled_entry(), fee_msat: 2 }])[0].walletNote).toBe('2 msat to route it')
+    expect(delivered.walletNote).toBe('42 tokens')
+    expect(delivered.phase).toBe('Delivered')
+    // On the provider's own book, the provider is "you".
+    expect(plain.sourceLabel).toBe('you stated')
+    expect(settled.sourceLabel).toBe('your wallet reported')
+  })
+
+  it('the provider’s own book names who paid, the state its wallet reported, and the delivered watermark', () => {
+    const provider: PayerBook = {
+      observed_by: 'provider',
+      who_paid: 'requester',
+      state: 'settled',
+      terms_digests: ['t'.repeat(64)],
+      entries: [],
+      delivered_tokens: 42
+    }
+    const view = providerSettlementView(provider, 'node:aa11bb22cc33')
+    expect(view?.label).toBe('received · your wallet')
+    expect(view?.whoPaid).toMatch(/^paid by /)
+    expect(view?.delivered).toBe('42 tokens delivered, as you recorded')
+    // A served row with no recorded counterparty says so; it never guesses.
+    expect(providerSettlementView(provider, null)?.whoPaid).toBe('payer not recorded')
+    expect(providerSettlementView(provider, undefined)?.whoPaid).toBe('payer not recorded')
+    expect(providerSettlementView(provider, '')?.whoPaid).toBe('payer not recorded')
+    expect(providerSettlementView({ ...provider, state: 'outcome_not_reported' }, null)?.tone).toBe('warn')
+    expect(providerSettlementView({ ...provider, state: 'something_new' }, null)?.stateKey).toBe('unrecognised')
+    expect(providerSettlementView(null, null)).toBeNull()
+  })
+
+  it('the Peers line counts outcomes not reported, and still no amounts', () => {
+    const counts: PeerSettlementCounts = {
+      paid_exchanges: 2,
+      settled_payer_observed: 1,
+      no_settlement_seen: 0,
+      outcome_not_reported: 1,
+      provider_book: 'not_available'
+    }
+    const text = peerSettlementText(counts)
+    expect(text).toContain('1 outcome not reported')
+    expect(text).not.toMatch(/msat|balance/)
   })
 })
