@@ -328,14 +328,16 @@ mod tests {
             else {
                 continue;
             };
-            let default: String = serde_json::from_str(
-                setting
-                    .default_json
-                    .as_deref()
-                    .unwrap_or_else(|| panic!("{} is a choice with no declared default", setting.key)),
-            )
-            .expect("default_json is a JSON string");
-            assert_eq!(values[0], default, "{}: the first choice must be the default", setting.key);
+            let default: String =
+                serde_json::from_str(setting.default_json.as_deref().unwrap_or_else(|| {
+                    panic!("{} is a choice with no declared default", setting.key)
+                }))
+                .expect("default_json is a JSON string");
+            assert_eq!(
+                values[0], default,
+                "{}: the first choice must be the default",
+                setting.key
+            );
             checked += 1;
         }
         assert_eq!(checked, 4, "the four choice settings were checked");
