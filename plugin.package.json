@@ -9,8 +9,8 @@
         "value_schema": {
           "kind": "enum",
           "enum_values": [
-            "counterparty",
-            "off"
+            "off",
+            "counterparty"
           ],
           "allow_additional_properties": false
         },
@@ -33,8 +33,8 @@
         "value_schema": {
           "kind": "enum",
           "enum_values": [
-            "counterparties",
             "prospective",
+            "counterparties",
             "peers",
             "off"
           ],
@@ -59,8 +59,8 @@
         "value_schema": {
           "kind": "enum",
           "enum_values": [
-            "deliver_to_subjects",
-            "off"
+            "off",
+            "deliver_to_subjects"
           ],
           "allow_additional_properties": false
         },
@@ -126,8 +126,8 @@
         "value_schema": {
           "kind": "enum",
           "enum_values": [
-            "on",
-            "off"
+            "off",
+            "on"
           ],
           "allow_additional_properties": false
         },

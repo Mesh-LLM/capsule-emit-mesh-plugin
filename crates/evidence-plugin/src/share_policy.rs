@@ -156,10 +156,17 @@ const RULE_CATEGORY_SUMMARY: &str =
 
 /// The `config_schema` manifest entry naming all four switches. Attach with
 /// `DeclarativePluginBuilder::config_item`.
+///
+/// Every choice list names its default FIRST. mesh-llm 0.78's console does not
+/// receive a plugin setting's declared default, so it takes the first choice
+/// as the default: it shows that choice for an unset setting and leaves it out
+/// of the saved config. With the default first, an unset setting shows its
+/// real value and every other choice is saved. Pinned by
+/// `every_choice_list_names_its_default_first`.
 pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
     config_schema(plugin_id)
         .setting(
-            config_setting(RECORD_AT_COMPLETION_KEY, config_enum(["counterparty", "off"]))
+            config_setting(RECORD_AT_COMPLETION_KEY, config_enum(["off", "counterparty"]))
                 .default_value(&"off")
                 .description(
                     "Push this node's own sealed record of a completed exchange to the \
@@ -176,7 +183,7 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
         .setting(
             config_setting(
                 HISTORY_SEGMENTS_KEY,
-                config_enum(["counterparties", "prospective", "peers", "off"]),
+                config_enum(["prospective", "counterparties", "peers", "off"]),
             )
             .default_value(&"prospective")
             .description(
@@ -188,7 +195,7 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
             .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 1),
         )
         .setting(
-            config_setting(ADJUDICATIONS_KEY, config_enum(["deliver_to_subjects", "off"]))
+            config_setting(ADJUDICATIONS_KEY, config_enum(["off", "deliver_to_subjects"]))
                 .default_value(&"off")
                 .description(
                     "Deliver a sealed verdict to every node it judges, or don't (off, the default). The \
@@ -220,7 +227,7 @@ pub fn share_policy_config_schema(plugin_id: &str) -> ManifestEntry {
                 .category(CATEGORY_ID, CATEGORY_LABEL, CATEGORY_SUMMARY, 3),
         )
         .setting(
-            config_setting(ADJUDICATE_DIFFERING_TWINS_KEY, config_enum(["on", "off"]))
+            config_setting(ADJUDICATE_DIFFERING_TWINS_KEY, config_enum(["off", "on"]))
                 .default_value(&"off")
                 .description(
                     "Ask a referee when two twins of a pair a client marked answered the same \
@@ -302,6 +309,38 @@ mod tests {
                 STOP_ROUTING_WINDOW_KEY
             ]
         );
+    }
+
+    /// mesh-llm 0.78's console takes a choice list's first value as the
+    /// setting's default (it does not receive the declared one). Listing the
+    /// declared default first keeps what the console shows and saves equal to
+    /// what this plugin does.
+    #[test]
+    fn every_choice_list_names_its_default_first() {
+        let schema = as_config_schema(share_policy_config_schema("capsules"));
+        let mut checked = 0;
+        for setting in &schema.settings {
+            let Some(values) = setting
+                .value_schema
+                .as_ref()
+                .map(|v| &v.enum_values)
+                .filter(|v| !v.is_empty())
+            else {
+                continue;
+            };
+            let default: String =
+                serde_json::from_str(setting.default_json.as_deref().unwrap_or_else(|| {
+                    panic!("{} is a choice with no declared default", setting.key)
+                }))
+                .expect("default_json is a JSON string");
+            assert_eq!(
+                values[0], default,
+                "{}: the first choice must be the default",
+                setting.key
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 4, "the four choice settings were checked");
     }
 
     #[test]
